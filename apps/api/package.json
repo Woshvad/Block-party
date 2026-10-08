@@ -1,0 +1,24 @@
+{
+  "name": "@bp/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/app.ts",
+  "scripts": {
+    "dev": "tsx src/node.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@bp/core": "workspace:*",
+    "@bp/db": "workspace:*",
+    "@hono/node-server": "^2.1.4",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "dotenv": "^18.0.6",
+    "fast-check": "^4.10.2",
+    "jose": "^6.2.12",
+    "postgres": "^3.4.9"
+  }
+}

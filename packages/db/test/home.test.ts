@@ -226,6 +226,7 @@ describe("Build mode", () => {
     expect(await setFinishes(db, u, { wall: "brick", floor: "checker" })).toMatchObject({ wallFinish: "brick", floorFinish: "checker" });
     expect(await code(setFinishes(db, u, { wall: "gold_leaf" }))).toBe("BAD_FINISH");
     expect(await code(setFinishes(db, u, { floor: "'; DROP TABLE homes;--" }))).toBe("BAD_FINISH");
+    expect(await setFinishes(db, u, {})).toMatchObject({ wallFinish: "brick" }); // nothing to change: no error
     expect((await setDoor(db, u, true)).doorOpen).toBe(true);
     expect(await code(setDoor(db, u, "yes" as unknown as boolean))).toBe("BAD_PLACEMENT");
   });
@@ -339,6 +340,7 @@ describe("the Crew House", () => {
     expect(await code(placeCrewItem(db, c.lead, item.id, "trophy_room", F(9, 9)))).toBe("BAD_PLACEMENT");
     await storeCrewItem(db, c.lead, item.id);
     expect((await setCrewFinishes(db, c.lead, { wall: "neon_grid" })).wallFinish).toBe("neon_grid");
+    expect((await setCrewFinishes(db, c.lead, {})).wallFinish).toBe("neon_grid");
     // Crew pieces are never a member's
     expect(await code(placeItem(db, c.lead, item.id, F(3, 6)))).toBe("NOT_YOURS");
   });

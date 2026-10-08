@@ -6,6 +6,7 @@ pnpm monorepo. Built brick by brick; each brick ships with tests against a real 
 | --- | --- |
 | `packages/core` | Pure domain rules (no I/O), safe to run in Workers |
 | `packages/db` | Drizzle schema, migrations, and the services that touch Postgres |
+| `apps/api` | The HTTP API (Hono): runs on Cloudflare Workers (`src/worker.ts`) and Node for local dev (`src/node.ts`) |
 
 ## Setup
 
@@ -17,6 +18,7 @@ cp .env.example .env
 createdb blockparty
 pnpm db:migrate
 pnpm test
+pnpm --filter @bp/api dev   # http://localhost:8787, refuses to start on an un-migrated database
 ```
 
 Tests drop and recreate `blockparty_test` on every run (the name must end in `_test`).
@@ -33,6 +35,8 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 7. **Rent and jobs** (done). Saturday rent of 250 GM at the bell: 225 burns, 25 to the City Purse, which never pays GM out. Sublet after 7 full days away; can't pay means a week on the crew's couch or the bench, never debt; catch-up looks back at most 8 weeks. Mod Shift: 2 a day across every job, one at a time, a server-scored moderation mini-game (the client never sends a score), 10 to 12 GM after 15 real minutes. The away shift: Proof of Neighbour only, a gm in the last 24 hours, 5 GM, takes one of the 2 slots. The Drip Committee report shows GM created vs destroyed on net flows and the median active balance in weeks of income. Tests replay the plan's active week exactly: drip 350, streak 175, shifts 154.
 8. **The bell job and the Halving** (done). `runBell` runs each night's due steps once each (settle every crew's gm chain; rent on Saturdays; the Halving at a season's last bell), records them, resumes cleanly after a crash, and serialises runners on an advisory lock. The Halving burns half the excess above 2,000 on every resident balance and crew pot (rounding for the player), once per season, up to 7 days late. A ledger audit checks every Halving burn against the balance it was taken from.
    - Also fixed two deadlocks found here (Halving vs purchase, rent vs purchase) and their root cause: every row lock is now `FOR NO KEY UPDATE`, and balances read before posting go through `lockAccounts` in the ledger's order.
+9. **The HTTP API** (done). Every player action from bricks 1 to 8 behind session auth, per-IP and per-player rate limits (guest sign-ups capped per IP), JSON-only bodies with a size cap, CORS allowlist, security headers and request ids. GM-moving routes need an `Idempotency-Key`, namespaced per player. One error shape; every service error code maps to a status (enforced by the type checker); 500s never leak internals. Server-only actions (streak days, minting, earned pieces, pot burns) have no route. Internal routes (`/internal/bell`, `/internal/economy`) hide behind a 32+ character secret. `/health` is 503 until every migration is applied.
+   - Tests: end-to-end flows, a route-table check (no route without auth unless listed public), and a fuzzer that sends every hostile value through every path parameter and body field of every route, with a fresh crew per route and a guard that fails if it ever loses its session.
 
 ## Notes for later bricks
 
@@ -52,6 +56,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 - Every open-ended loop carries a `loop-bound:` comment saying what limits it; `loops.test.ts` fails the build otherwise.
 - Exploit loops get property tests: random sequences of real actions must never beat a cap.
 - Row locks are `FOR NO KEY UPDATE`, never plain `FOR UPDATE` (it blocks foreign-key checks and deadlocked twice); `locks.test.ts` enforces it. Read a balance you are about to post against through `lockAccounts`.
+- A fuzzer must prove it reaches the handlers: ours once logged itself out and tested nothing but 401s.
 - Lock order everywhere: resident, then request/invite, then crew, then ledger accounts.
 - Shared helpers live in `packages/db/test/helpers.ts`. Test files share one database, so assertions must be scoped to their own rows.
 

@@ -195,6 +195,12 @@ function finishes(input: { wall?: unknown; floor?: unknown }) {
 
 export async function setFinishes(db: Db, userId: string, input: { wall?: unknown; floor?: unknown }) {
   const set = finishes(input);
+  // Nothing to change is not an error (Drizzle throws on an empty SET).
+  if (Object.keys(set).length === 0) {
+    const [h] = await db.select().from(homes).where(eq(homes.userId, userId));
+    if (!h) throw new HomeError("NO_HOME", "move in first");
+    return h;
+  }
   const [h] = await db.update(homes).set(set).where(eq(homes.userId, userId)).returning();
   if (!h) throw new HomeError("NO_HOME", "move in first");
   return h;
@@ -346,6 +352,7 @@ export async function setCrewFinishes(db: Db, userId: string, input: { wall?: un
     const m = await crewMember(tx, userId);
     if (m.role === "member") throw new HomeError("NOT_ALLOWED", "the lead and deputies arrange the Crew House");
     await lockLiveCrew(tx, m.crewId);
+    if (Object.keys(set).length === 0) return (await tx.select().from(crewHouses).where(eq(crewHouses.crewId, m.crewId)))[0]!;
     const [h] = await tx.update(crewHouses).set(set).where(eq(crewHouses.crewId, m.crewId)).returning();
     return h!;
   });

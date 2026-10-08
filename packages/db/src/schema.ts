@@ -560,3 +560,17 @@ export const halvings = pgTable(
     check("halvings_math", sql`${t.balanceBefore} > 2000 AND ${t.burned} = (${t.balanceBefore} - 2000) / 2 AND ${t.burned} > 0`),
   ],
 );
+
+// --- Rate limits ----------------------------------------------------------
+
+// Fixed-window counters. One row per bucket per window; old windows are
+// swept by the bell job.
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    bucket: text("bucket").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    count: integer("count").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.bucket, t.windowStart] }), check("rate_limits_count", sql`${t.count} > 0`)],
+);

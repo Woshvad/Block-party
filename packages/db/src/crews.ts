@@ -229,7 +229,10 @@ export async function createInvite(db: Db, actorId: string, opts: { ttlHours?: n
   });
 }
 
-export async function revokeInvite(db: Db, actorId: string, code: string) {
+export async function revokeInvite(db: Db, actorId: string, code: unknown) {
+  // Same format check as redeem: never hand an unchecked string to SQL (a
+  // null byte here was a 500).
+  if (typeof code !== "string" || !/^[A-Za-z0-9_-]{16}$/.test(code)) throw new CrewError("INVITE_INVALID", "no such invite");
   return db.transaction(async (tx) => {
     const [inv] = await tx.select().from(crewInvites).where(eq(crewInvites.code, code));
     const m = await membershipOf(tx, actorId);
