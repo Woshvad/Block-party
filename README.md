@@ -30,6 +30,13 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 4. **Create-a-Resident** (done). Claimed accounts move in once: @handle (unique ignoring case, fixed at MVP), name, mix-and-match look (46 parts plus palettes), 3 of 12 traits (free swap once a season), a goal and a kit style. The city deals the backstory and its starter item server-side; the client can't pick it, and the database refuses any later change. Names and handles block impersonation of the cast and staff (leetspeak, homoglyph and spacing tricks included) and crypto scam bait, without blocking real first names. Name cleanup strips invisible, direction-flipping and tag characters (ASCII smuggling) while keeping emoji, skin tones and flags.
 5. **Crews** (done). Create a crew (3 to 50 members, one crew per resident), a lead plus up to 2 deputies, invites (a lead or deputy link joins straight away; a member's link becomes a join request; open crews join in one tap), Open tables, removal strictly downward, lead hand-over. The crew pot takes deposits and only ever loses GM by burning; dissolving burns it. The gm chain settles at each bell from roster history (members at that bell, active = gm in the last 7 days, holds at 60% with at least 3), any 3 members from that day can relight a miss until the next bell, and it stores counts only, never who missed. The database enforces the roster limits, one lead, one crew per resident and append-only history.
 6. **Homes and Build mode** (done). Moving in sets up a tenement with the free kit already placed and the backstory starter item in storage. 40 GM pieces in the plan's price bands; buying burns the GM under the kinds the broke floor counts, and released prices are pinned by a test. One of each working piece (trophy wall, TV, Slate board, guestbook) per home. Grid placement with rotation, recolour, rug/floor/wall layers and free storage. Earned-only pieces (30-day gm lamp, 100-day neon) come from the streak. The Crew House is bought from the pot once the lead and 2 members approve, and grows rooms at 11 and 26 members. The database refuses item transfers, deletes, and any purchase not backed by a burn of its exact price.
+7. **Rent and jobs** (done). Saturday rent of 250 GM at the bell: 225 burns, 25 to the City Purse, which never pays GM out. Sublet after 7 full days away; can't pay means a week on the crew's couch or the bench, never debt; catch-up looks back at most 8 weeks. Mod Shift: 2 a day across every job, one at a time, a server-scored moderation mini-game (the client never sends a score), 10 to 12 GM after 15 real minutes. The away shift: Proof of Neighbour only, a gm in the last 24 hours, 5 GM, takes one of the 2 slots. The Drip Committee report shows GM created vs destroyed on net flows and the median active balance in weeks of income. Tests replay the plan's active week exactly: drip 350, streak 175, shifts 154.
+
+## Notes for later bricks
+
+- **Rent vs open stakes.** Rent's "can't pay" check reads the wallet balance. When duels and City/Crew markets add escrowed stakes, GM parked in a stake over a Saturday could dodge rent. Count open stakes there the same way `gmNetWorth` will.
+- **The bell job** must run `collectAllRent` at the Saturday bell before players can act, and `settleCrewChain` for every crew each night.
+- **Proof of Neighbour** writes `users.proof_of_neighbour_at`; the away shift already reads it.
 
 ## Testing rules
 
@@ -39,6 +46,8 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 - `api-contract.test.ts` calls every exported service with garbage and fails on any synchronous throw (this bug shipped twice).
 - Never let randomness make a test pass by luck: seed it or pin it.
 - Check database errors by SQLSTATE on `error.cause` (Drizzle wraps them), and never turn an unknown error into a friendly one.
+- Every open-ended loop carries a `loop-bound:` comment saying what limits it; `loops.test.ts` fails the build otherwise.
+- Exploit loops get property tests: random sequences of real actions must never beat a cap.
 - Lock order everywhere: resident, then request/invite, then crew, then ledger accounts.
 - Shared helpers live in `packages/db/test/helpers.ts`. Test files share one database, so assertions must be scoped to their own rows.
 

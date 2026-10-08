@@ -31,6 +31,8 @@ export const users = pgTable(
     // The plan's one-tap 18+ notice; nobody gets an account without it.
     ageAckAt: timestamp("age_ack_at", { withTimezone: true }).notNull(),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    // Set by the Proof of Neighbour brick (phone or crypto-native proof).
+    proofOfNeighbourAt: timestamp("proof_of_neighbour_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [check("users_claimed_consistent", sql`(${t.status} = 'claimed') = (${t.claimedAt} IS NOT NULL)`)],
@@ -136,6 +138,8 @@ export const dailyGm = pgTable(
     drip: integer("drip").notNull(),
     brokeFloor: boolean("broke_floor").notNull(),
     netWorth: bigint("net_worth", { mode: "number" }).notNull(),
+    // The exact moment of the gm (the away shift needs "in the last 24 hours").
+    saidAt: timestamp("said_at", { withTimezone: true }).notNull().defaultNow(),
     txId: uuid("tx_id")
       .notNull()
       .references(() => gmTransactions.id),
@@ -462,4 +466,61 @@ export const crewPieceApprovals = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.proposalId, t.userId] })],
+);
+
+// --- Rent and jobs --------------------------------------------------------
+
+export const rentStatus = pgEnum("rent_status", ["paid", "couch", "sublet"]);
+
+// One row per resident per Saturday: paid, couch-surfed (couldn't pay, no
+// debt) or sublet (away 7+ days).
+export const rentCharges = pgTable(
+  "rent_charges",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    saturday: date("saturday", { mode: "string" }).notNull(),
+    status: rentStatus("status").notNull(),
+    amount: integer("amount").notNull().default(0),
+    txId: uuid("tx_id").references(() => gmTransactions.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.saturday] }),
+    check("rent_charges_paid", sql`(${t.status} = 'paid') = (${t.txId} IS NOT NULL AND ${t.amount} > 0)`),
+    check("rent_charges_unpaid_zero", sql`${t.status} = 'paid' OR ${t.amount} = 0`),
+  ],
+);
+
+export const shiftKind = pgEnum("shift_kind", ["active", "away"]);
+
+export const shifts = pgTable(
+  "shifts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    // 1 or 2: the daily cap, enforced by the unique index below.
+    slot: integer("slot").notNull(),
+    kind: shiftKind("kind").notNull(),
+    seed: integer("seed"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    score: integer("score"),
+    pay: integer("pay"),
+    collectedTx: uuid("collected_tx").references(() => gmTransactions.id),
+  },
+  (t) => [
+    uniqueIndex("shifts_daily_cap").on(t.userId, t.cityDay, t.slot),
+    uniqueIndex("shifts_one_away_a_day").on(t.userId, t.cityDay).where(sql`${t.kind} = 'away'`),
+    check("shifts_slot", sql`${t.slot} BETWEEN 1 AND 2`),
+    check("shifts_score", sql`${t.score} IS NULL OR ${t.score} BETWEEN 0 AND 10`),
+    check("shifts_pay", sql`${t.pay} IS NULL OR ${t.pay} BETWEEN 5 AND 12`),
+    check("shifts_collected_paid", sql`${t.collectedTx} IS NULL OR ${t.pay} IS NOT NULL`),
+    check("shifts_active_seed", sql`(${t.kind} = 'active') = (${t.seed} IS NOT NULL)`),
+  ],
 );

@@ -55,7 +55,9 @@ export async function settleCrewChain(db: Db, crewId: string, opts: { now?: Date
     // A crew dissolved during day X never reaches X's bell.
     const end = c.dissolvedAt ? minDay(addDays(today, -1), addDays(cityDay(c.dissolvedAt), -1)) : addDays(today, -1);
     let settled = 0;
-    while (daysBetween(day, end) >= 0) {
+    // loop-bound: at most MAX_SETTLE_DAYS per call, so one request never does
+    // unbounded work; callers that need more call again (see chainStatus).
+    while (daysBetween(day, end) >= 0 && settled < MAX_SETTLE_DAYS) {
       const n = await countsFor(tx, crewId, day);
       await tx
         .insert(crewChainDays)
@@ -64,9 +66,11 @@ export async function settleCrewChain(db: Db, crewId: string, opts: { now?: Date
       settled++;
       day = addDays(day, 1);
     }
-    return { settled };
+    return { settled, done: daysBetween(day, end) < 0 };
   });
 }
+
+export const MAX_SETTLE_DAYS = 400;
 
 const minDay = (a: string, b: string) => (a < b ? a : b);
 
@@ -83,7 +87,10 @@ async function membershipCrew(db: Db, userId: string) {
 export async function chainStatus(db: Db, crewId: string, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
   const today = cityDay(now);
-  await settleCrewChain(db, crewId, { now });
+  // loop-bound: 10 rounds of MAX_SETTLE_DAYS covers 10+ years of dormancy.
+  for (let round = 0; round < 10; round++) {
+    if ((await settleCrewChain(db, crewId, { now })).done) break;
+  }
   const days = await db
     .select({ day: crewChainDays.cityDay, held: crewChainDays.held, relit: crewChainDays.relit })
     .from(crewChainDays)

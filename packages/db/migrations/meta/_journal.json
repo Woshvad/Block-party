@@ -85,6 +85,13 @@
       "when": 1791498768711,
       "tag": "0011_item_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791499376273,
+      "tag": "0012_rent_and_jobs",
+      "breakpoints": true
     }
   ]
 }

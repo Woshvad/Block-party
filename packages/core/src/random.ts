@@ -6,6 +6,8 @@ export const cryptoRandomInt: RandomInt = (n) => {
   if (!Number.isSafeInteger(n) || n < 1 || n > 2 ** 32) throw new RangeError(`bad range ${n}`);
   const limit = Math.floor(2 ** 32 / n) * n;
   const buf = new Uint32Array(1);
+  // loop-bound: rejection sampling; each draw is accepted with probability
+  // above 1/2, so 40 straight rejections is a 1-in-a-trillion event.
   for (;;) {
     crypto.getRandomValues(buf);
     if (buf[0]! < limit) return buf[0]! % n;

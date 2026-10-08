@@ -8,3 +8,4 @@ export * from "./random";
 export * from "./resident";
 export * from "./crew";
 export * from "./home";
+export * from "./economy";

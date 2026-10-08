@@ -117,6 +117,7 @@ const isUniqueViolation = (e: unknown): boolean => {
 export async function signInWithIdentity(db: Db, input: IdentityInput): Promise<AuthResult> {
   // Two first sign-ins with the same identity can race; the unique constraint
   // picks a winner and the loser retries into outcome 1.
+  // loop-bound: at most 3 attempts; the catch rethrows once attempt reaches 2.
   for (let attempt = 0; ; attempt++) {
     try {
       return await signInOnce(db, input);

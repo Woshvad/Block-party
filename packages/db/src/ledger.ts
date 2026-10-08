@@ -3,6 +3,7 @@ import {
   LedgerError,
   SYS_BURN,
   SYS_MINT,
+  SYS_PURSE,
   postingHash,
   userAccountId,
   validateLegs,
@@ -135,6 +136,7 @@ export async function ensureSystemAccounts(db: Db) {
     .values([
       { id: SYS_MINT, kind: "system", allowNegative: true },
       { id: SYS_BURN, kind: "system" },
+      { id: SYS_PURSE, kind: "system" },
     ])
     .onConflictDoNothing();
 }

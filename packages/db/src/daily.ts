@@ -77,7 +77,7 @@ export async function sayGm(db: Db, userId: string, opts: { now?: Date } = {}): 
       idempotencyKey: `drip:${userId}:${day}`,
       meta: { cityDay: day, brokeFloor },
     });
-    await tx.insert(dailyGm).values({ userId, cityDay: day, drip: amount, brokeFloor, netWorth, txId: res.txId });
+    await tx.insert(dailyGm).values({ userId, cityDay: day, drip: amount, brokeFloor, netWorth, txId: res.txId, saidAt: now });
     return { cityDay: day, already: false, drip: amount, brokeFloor, balance: res.balances[acct]! };
   });
 }
