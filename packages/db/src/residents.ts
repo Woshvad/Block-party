@@ -15,6 +15,7 @@ import {
 } from "@bp/core";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "./client";
+import { setUpHome } from "./home";
 import { residents, users } from "./schema";
 
 export type ResidentErrorCode =
@@ -74,6 +75,7 @@ export async function createResident(
         .insert(residents)
         .values({ userId, ...v, ...dealt })
         .returning();
+      await setUpHome(tx, userId, v.kitStyle, dealt.starterItem);
       return row!;
     });
   } catch (e) {

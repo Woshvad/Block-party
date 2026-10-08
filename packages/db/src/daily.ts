@@ -1,6 +1,7 @@
-import { GM, type StreakState, advanceStreak, cityDay, dripFor, nextBell, streakView, userAccountId } from "@bp/core";
+import { GM, STREAK_PIECES, type StreakState, advanceStreak, cityDay, dripFor, nextBell, streakView, userAccountId } from "@bp/core";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
+import { grantEarned } from "./home";
 import { burn, mint } from "./ledger";
 import { badges, dailyGm, gmEntries, gmAccounts, gmTransactions, streakDays, streaks, users } from "./schema";
 
@@ -122,6 +123,8 @@ export async function recordStreakDay(db: Db, userId: string, opts: { now?: Date
         .insert(badges)
         .values(r.cards.map((n) => ({ userId, badge: `streak_${n}`, earnedOn: day })))
         .onConflictDoNothing();
+      // The 30-day gm lamp and the 100-day neon: earned, never sold.
+      for (const n of r.cards) if (STREAK_PIECES[n]) await grantEarned(tx, userId, STREAK_PIECES[n]);
     }
     return { ...r, cityDay: day };
   });

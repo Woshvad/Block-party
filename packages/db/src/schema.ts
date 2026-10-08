@@ -354,3 +354,112 @@ export const crewChainRelights = pgTable(
   },
   (t) => [primaryKey({ columns: [t.crewId, t.cityDay, t.userId] })],
 );
+
+// --- Homes and Build mode -------------------------------------------------
+
+export const homeTier = pgEnum("home_tier", ["tenement"]);
+export const itemSource = pgEnum("item_source", ["kit", "starter", "purchase", "earned"]);
+export const proposalStatus = pgEnum("crew_piece_proposal_status", ["pending", "bought", "cancelled"]);
+
+export const homes = pgTable("homes", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  tier: homeTier("tier").notNull().default("tenement"),
+  wallFinish: text("wall_finish").notNull().default("plaster"),
+  floorFinish: text("floor_finish").notNull().default("boards"),
+  doorOpen: boolean("door_open").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const crewHouses = pgTable("crew_houses", {
+  crewId: uuid("crew_id")
+    .primaryKey()
+    .references(() => crews.id),
+  wallFinish: text("wall_finish").notNull().default("plaster"),
+  floorFinish: text("floor_finish").notNull().default("boards"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Every piece anyone owns. Owned by a resident or by a crew, never both, and
+// never handed on: no resale, no gifting.
+export const items = pgTable(
+  "items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pieceId: text("piece_id").notNull(),
+    ownerUserId: uuid("owner_user_id").references(() => users.id),
+    ownerCrewId: uuid("owner_crew_id").references(() => crews.id),
+    source: itemSource("source").notNull(),
+    pricePaid: integer("price_paid"),
+    txId: uuid("tx_id").references(() => gmTransactions.id),
+    acquiredAt: timestamp("acquired_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("items_one_owner", sql`(${t.ownerUserId} IS NULL) <> (${t.ownerCrewId} IS NULL)`),
+    check("items_paid_consistent", sql`(${t.source} = 'purchase') = (${t.pricePaid} IS NOT NULL AND ${t.txId} IS NOT NULL)`),
+    index("items_owner_user").on(t.ownerUserId),
+    index("items_owner_crew").on(t.ownerCrewId),
+    uniqueIndex("items_tx_once").on(t.txId),
+    // Kit, starter and earned pieces come once per owner.
+    uniqueIndex("items_free_once_user").on(t.ownerUserId, t.pieceId).where(sql`${t.source} <> 'purchase'`),
+    // Working pieces: one of each per home.
+    uniqueIndex("items_working_once_user")
+      .on(t.ownerUserId, t.pieceId)
+      .where(sql`${t.pieceId} IN ('guestbook','trophy_wall','slate_board','tv')`),
+    uniqueIndex("items_working_once_crew")
+      .on(t.ownerCrewId, t.pieceId)
+      .where(sql`${t.pieceId} IN ('guestbook','trophy_wall','slate_board','tv')`),
+  ],
+);
+
+// Where a piece sits. No row means it's in storage (free).
+export const placements = pgTable(
+  "placements",
+  {
+    itemId: uuid("item_id")
+      .primaryKey()
+      .references(() => items.id),
+    room: text("room").notNull(),
+    layer: text("layer").notNull(),
+    spot: jsonb("spot").$type<Record<string, unknown>>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("placements_layer", sql`${t.layer} IN ('floor','rug','wall')`)],
+);
+
+export const crewPieceProposals = pgTable(
+  "crew_piece_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    crewId: uuid("crew_id")
+      .notNull()
+      .references(() => crews.id),
+    pieceId: text("piece_id").notNull(),
+    proposedBy: uuid("proposed_by")
+      .notNull()
+      .references(() => users.id),
+    status: proposalStatus("status").notNull().default("pending"),
+    itemId: uuid("item_id").references(() => items.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("crew_piece_proposals_crew").on(t.crewId),
+    check("crew_piece_proposals_bought", sql`(${t.status} = 'bought') = (${t.itemId} IS NOT NULL)`),
+  ],
+);
+
+export const crewPieceApprovals = pgTable(
+  "crew_piece_approvals",
+  {
+    proposalId: uuid("proposal_id")
+      .notNull()
+      .references(() => crewPieceProposals.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.proposalId, t.userId] })],
+);

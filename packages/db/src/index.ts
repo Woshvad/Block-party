@@ -3,6 +3,7 @@ export * from "./chain";
 export * from "./client";
 export * from "./crews";
 export * from "./daily";
+export * from "./home";
 export * from "./ledger";
 export * from "./residents";
 export * as schema from "./schema";
