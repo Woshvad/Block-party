@@ -1,0 +1,17 @@
+{
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15"
+  },
+  "name": "block-party",
+  "private": true,
+  "packageManager": "pnpm@10.10.0",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @bp/db generate",
+    "db:migrate": "pnpm --filter @bp/db migrate"
+  }
+}

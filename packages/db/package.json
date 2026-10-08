@@ -1,0 +1,23 @@
+{
+  "name": "@bp/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@bp/core": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "dotenv": "^18.0.6",
+    "drizzle-kit": "^0.31.11",
+    "jose": "^6.2.12"
+  }
+}
