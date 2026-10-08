@@ -98,7 +98,7 @@ export async function buyPiece(db: Db, userId: string, pieceId: unknown, idempot
   const piece = forSale(pieceId);
   try {
     return await db.transaction(async (tx) => {
-      const [home] = await tx.select().from(homes).where(eq(homes.userId, userId)).for("update");
+      const [home] = await tx.select().from(homes).where(eq(homes.userId, userId)).for("no key update");
       if (!home) throw new HomeError("NO_HOME", "move in first");
       const res = await burn(tx, {
         accountId: userAccountId(userId),
@@ -164,7 +164,7 @@ async function place(tx: Db, owner: Owner, itemId: string, room: RoomKind, input
 export async function placeItem(db: Db, userId: string, itemId: string, placement: unknown) {
   return db.transaction(async (tx) => {
     // One editor per home at a time, so two placements can't land on one spot.
-    const [home] = await tx.select().from(homes).where(eq(homes.userId, userId)).for("update");
+    const [home] = await tx.select().from(homes).where(eq(homes.userId, userId)).for("no key update");
     if (!home) throw new HomeError("NO_HOME", "move in first");
     return place(tx, { kind: "user", id: userId }, itemId, "tenement", placement);
   });
@@ -172,7 +172,7 @@ export async function placeItem(db: Db, userId: string, itemId: string, placemen
 
 export async function storeItem(db: Db, userId: string, itemId: string) {
   return db.transaction(async (tx) => {
-    const [home] = await tx.select().from(homes).where(eq(homes.userId, userId)).for("update");
+    const [home] = await tx.select().from(homes).where(eq(homes.userId, userId)).for("no key update");
     if (!home) throw new HomeError("NO_HOME", "move in first");
     const [it] = await tx.select().from(items).where(and(eq(items.id, itemId), eq(items.ownerUserId, userId)));
     if (!it) throw new HomeError("NOT_YOURS", "that piece isn't yours");
@@ -238,7 +238,7 @@ async function crewMember(tx: Db, userId: string) {
 }
 
 async function lockLiveCrew(tx: Db, crewId: string) {
-  const [c] = await tx.select().from(crews).where(eq(crews.id, crewId)).for("update");
+  const [c] = await tx.select().from(crews).where(eq(crews.id, crewId)).for("no key update");
   if (!c || c.dissolvedAt) throw new HomeError("CREW_DISSOLVED", "this crew has dissolved");
   await tx.insert(crewHouses).values({ crewId }).onConflictDoNothing();
 }
@@ -265,7 +265,7 @@ export async function approveCrewPiece(db: Db, userId: string, proposalId: strin
   return db.transaction(async (tx) => {
     const m = await crewMember(tx, userId);
     await lockLiveCrew(tx, m.crewId);
-    const [p] = await tx.select().from(crewPieceProposals).where(eq(crewPieceProposals.id, proposalId)).for("update");
+    const [p] = await tx.select().from(crewPieceProposals).where(eq(crewPieceProposals.id, proposalId)).for("no key update");
     if (!p || p.crewId !== m.crewId || p.status !== "pending") throw new HomeError("NO_SUCH_PROPOSAL", "no open proposal");
     await tx.insert(crewPieceApprovals).values({ proposalId, userId }).onConflictDoNothing();
 
@@ -302,7 +302,7 @@ export async function approveCrewPiece(db: Db, userId: string, proposalId: strin
 export async function cancelCrewPiece(db: Db, userId: string, proposalId: string) {
   return db.transaction(async (tx) => {
     const m = await crewMember(tx, userId);
-    const [p] = await tx.select().from(crewPieceProposals).where(eq(crewPieceProposals.id, proposalId)).for("update");
+    const [p] = await tx.select().from(crewPieceProposals).where(eq(crewPieceProposals.id, proposalId)).for("no key update");
     if (!p || p.crewId !== m.crewId || p.status !== "pending") throw new HomeError("NO_SUCH_PROPOSAL", "no open proposal");
     if (p.proposedBy !== userId && m.role !== "lead") throw new HomeError("NOT_ALLOWED", "only the proposer or the lead can cancel");
     await tx.update(crewPieceProposals).set({ status: "cancelled", decidedAt: new Date() }).where(eq(crewPieceProposals.id, proposalId));

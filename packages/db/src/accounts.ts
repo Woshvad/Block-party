@@ -64,7 +64,7 @@ export async function resolveSession(
       ),
     );
   // Locking the user row serialises concurrent sign-ins for the same resident.
-  const [row] = opts.lock ? await q.for("update", { of: users }) : await q;
+  const [row] = opts.lock ? await q.for("no key update", { of: users }) : await q;
   return row ?? null;
 }
 

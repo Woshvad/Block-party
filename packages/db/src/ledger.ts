@@ -59,7 +59,7 @@ export async function post(db: Db, input: PostInput): Promise<PostResult> {
       .from(gmAccounts)
       .where(inArray(gmAccounts.id, ids))
       .orderBy(asc(gmAccounts.id))
-      .for("update");
+      .for("no key update");
 
     const byId = new Map(locked.map((a) => [a.id, a]));
     const missing = ids.filter((id) => !byId.has(id));
@@ -100,6 +100,20 @@ export async function post(db: Db, input: PostInput): Promise<PostResult> {
 
     return { txId, replayed: false, balances };
   });
+}
+
+// Locks accounts in the same global order post() uses (sorted ids). Anything
+// that reads a balance before posting must lock through here, or it can
+// deadlock against an ordinary posting (the Halving once did).
+export async function lockAccounts(db: Db, ids: string[]) {
+  const sorted = [...new Set(ids)].sort();
+  const rows = await db
+    .select({ id: gmAccounts.id, balance: gmAccounts.balance })
+    .from(gmAccounts)
+    .where(inArray(gmAccounts.id, sorted))
+    .orderBy(asc(gmAccounts.id))
+    .for("no key update");
+  return new Map(rows.map((r) => [r.id, r.balance]));
 }
 
 async function replay(db: Db, idempotencyKey: string, hash: string): Promise<PostResult> {

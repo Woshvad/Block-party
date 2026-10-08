@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { RENT, SHIFT, addDays, cityWeekday, isSublet, rentSplit, saturdaysBetween, scoreShift, shiftPay, shiftPuzzle } from "../src";
+import { RENT, SHIFT, addDays, cityWeekday, halvingBurn, halvingDue, seasonLastDay, isSublet, rentSplit, saturdaysBetween, scoreShift, seasonEndedAt, seasonOf, shiftPay, shiftPuzzle } from "../src";
 
 describe("rent", () => {
   it("splits 10% to the Purse, the rest burns, nothing lost", () => {
@@ -73,5 +73,44 @@ describe("Mod Shift mini-game", () => {
 
   it("2 shifts a day at an average score matches the plan's weekly 154 GM", () => {
     expect(7 * SHIFT.perDay * shiftPay(8)).toBe(154);
+  });
+});
+
+describe("the Halving", () => {
+  it("halves and burns the excess above 2,000, rounding for the player", () => {
+    expect([0, 1999, 2000, 2001, 2002, 5000, 5001, 1_000_000].map(halvingBurn)).toEqual([0, 0, 0, 0, 1, 1500, 1500, 499_000]);
+    for (const bad of [NaN, -5, 2500.5, Infinity]) expect(halvingBurn(bad)).toBe(0);
+  });
+
+  it("never takes you below 2,000 and always leaves at least half the excess", () => {
+    fc.assert(fc.property(fc.integer({ min: 0, max: 10_000_000 }), (b) => {
+      const after = b - halvingBurn(b);
+      return b <= 2000 ? after === b : after >= 2000 && after - 2000 >= (b - 2000) / 2 && after - 2000 <= (b - 2000) / 2 + 0.5;
+    }));
+  });
+
+  it("knows a season's last bell", () => {
+    expect(seasonEndedAt("2026-11-02", seasonOf)).toBe(1); // season 1 ran 2026-10-05 .. 2026-11-01
+    expect(seasonEndedAt("2026-11-01", seasonOf)).toBeNull();
+    expect(seasonEndedAt("2026-11-03", seasonOf)).toBeNull();
+    expect(seasonEndedAt("2026-11-30", seasonOf)).toBe(2);
+    expect(seasonEndedAt("2026-10-05", seasonOf)).toBeNull(); // season 0 (pre-launch) never halves
+  });
+});
+
+describe("when the Halving is due", () => {
+  it("at the season's last bell and up to 7 days late, never earlier, never later", () => {
+    expect(halvingDue("2026-11-01")).toBeNull(); // last day of season 1, bell hasn't rung
+    expect(halvingDue("2026-11-02")).toBe(1);
+    expect(halvingDue("2026-11-08")).toBe(1); // 6 days late
+    expect(halvingDue("2026-11-09")).toBeNull(); // 7 days late: skipped
+    expect(halvingDue("2026-10-20")).toBeNull(); // season 1 itself
+    expect(halvingDue("2026-09-01")).toBeNull(); // before launch
+  });
+
+  it("a season's last day is the day before the next one starts", () => {
+    expect(seasonLastDay(1)).toBe("2026-11-01");
+    expect(seasonOf(seasonLastDay(5))).toBe(5);
+    expect(seasonOf(addDays(seasonLastDay(5), 1))).toBe(6);
   });
 });

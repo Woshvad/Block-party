@@ -129,7 +129,7 @@ export async function relightChain(db: Db, userId: string, opts: { now?: Date } 
       .select()
       .from(crewChainDays)
       .where(and(eq(crewChainDays.crewId, crewId), eq(crewChainDays.cityDay, target)))
-      .for("update");
+      .for("no key update");
     if (!d || d.held) throw new ChainError("NOTHING_TO_RELIGHT", "the chain doesn't need relighting");
     const bell = bellAfter(target).toISOString();
     const [wasMember] = await tx.execute<{ ok: number }>(sql`

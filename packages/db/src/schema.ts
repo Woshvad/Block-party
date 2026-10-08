@@ -524,3 +524,39 @@ export const shifts = pgTable(
     check("shifts_active_seed", sql`(${t.kind} = 'active') = (${t.seed} IS NOT NULL)`),
   ],
 );
+
+// --- The bell -------------------------------------------------------------
+
+// Each step of each nightly bell, recorded once it finishes. A crashed run
+// leaves its step unrecorded, so the next run picks it up.
+export const bellSteps = pgTable(
+  "bell_steps",
+  {
+    bellDay: date("bell_day", { mode: "string" }).notNull(), // the city day the bell closed
+    step: text("step").notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default({}),
+    doneAt: timestamp("done_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.bellDay, t.step] })],
+);
+
+// One row per account the Halving touched, per season.
+export const halvings = pgTable(
+  "halvings",
+  {
+    season: integer("season").notNull(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => gmAccounts.id),
+    balanceBefore: bigint("balance_before", { mode: "number" }).notNull(),
+    burned: bigint("burned", { mode: "number" }).notNull(),
+    txId: uuid("tx_id")
+      .notNull()
+      .references(() => gmTransactions.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.season, t.accountId] }),
+    check("halvings_math", sql`${t.balanceBefore} > 2000 AND ${t.burned} = (${t.balanceBefore} - 2000) / 2 AND ${t.burned} > 0`),
+  ],
+);

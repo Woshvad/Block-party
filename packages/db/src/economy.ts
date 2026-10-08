@@ -19,7 +19,7 @@ import {
 } from "@bp/core";
 import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { mint, post } from "./ledger";
+import { lockAccounts, mint, post } from "./ledger";
 import { crewMembers, dailyGm, gmAccounts, rentCharges, residents, shifts, users } from "./schema";
 
 export class EconomyError extends Error {
@@ -42,7 +42,7 @@ export class EconomyError extends Error {
 }
 
 async function lockResident(tx: Db, userId: string) {
-  await tx.execute(sql`SELECT 1 FROM users WHERE id = ${userId} FOR UPDATE`);
+  await tx.execute(sql`SELECT 1 FROM users WHERE id = ${userId} FOR NO KEY UPDATE`);
   const [r] = await tx.select({ createdAt: residents.createdAt }).from(residents).where(eq(residents.userId, userId));
   if (!r) throw new EconomyError("NO_RESIDENT", "move in first");
   return r;
@@ -88,8 +88,10 @@ export async function collectRent(db: Db, userId: string, opts: { now?: Date } =
         out.push({ saturday, status: "sublet", amount: 0 });
         continue;
       }
-      const [acct] = await tx.select({ balance: gmAccounts.balance }).from(gmAccounts).where(eq(gmAccounts.id, userAccountId(userId)));
-      if ((acct?.balance ?? 0) < RENT.tenement) {
+      // Read under the ledger's locks, in its order, so a purchase can't land
+      // between "can they pay?" and the charge.
+      const balance = (await lockAccounts(tx, [userAccountId(userId), SYS_BURN, SYS_PURSE])).get(userAccountId(userId)) ?? 0;
+      if (balance < RENT.tenement) {
         // Can't pay: a week on the crew's couch (or the bench). Never debt.
         await tx.insert(rentCharges).values({ userId, saturday, status: "couch" });
         out.push({ saturday, status: "couch", amount: 0 });
@@ -179,7 +181,7 @@ export async function startShift(db: Db, userId: string, opts: { now?: Date; see
 
 async function ownShift(tx: Db, userId: string, shiftId: unknown) {
   if (typeof shiftId !== "string" || !/^[0-9a-f-]{36}$/.test(shiftId)) throw new EconomyError("NO_SUCH_SHIFT", "no such shift");
-  const [s] = await tx.select().from(shifts).where(and(eq(shifts.id, shiftId), eq(shifts.userId, userId))).for("update");
+  const [s] = await tx.select().from(shifts).where(and(eq(shifts.id, shiftId), eq(shifts.userId, userId))).for("no key update");
   if (!s) throw new EconomyError("NO_SUCH_SHIFT", "no such shift");
   return s;
 }

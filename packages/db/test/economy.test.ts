@@ -13,6 +13,7 @@ import {
   economyReport,
   ensureSystemAccounts,
   getBalance,
+  mint,
   reconcile,
   recordStreakDay,
   sayGm,
@@ -145,6 +146,37 @@ describe("rent", () => {
       { numRuns: 8 },
     );
   }, 60_000);
+
+  it("a purchase landing as rent runs: rent sees the new balance and couch-surfs, no error", async () => {
+    const u = await makeResident(db);
+    await buyPiece(db, u, "double_bed", randomUUID()); // 1000 -> 600
+    await buyPiece(db, u, "gaming_desk", randomUUID()); // -> 250
+    await mint(db, { accountId: userAccountId(u), amount: 50, kind: "test_seed", idempotencyKey: randomUUID() }); // -> 300
+    expect(await bal(u)).toBe(300);
+
+    // Hold the account so both writers queue: the purchase first, then rent.
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM gm_accounts WHERE id = ${userAccountId(u)} FOR UPDATE`;
+    const waiting = async (n: number) => {
+      for (let i = 0; i < 300; i++) {
+        const [w] = await client`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+        if (w!.n >= n) return;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      throw new Error("racers never queued");
+    };
+    const purchase = code(buyPiece(db, u, "guestbook", randomUUID())); // 60: leaves 240
+    await waiting(1);
+    const rent = collectRent(db, u, { now: at(toSat) }).then((r) => r, (e) => e);
+    await waiting(2);
+    await barrier`COMMIT`;
+    barrier.release();
+    expect(await purchase).toBe("OK");
+    const out = await rent;
+    expect(out).toEqual([expect.objectContaining({ status: "couch" })]);
+    expect(await bal(u)).toBe(240);
+  });
 
   it("the City Purse never pays GM back to anyone", async () => {
     const out = await client`SELECT count(*)::int AS n FROM gm_entries WHERE account_id = ${SYS_PURSE} AND amount < 0`;

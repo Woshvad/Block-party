@@ -55,7 +55,7 @@ export async function sayGm(db: Db, userId: string, opts: { now?: Date } = {}): 
   const day = cityDay(now);
   return db.transaction(async (tx) => {
     // Serialises gm, sign-in and Hodl purchases for this resident.
-    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update");
+    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update");
     if (!u) throw new DailyError("UNKNOWN_USER", "no such resident");
 
     const [existing] = await tx
@@ -86,7 +86,7 @@ export async function sayGm(db: Db, userId: string, opts: { now?: Date } = {}): 
 
 async function lockStreak(tx: Db, userId: string): Promise<StreakState> {
   await tx.insert(streaks).values({ userId }).onConflictDoNothing();
-  const [row] = await tx.select().from(streaks).where(eq(streaks.userId, userId)).for("update");
+  const [row] = await tx.select().from(streaks).where(eq(streaks.userId, userId)).for("no key update");
   return { current: row!.current, longest: row!.longest, lastDay: row!.lastDay, hodlDays: row!.hodlDays };
 }
 
@@ -96,7 +96,7 @@ async function lockStreak(tx: Db, userId: string): Promise<StreakState> {
 export async function recordStreakDay(db: Db, userId: string, opts: { now?: Date } = {}) {
   const day = cityDay(opts.now ?? new Date());
   return db.transaction(async (tx) => {
-    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update");
+    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update");
     if (!u) throw new DailyError("UNKNOWN_USER", "no such resident");
 
     const before = await lockStreak(tx, userId);
@@ -134,7 +134,7 @@ export async function recordStreakDay(db: Db, userId: string, opts: { now?: Date
 
 export async function buyHodlDay(db: Db, userId: string, idempotencyKey: string) {
   return db.transaction(async (tx) => {
-    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("update");
+    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update");
     if (!u) throw new DailyError("UNKNOWN_USER", "no such resident");
     const s = await lockStreak(tx, userId);
 

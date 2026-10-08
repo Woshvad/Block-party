@@ -66,7 +66,7 @@ export async function createResident(
   const dealt = dealBackstory(opts.rand ?? cryptoRandomInt);
   try {
     return await db.transaction(async (tx) => {
-      const [u] = await tx.select({ status: users.status }).from(users).where(eq(users.id, userId)).for("update");
+      const [u] = await tx.select({ status: users.status }).from(users).where(eq(users.id, userId)).for("no key update");
       if (!u) throw new ResidentError("UNKNOWN_USER", "no such account");
       if (u.status !== "claimed") throw new ResidentError("NOT_CLAIMED", "claim your account to move in");
       const [existing] = await tx.select({ userId: residents.userId }).from(residents).where(eq(residents.userId, userId));
@@ -149,7 +149,7 @@ export async function swapTraits(db: Db, userId: string, traits: unknown, opts: 
   const next = wrapInput(() => validateTraits(traits));
   const season = seasonOf(cityDay(opts.now ?? new Date()));
   return db.transaction(async (tx) => {
-    const [r] = await tx.select().from(residents).where(eq(residents.userId, userId)).for("update");
+    const [r] = await tx.select().from(residents).where(eq(residents.userId, userId)).for("no key update");
     if (!r) throw new ResidentError("NO_RESIDENT", "move in first");
     if (r.traits.join() === next.join()) return r;
     if (r.traitsSwappedSeason === season) {

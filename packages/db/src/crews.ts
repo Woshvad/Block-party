@@ -85,7 +85,7 @@ async function requireMembership(tx: Db, userId: string): Promise<Membership> {
 
 // Every roster change locks the crew row first: one writer per crew at a time.
 async function lockCrew(tx: Db, crewId: string) {
-  const [c] = await tx.select().from(crews).where(eq(crews.id, crewId)).for("update");
+  const [c] = await tx.select().from(crews).where(eq(crews.id, crewId)).for("no key update");
   if (!c) throw new CrewError("CREW_DISSOLVED", "no such crew");
   if (c.dissolvedAt) throw new CrewError("CREW_DISSOLVED", "this crew has dissolved");
   return c;
@@ -122,7 +122,7 @@ async function closeStint(tx: Db, stintId: string, reason: "left" | "removed" | 
 
 // Serialises everything one resident does across crews.
 async function lockResident(tx: Db, userId: string) {
-  await tx.execute(sql`SELECT 1 FROM users WHERE id = ${userId} FOR UPDATE`);
+  await tx.execute(sql`SELECT 1 FROM users WHERE id = ${userId} FOR NO KEY UPDATE`);
 }
 
 const mapUnique = (e: unknown): never => {
@@ -261,7 +261,7 @@ export async function redeemInvite(db: Db, userId: string, code: unknown, opts: 
   return db.transaction(async (tx) => {
     await lockResident(tx, userId);
     await requireResident(tx, userId);
-    const [inv] = await tx.select().from(crewInvites).where(eq(crewInvites.code, code)).for("update");
+    const [inv] = await tx.select().from(crewInvites).where(eq(crewInvites.code, code)).for("no key update");
     const now = opts.now ?? new Date();
     if (!inv || inv.revokedAt || inv.expiresAt <= now) throw new CrewError("INVITE_INVALID", "this invite has expired");
     // Only "dissolved" becomes an expired invite. A blanket catch here once
@@ -302,7 +302,7 @@ export async function decideJoinRequest(db: Db, actorId: string, requestId: stri
     const [peek] = await tx.select({ userId: crewJoinRequests.userId }).from(crewJoinRequests).where(eq(crewJoinRequests.id, requestId));
     if (!peek) throw new CrewError("NO_SUCH_REQUEST", "no pending request");
     await lockResident(tx, peek.userId);
-    const [req] = await tx.select().from(crewJoinRequests).where(eq(crewJoinRequests.id, requestId)).for("update");
+    const [req] = await tx.select().from(crewJoinRequests).where(eq(crewJoinRequests.id, requestId)).for("no key update");
     if (!req || req.status !== "pending") throw new CrewError("NO_SUCH_REQUEST", "no pending request");
     await lockCrew(tx, req.crewId);
     const m = await membershipOf(tx, actorId);

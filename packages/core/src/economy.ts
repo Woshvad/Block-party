@@ -1,4 +1,5 @@
 import { type CityDay, addDays, cityWeekday, daysBetween } from "./clock";
+import { SEASON_EPOCH, SEASON_LENGTH_DAYS, seasonOf } from "./resident";
 import { seededRandomInt } from "./random";
 
 export const SYS_PURSE = "sys:city_purse"; // the Mayor's GM, only ever spent on things everyone sees
@@ -102,3 +103,38 @@ export function scoreShift(seed: number, submitted: unknown): number {
   if (!submitted.every((x) => typeof x === "boolean")) return 0;
   return submitted.reduce((n, x, i) => n + (x === answers[i] ? 1 : 0), 0);
 }
+
+// --- The Halving ----------------------------------------------------------
+
+export const HALVING_LINE = 2000;
+
+// The excess above 2,000 is halved and burned. Whole GM, rounded in the
+// player's favour: an excess of 3,001 burns 1,500 and keeps 1,501.
+export function halvingBurn(balance: number): number {
+  if (!Number.isSafeInteger(balance) || balance <= HALVING_LINE) return 0;
+  return Math.floor((balance - HALVING_LINE) / 2);
+}
+
+// The bell at 00:00 UTC ends the city day before `today`. If that day was the
+// last of a season, this is the season's last bell.
+export function seasonEndedAt(today: CityDay, seasonOf: (d: CityDay) => number): number | null {
+  const ended = seasonOf(addDays(today, -1));
+  return ended >= 1 && seasonOf(today) !== ended ? ended : null;
+}
+
+export const HALVING_LATE_DAYS = 7; // a missed Halving still runs this many days into the new season
+
+// The last city day of a season; a season's Halving is recorded against it,
+// so however late the job runs, that season is halved once.
+export const seasonLastDay = (season: number, epoch = SEASON_EPOCH) => addDays(epoch, season * SEASON_LENGTH_DAYS - 1);
+
+// The season whose Halving is due at this bell, if any: the season that just
+// ended, as long as we're within HALVING_LATE_DAYS of its end.
+export function halvingDue(today: string, epoch = SEASON_EPOCH): number | null {
+  const current = seasonOf(today, epoch);
+  const ended = current - 1;
+  if (ended < 1) return null;
+  const seasonStart = addDays(epoch, (current - 1) * SEASON_LENGTH_DAYS);
+  return daysBetween(seasonStart, today) < HALVING_LATE_DAYS ? ended : null;
+}
+

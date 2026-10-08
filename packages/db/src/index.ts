@@ -1,4 +1,5 @@
 export * from "./accounts";
+export * from "./bell";
 export * from "./chain";
 export * from "./client";
 export * from "./crews";
