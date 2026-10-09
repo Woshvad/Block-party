@@ -541,3 +541,30 @@ describe("away life over HTTP", () => {
     expect((await call("GET", "/internal/rooms/away?place=../x", { headers: { "x-internal-secret": SECRET } })).status).toBe(400);
   });
 });
+
+describe("Proof of Neighbour over HTTP", () => {
+  it("phone verification, then rooms shared, then the mark", async () => {
+    const { client } = await import("./harness");
+    const me = await resident();
+    expect((await call("GET", "/v1/pon", { token: me.token })).body).toMatchObject({ proofOfNeighbour: false, verified: [] });
+    expect((await call("POST", "/v1/pon/phone", { token: me.token, body: { phone: "+15551234567" } })).body.error.code).toBe("NOT_MOBILE");
+    const phone = `+234809${Math.floor(Math.random() * 1e7).toString().padStart(7, "0")}`;
+    const start = await call("POST", "/v1/pon/phone", { token: me.token, body: { phone } });
+    expect(start.status).toBe(201);
+    const ok = await call("POST", `/v1/pon/phone/${start.body.checkId}/confirm`, { token: me.token, body: { phone, code: "123456" } });
+    expect(ok.body).toMatchObject({ verified: true, status: { verified: ["phone"] } });
+    await client`UPDATE users SET created_at = now() - interval '4 days' WHERE id = ${me.userId}`;
+    const others = await Promise.all(Array.from({ length: 5 }, () => resident()));
+    const t = Date.now() - 10 * 60_000;
+    const effects = [me, ...others].map((u) => ({ kind: "visit_start", userId: u.userId, at: t }));
+    await call("POST", "/internal/rooms/effects", { body: { place: "diner", copy: 7, effects }, headers: { "x-internal-secret": SECRET } });
+    expect((await call("GET", "/v1/pon", { token: me.token })).body).toMatchObject({ neighbours: 5, proofOfNeighbour: true });
+  });
+
+  it("providers missing: a clear 503, not a crash", async () => {
+    const bare = makeApp({ phoneVerifier: undefined, cryptoProofs: undefined });
+    const u = await resident();
+    expect((await call("POST", "/v1/pon/phone", { token: u.token, body: { phone: "+2348011111111" }, via: bare })).status).toBe(503);
+    expect((await call("POST", "/v1/pon/crypto", { token: u.token, body: { kind: "world_id", proof: {} }, via: bare })).status).toBe(503);
+  });
+});

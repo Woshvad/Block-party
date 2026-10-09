@@ -261,3 +261,20 @@ describe("away residents in a live room", () => {
     b.ws.close();
   });
 });
+
+describe("Proof of Neighbour visits", () => {
+  it("joining and leaving report visit start and end to the API; a second tab isn't a leave", async () => {
+    effects.length = 0;
+    const a1 = await connect("pv", { place: "gm_wall" });
+    await a1.next("welcome");
+    const a2 = await connect("pv", { place: "gm_wall" }); // replaces a1
+    await a2.next("welcome");
+    a2.ws.close();
+    await quiet(500);
+    const kinds = effects.flatMap((e) => e.effects).filter((x: any) => x.userId === "pv").map((x: any) => x.kind);
+    expect(kinds.filter((k: string) => k === "visit_start")).toHaveLength(2);
+    expect(kinds.filter((k: string) => k === "visit_end")).toHaveLength(1);
+    // Other tests' rooms post effects late, so only check this resident's own.
+    expect(effects.filter((e) => e.effects.some((x: any) => x.userId === "pv")).every((e) => e.place === "gm_wall")).toBe(true);
+  });
+});

@@ -40,6 +40,13 @@ import {
   getResident,
   isHandleAvailable,
   accountAgeDays,
+  addCryptoProof,
+  confirmPhoneCheck,
+  type CryptoProofVerifier,
+  type PhoneVerifier,
+  ponStatus,
+  recordVisit,
+  startPhoneCheck,
   awayAt,
   awayRecap,
   takeRide,
@@ -167,6 +174,10 @@ export type AppConfig = {
   rooms?: RoomsClient;
   roomsUrl?: string;
   ticketSecret?: string;
+  // Proof of Neighbour providers and the pepper for hashing phones and wallets.
+  phoneVerifier?: PhoneVerifier;
+  cryptoProofs?: CryptoProofVerifier;
+  ponPepper?: string;
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -652,6 +663,26 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ticket, url: `${cfg.roomsUrl}/connect?ticket=${encodeURIComponent(ticket)}` });
   });
 
+  // --- Proof of Neighbour ------------------------------------------------------
+
+  app.get("/v1/pon", auth, async (c) => c.json(await ponStatus(db, c.get("userId"), opts())));
+  const needPhone = () => {
+    if (!cfg.phoneVerifier || !cfg.ponPepper) throw new ApiError(503, "PON_PHONE_DISABLED", "phone verification isn't set up yet");
+    return { verifier: cfg.phoneVerifier, pepper: cfg.ponPepper, now: now() };
+  };
+  app.post("/v1/pon/phone", auth, async (c) => c.json(await startPhoneCheck(db, c.get("userId"), (await body(c)).phone, needPhone()), 201));
+  app.post("/v1/pon/phone/:id/confirm", auth, async (c) => {
+    const b = await body(c);
+    const r = await confirmPhoneCheck(db, c.get("userId"), { checkId: uuid(c, "id"), phone: b.phone, code: b.code }, needPhone());
+    return c.json({ ...r, status: await ponStatus(db, c.get("userId"), opts()) });
+  });
+  app.post("/v1/pon/crypto", auth, async (c) => {
+    if (!cfg.cryptoProofs || !cfg.ponPepper) throw new ApiError(503, "PON_CRYPTO_DISABLED", "crypto proofs aren't set up yet");
+    const b = await body(c);
+    await addCryptoProof(db, c.get("userId"), b.kind, b.proof, { verifier: cfg.cryptoProofs, pepper: cfg.ponPepper, now: now() });
+    return c.json({ verified: true, status: await ponStatus(db, c.get("userId"), opts()) }, 201);
+  });
+
   // --- Away life --------------------------------------------------------------
 
   app.get("/v1/away/recap", auth, async (c) => c.json(await awayRecap(db, c.get("userId"), opts())));
@@ -749,6 +780,10 @@ export function createApp(cfg: AppConfig) {
       if ((e.kind === "cozy_start" || e.kind === "cozy_end") && typeof e.userId === "string" && UUID.test(e.userId)) {
         if (e.kind === "cozy_start") await grantMood(db, e.userId, "cozy", { now: at, source: { place } });
         else await endCozy(db, e.userId, { now: at });
+        applied++;
+      }
+      if ((e.kind === "visit_start" || e.kind === "visit_end") && typeof e.userId === "string" && UUID.test(e.userId)) {
+        await recordVisit(db, { userId: e.userId, room: `${place}#${copy}`, event: e.kind === "visit_start" ? "start" : "end", at });
         applied++;
       }
       const line = e.line as { id?: unknown; userId?: unknown; text?: unknown } | undefined;

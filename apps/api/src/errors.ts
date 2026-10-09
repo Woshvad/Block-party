@@ -17,6 +17,7 @@ import {
   ChatError,
   type ChatErrorCode,
   RideError,
+  PonError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -146,7 +147,21 @@ const CHAT: Record<ChatErrorCode, number> = {
 
 const RIDE: Record<RideError["code"], number> = { INVALID_INPUT: 400, NO_RESIDENT: 404, ALREADY_THERE: 409, IDEMPOTENCY_KEY_REQUIRED: 400 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE };
+const PON_STATUS: Record<PonError["code"], number> = {
+  INVALID_PHONE: 400,
+  NOT_MOBILE: 400,
+  PHONE_TAKEN: 409,
+  ALREADY_VERIFIED: 409,
+  TOO_MANY_CODES: 429,
+  NO_SUCH_CHECK: 404,
+  CODE_EXPIRED: 410,
+  WRONG_CODE: 400,
+  PROOF_REJECTED: 400,
+  PROOF_TAKEN: 409,
+  INVALID_INPUT: 400,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -171,6 +186,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof PoliticsError) return out(POLITICS[e.code], e.code, e.message);
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
+  if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
   if (e instanceof ChatError) return { ...out(CHAT[e.code], e.code, e.message), body: { error: { code: e.code, message: e.message, ...(e.reason ? { field: e.reason } : {}) } } };
   // Postgres "data exception" errors are bad input that slipped past a
   // validator (a null byte, a malformed value, a number out of range): a 400,

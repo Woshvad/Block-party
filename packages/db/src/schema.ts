@@ -983,3 +983,54 @@ export const rides = pgTable(
     check("rides_order", sql`${t.arriveAt} >= ${t.departedAt}`),
   ],
 );
+
+// --- Proof of Neighbour -------------------------------------------------------
+
+// Live room visits, reported by the rooms Worker. Away residents are never
+// in a room, so they never appear here.
+export const roomVisits = pgTable(
+  "room_visits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    room: text("room").notNull(), // place#copy
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull(),
+    leftAt: timestamp("left_at", { withTimezone: true }),
+  },
+  (t) => [index("room_visits_room").on(t.room, t.joinedAt), index("room_visits_user").on(t.userId, t.joinedAt), check("room_visits_order", sql`${t.leftAt} IS NULL OR ${t.leftAt} >= ${t.joinedAt}`)],
+);
+
+export const proofKind = pgEnum("proof_kind", ["phone", "wallet_history", "coinbase", "world_id"]);
+
+// One verified identity per kind per account, and each phone, wallet or
+// World ID backs one account only. Subjects are stored as keyed hashes.
+export const verifiedIdentities = pgTable(
+  "verified_identities",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    kind: proofKind("kind").notNull(),
+    subjectHash: text("subject_hash").notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.kind] }), uniqueIndex("verified_identities_subject").on(t.kind, t.subjectHash)],
+);
+
+export const phoneChecks = pgTable(
+  "phone_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    phoneHash: text("phone_hash").notNull(),
+    providerRef: text("provider_ref").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    status: text("status").notNull().default("pending"), // pending | verified | failed
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("phone_checks_user").on(t.userId, t.createdAt), check("phone_checks_status", sql`${t.status} IN ('pending','verified','failed')`)],
+);

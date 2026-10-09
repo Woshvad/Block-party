@@ -309,6 +309,8 @@ export class RoomDO implements DurableObject {
       server.serializeAttachment(fromMember(e.snapshot(t.u)!, t.age));
       this.deliver(out.deliveries);
       this.refreshAway(e);
+      // Proof of Neighbour counts residents who shared a room in person.
+      out.effects.push({ kind: "visit_start", userId: t.u, at: Date.now() } as unknown as Effect);
       await this.dir().fetch("https://dir/joined", { method: "POST", body: JSON.stringify({ copy: this.copy, u: t.u, crew: t.crew }) });
       await this.afterEvent(e, out.effects);
       return new Response(null, { status: 101, webSocket: client });
@@ -386,6 +388,7 @@ export class RoomDO implements DurableObject {
     if (this.sockets(a.m.userId).some((s) => s !== ws && s.readyState === WebSocket.OPEN)) return;
     const out = e.leave(a.m.userId, Date.now());
     this.deliver(out.deliveries);
+    out.effects.push({ kind: "visit_end", userId: a.m.userId, at: Date.now() } as unknown as Effect);
     await this.dir().fetch("https://dir/left", { method: "POST", body: JSON.stringify({ copy: this.copy, u: a.m.userId, crew: a.m.crewId }) });
     await this.afterEvent(e, out.effects);
   }
