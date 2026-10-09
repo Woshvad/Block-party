@@ -89,6 +89,27 @@ export class RoomEngine {
     return null;
   }
 
+  // --- Hibernation: a sleeping room forgets its memory, so it rebuilds from
+  // the state saved on each live socket and in storage. No broadcasts.
+
+  restore(m: Member): void {
+    this.away.delete(m.userId);
+    this.members.set(m.userId, { ...m });
+  }
+
+  snapshot(userId: string): Member | undefined {
+    const m = this.members.get(userId);
+    return m ? { ...m, hidden: m.hidden } : undefined;
+  }
+
+  loadEvidence(lines: ChatLine[]): void {
+    this.evidence = lines.slice(-ROOM.evidenceKept);
+  }
+
+  evidenceAll(): ChatLine[] {
+    return [...this.evidence];
+  }
+
   // A block or mute made mid-session applies at once.
   updateHidden(userId: string, hidden: ReadonlySet<string>) {
     const m = this.members.get(userId);

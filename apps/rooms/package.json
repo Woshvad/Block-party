@@ -1,0 +1,20 @@
+{
+  "name": "@bp/rooms",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/worker.ts",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@bp/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261009.1",
+    "esbuild": "^0.28.2",
+    "miniflare": "4.20260730.0"
+  }
+}

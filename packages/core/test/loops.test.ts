@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 // Every loop that isn't a plain walk over an array must say what bounds it,
 // in a "loop-bound:" comment just above. New unbounded loops fail the build
 // until someone reasons about them.
-const ROOTS = ["../core/src", "../db/src"].map((r) => join(__dirname, "..", r));
+const ROOTS = ["../core/src", "../db/src", "../../apps/api/src", "../../apps/rooms/src"].map((r) => join(__dirname, "..", r));
 const LOOP = /\bwhile\s*\(|\bdo\s*\{|\bfor\s*\(\s*;\s*;|\bfor\s*\([^;)]*;\s*;/;
 
 const files = ROOTS.flatMap((root) => readdirSync(root).filter((f) => f.endsWith(".ts")).map((f) => join(root, f)));
