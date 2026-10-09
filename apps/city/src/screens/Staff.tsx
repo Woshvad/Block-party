@@ -1,0 +1,254 @@
+"use client";
+import { useState } from "react";
+import type { Api } from "../api";
+import { label } from "../palette";
+import { Loading, Page, useAction } from "../ui";
+import { useLoad } from "../useLoad";
+import { handleOf, useWho } from "../who";
+
+// The staff console. The role is granted in the database only, and the API
+// checks it on every call; for anyone else each panel just says "staff only".
+
+type Any = Record<string, unknown>;
+const RESTRICTIONS = ["chat_mute", "suspended"] as const;
+
+export default function Staff({ api, onBack }: { api: Api; onBack: () => void }) {
+  const [tab, setTab] = useState<"reports" | "appeals" | "markets" | "alts" | "controls">("reports");
+  const act = useAction();
+  return (
+    <Page title="Staff" onBack={onBack}>
+      {act.toast}
+      <div className="chips">
+        {(["reports", "appeals", "markets", "alts", "controls"] as const).map((t) => (
+          <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
+            {label(t)}
+          </button>
+        ))}
+      </div>
+      {tab === "reports" && <Reports api={api} act={act} />}
+      {tab === "appeals" && <Appeals api={api} act={act} />}
+      {tab === "markets" && <Markets api={api} act={act} />}
+      {tab === "alts" && <Alts api={api} />}
+      {tab === "controls" && <Controls api={api} act={act} />}
+    </Page>
+  );
+}
+
+type Act = ReturnType<typeof useAction>;
+
+function Reports({ api, act }: { api: Api; act: Act }) {
+  const reports = useLoad(() => api.staffReports(), [api]);
+  const sla = useLoad(() => api.sla(new Date(Date.now() - 7 * 86_400_000).toISOString(), new Date().toISOString()).catch(() => null), [api]);
+  const [note, setNote] = useState<Record<string, string>>({});
+  const [kind, setKind] = useState<Record<string, string>>({});
+  useWho(api, (reports.data ?? []).flatMap((r) => [String(r.targetUserId ?? ""), String(r.reporterId ?? "")]).filter(Boolean));
+  if (!reports.data) return <Loading error={reports.error} retry={reports.reload} />;
+  return (
+    <>
+      {sla.data && <p className="muted">Last 7 days: {Object.entries(sla.data).map(([k, v]) => `${label(k)} ${typeof v === "number" ? v : JSON.stringify(v)}`).join(" · ")}</p>}
+      {reports.data.length === 0 && <p className="muted">No open reports.</p>}
+      {reports.data.map((r) => {
+        const id = String(r.id);
+        const target = String(r.targetUserId ?? "");
+        return (
+          <section className="card" key={id}>
+            <p>
+              <b>{label(String(r.reason))}</b> against {handleOf(target)} · due {r.dueAt ? new Date(String(r.dueAt)).toLocaleString() : "?"}
+            </p>
+            {r.note ? <p className="muted">"{String(r.note)}"</p> : null}
+            {Array.isArray(r.evidence) && (r.evidence as Any[]).length > 0 && (
+              <div className="notice">
+                {(r.evidence as Any[]).slice(-6).map((e, i) => (
+                  <p key={i}>
+                    <small>{handleOf(String(e.authorId))}:</small> {String(e.text)}
+                  </p>
+                ))}
+              </div>
+            )}
+            <label className="field">
+              Note (required)
+              <input value={note[id] ?? ""} onChange={(e) => setNote({ ...note, [id]: e.target.value })} />
+            </label>
+            <div className="chips">
+              {RESTRICTIONS.map((k) => (
+                <button key={k} className={kind[id] === k ? "on" : ""} onClick={() => setKind({ ...kind, [id]: k })}>
+                  {label(k)}
+                </button>
+              ))}
+            </div>
+            <div className="btnrow">
+              <button className="btn light" disabled={!note[id]?.trim()} onClick={() => act.run(() => api.resolveReport(id, { action: "dismiss", note: note[id]! }), "Dismissed").then(() => reports.reload())}>
+                Dismiss
+              </button>
+              <button
+                className="btn danger"
+                disabled={!note[id]?.trim() || !kind[id]}
+                onClick={() => act.run(() => api.resolveReport(id, { action: "restrict", note: note[id]!, restriction: { kind: kind[id]!, hours: 24, reason: note[id]! } }), "Restricted for 24 h").then(() => reports.reload())}
+              >
+                Restrict 24 h
+              </button>
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function Appeals({ api, act }: { api: Api; act: Act }) {
+  const appeals = useLoad(() => api.staffAppeals(), [api]);
+  const [note, setNote] = useState<Record<string, string>>({});
+  if (!appeals.data) return <Loading error={appeals.error} retry={appeals.reload} />;
+  return (
+    <>
+      {appeals.data.length === 0 && <p className="muted">No open appeals.</p>}
+      {appeals.data.map((a) => {
+        const id = String(a.id);
+        return (
+          <section className="card" key={id}>
+            <p>"{String(a.text ?? "")}"</p>
+            <label className="field">
+              Note
+              <input value={note[id] ?? ""} onChange={(e) => setNote({ ...note, [id]: e.target.value })} />
+            </label>
+            <div className="btnrow">
+              <button className="btn" disabled={!note[id]?.trim()} onClick={() => act.run(() => api.decideAppeal(id, true, note[id]!), "Overturned").then(() => appeals.reload())}>
+                Overturn
+              </button>
+              <button className="btn light" disabled={!note[id]?.trim()} onClick={() => act.run(() => api.decideAppeal(id, false, note[id]!), "Upheld").then(() => appeals.reload())}>
+                Uphold
+              </button>
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function Markets({ api, act }: { api: Api; act: Act }) {
+  const open = useLoad(() => api.cityMarkets(), [api]);
+  // Markets lock 2 hours before their bell (00:00 UTC): past 22:00 UTC, default to tomorrow's.
+  const firstOpenDay = () => new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+  const [f, setF] = useState({ question: "", kind: "manual" as "manual" | "headcount", bellDay: firstOpenDay(), place: "roof", threshold: "20" });
+  return (
+    <>
+      <section className="card">
+        <h2>New City market</h2>
+        <label className="field">
+          Question
+          <input value={f.question} maxLength={200} onChange={(e) => setF({ ...f, question: e.target.value })} placeholder="20+ on the Roof at the bell?" />
+        </label>
+        <div className="chips">
+          {(["manual", "headcount"] as const).map((k) => (
+            <button key={k} className={f.kind === k ? "on" : ""} onClick={() => setF({ ...f, kind: k })}>
+              {label(k)}
+            </button>
+          ))}
+        </div>
+        <label className="field">
+          Bell day
+          <input type="date" value={f.bellDay} min={firstOpenDay()} onChange={(e) => setF({ ...f, bellDay: e.target.value })} />
+        </label>
+        {f.kind === "headcount" && (
+          <div className="row">
+            <input className="ask" value={f.place} onChange={(e) => setF({ ...f, place: e.target.value })} placeholder="place" />
+            <input className="ask" inputMode="numeric" value={f.threshold} onChange={(e) => setF({ ...f, threshold: e.target.value.replace(/[^0-9]/g, "") })} />
+          </div>
+        )}
+        <button
+          className="btn"
+          disabled={f.question.trim().length < 5}
+          onClick={() =>
+            act
+              .run(() => api.createCityMarket({ question: f.question.trim(), kind: f.kind, bellDay: f.bellDay, ...(f.kind === "headcount" ? { place: f.place, threshold: Number(f.threshold) } : {}) }), "Market open")
+              .then(() => open.reload())
+          }
+        >
+          Open market
+        </button>
+      </section>
+      <section className="card">
+        <h2>Resolve</h2>
+        {(open.data ?? []).map((m) => (
+          <div className="listrow" key={m.id}>
+            <span>{m.question}</span>
+            <span className="btnrow">
+              {(["yes", "no", "void"] as const).map((r) => (
+                <button key={r} onClick={() => confirm(`Resolve "${m.question}" as ${r.toUpperCase()}?`) && act.run(() => api.resolveCityMarket(m.id, r), `Resolved ${r}`).then(() => open.reload())}>
+                  {r.toUpperCase()}
+                </button>
+              ))}
+            </span>
+          </div>
+        ))}
+        {open.data?.length === 0 && <p className="muted">Nothing open.</p>}
+      </section>
+    </>
+  );
+}
+
+function Alts({ api }: { api: Api }) {
+  const flags = useLoad(() => api.altFlags(), [api]);
+  useWho(api, (flags.data ?? []).flatMap((f) => [String(f.a ?? ""), String(f.b ?? "")]).filter(Boolean));
+  if (!flags.data) return <Loading error={flags.error} retry={flags.reload} />;
+  return (
+    <section className="card">
+      {flags.data.length === 0 && <p className="muted">No flagged pairs.</p>}
+      {flags.data.map((f, i) => (
+        <p key={i}>
+          {handleOf(String(f.a))} ↔ {handleOf(String(f.b))} <small className="muted">{Object.entries(f).filter(([k]) => !["a", "b"].includes(k)).map(([k, v]) => `${label(k)}: ${String(v)}`).join(" · ")}</small>
+        </p>
+      ))}
+    </section>
+  );
+}
+
+function Controls({ api, act }: { api: Api; act: Act }) {
+  const [country, setCountry] = useState("");
+  const [ratio, setRatio] = useState("");
+  const [r, setR] = useState({ userId: "", kind: "chat_mute", hours: "24", reason: "" });
+  return (
+    <>
+      <section className="card">
+        <h2>Real trades by country</h2>
+        <div className="row">
+          <input className="ask" maxLength={2} value={country} onChange={(e) => setCountry(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))} placeholder="NG" />
+          <button className="btn" disabled={country.length !== 2} onClick={() => act.run(() => api.countrySwitch(country, true), `${country}: real trades on`)}>
+            On
+          </button>
+          <button className="btn light" disabled={country.length !== 2} onClick={() => act.run(() => api.countrySwitch(country, false), `${country}: real trades off`)}>
+            Off
+          </button>
+        </div>
+      </section>
+      <section className="card">
+        <h2>Restrict a resident</h2>
+        <input className="ask" value={r.userId} onChange={(e) => setR({ ...r, userId: e.target.value.trim() })} placeholder="user id" />
+        <div className="chips">
+          {RESTRICTIONS.map((k) => (
+            <button key={k} className={r.kind === k ? "on" : ""} onClick={() => setR({ ...r, kind: k })}>
+              {label(k)}
+            </button>
+          ))}
+        </div>
+        <div className="row">
+          <input className="ask" inputMode="numeric" value={r.hours} onChange={(e) => setR({ ...r, hours: e.target.value.replace(/[^0-9]/g, "") })} placeholder="hours" />
+          <input className="ask" value={r.reason} onChange={(e) => setR({ ...r, reason: e.target.value })} placeholder="reason" />
+        </div>
+        <button className="btn danger" disabled={!r.userId || !r.reason.trim()} onClick={() => act.run(() => api.restrict({ userId: r.userId, kind: r.kind, hours: Number(r.hours) || undefined, reason: r.reason.trim() }), "Restricted")}>
+          Restrict
+        </button>
+      </section>
+      <section className="card">
+        <h2>Hide a Ratio entry</h2>
+        <div className="row">
+          <input className="ask" value={ratio} onChange={(e) => setRatio(e.target.value.trim())} placeholder="entry id" />
+          <button className="btn" disabled={!ratio} onClick={() => act.run(() => api.hideRatio(ratio), "Hidden")}>
+            Hide
+          </button>
+        </div>
+      </section>
+    </>
+  );
+}

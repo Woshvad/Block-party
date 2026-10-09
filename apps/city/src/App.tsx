@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { type Screen, boot, screenFor } from "./boot";
 import type { PageId } from "./screens/More";
-import { initTelegram, launchData } from "./telegram";
+import { initTelegram, launchData, telegram } from "./telegram";
 
 const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
 const MoveIn = dynamic(() => import("./MoveIn"), { ssr: false });
@@ -21,6 +21,8 @@ const FaucetFren = dynamic(() => import("./screens/FaucetFren"), { ssr: false })
 const Social = dynamic(() => import("./screens/Social"), { ssr: false });
 const Crew = dynamic(() => import("./screens/Crew"), { ssr: false });
 const Games = dynamic(() => import("./screens/Games"), { ssr: false });
+const RealMoney = dynamic(() => import("./screens/RealMoney"), { ssr: false });
+const Staff = dynamic(() => import("./screens/Staff"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -33,7 +35,7 @@ async function devLaunchData(id: string): Promise<string | null> {
 }
 
 export default function App() {
-  const api = useMemo(() => createApi({ base: apiBase(), store: browserTokenStore() }), []);
+  const api = useMemo(() => createApi({ base: apiBase(), store: browserTokenStore(), ...(telegram() ? { client: "telegram-mini-app" } : {}) }), []);
   const [screen, setScreen] = useState<Screen | null>(null);
   const [ageAccepted, setAgeAccepted] = useState(false);
   const [initData, setInitData] = useState<string | null | undefined>(undefined);
@@ -176,6 +178,10 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       <FaucetFren api={api} onBack={back} />
     ) : page === "social" ? (
       <Social api={api} me={me} onBack={back} />
+    ) : page === "real" ? (
+      <RealMoney api={api} onBack={back} />
+    ) : page === "staff" ? (
+      <Staff api={api} onBack={back} />
     ) : page === "games" ? (
       <Games api={api} me={me} onBack={back} onChanged={refreshGm} />
     ) : page === "crew" ? (

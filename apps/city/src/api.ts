@@ -50,7 +50,7 @@ type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export type Api = ReturnType<typeof createApi>;
 
-export function createApi(opts: { base: string; store: TokenStore; fetch?: typeof fetch }) {
+export function createApi(opts: { base: string; store: TokenStore; fetch?: typeof fetch; client?: string }) {
   const doFetch = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const base = opts.base.replace(/\/+$/, "");
 
@@ -60,6 +60,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     if (token) headers.authorization = `Bearer ${token}`;
     if (body !== undefined) headers["content-type"] = "application/json";
     if (extra.idempotencyKey) headers["idempotency-key"] = extra.idempotencyKey;
+    // Inside Telegram the API must know it: real trades never happen in the Mini App.
+    if (opts.client) headers["x-client"] = opts.client;
     let res: Response;
     try {
       res = await doFetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -242,6 +244,31 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     answerShift: (id: string, answers: boolean[]) => request<{ score: number; pay: number }>("POST", `/v1/shifts/${encodeURIComponent(id)}/answers`, { answers }),
     collectShift: (id: string) => request<{ pay: number; replayed: boolean }>("POST", `/v1/shifts/${encodeURIComponent(id)}/collect`),
     awayShift: () => request<Record<string, unknown>>("POST", "/v1/shifts/away"),
+
+    // --- Real money (off until the legal opinion; never in the Mini App)
+    realGate: (b: { marketId?: string; amountCents?: number; deviceLocationOk?: boolean; deviceCountry?: string } = {}) => request<{ ok: true } | { ok: false; reason: string }>("POST", "/v1/real/gate", b),
+    realSetup: (b: { birthYear: number; notRestricted: boolean; noVpn: boolean; weeklyCents: number; monthlyCents: number; lossCents: number }) => request<Record<string, unknown>>("POST", "/v1/real/setup", b),
+    realLimit: (kind: "weekly" | "monthly" | "loss", cents: number) => request<{ applied: boolean; raiseId?: string; confirmableAt?: string }>("PATCH", "/v1/real/limits", { kind, cents }),
+    confirmRaise: (id: string) => request<Record<string, unknown>>("POST", `/v1/real/limits/${encodeURIComponent(id)}/confirm`),
+    realBreak: (kind: "timeout" | "exclusion", length: string | number) => request<Record<string, unknown>>("POST", "/v1/real/break", { kind, length }),
+    askBack: () => request<Record<string, unknown>>("POST", "/v1/real/ask-back"),
+    realFees: (amountCents: number, polymarketFeeCents = 0) => request<{ amountCents: number; polymarketFeeCents: number; builderFeeCents: number; totalCents: number }>("GET", `/v1/real/fees?amountCents=${amountCents}&polymarketFeeCents=${polymarketFeeCents}`),
+    realActivity: (month?: string) => request<{ month: string; intoTradesCents: number; winsCents: number; lossesCents: number; feesCents: number; minutesPlayed: number; trades: Record<string, unknown>[] }>("GET", `/v1/real/activity${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+    realityCheck: () => request<{ due: boolean; minutesPlayed: number; todayResultCents: number }>("GET", "/v1/real/reality-check"),
+    ackReality: () => request<Record<string, unknown>>("POST", "/v1/real/reality-check/ack"),
+
+    // --- Staff (the API checks the role on every call)
+    staffReports: () => request<Record<string, unknown>[]>("GET", "/v1/staff/reports"),
+    resolveReport: (id: string, b: { action: "dismiss" | "restrict"; note: string; restriction?: { kind: string; hours?: number; reason: string } }) => request<Record<string, unknown>>("POST", `/v1/staff/reports/${encodeURIComponent(id)}/resolve`, b),
+    restrict: (b: { userId: string; kind: string; hours?: number; reason: string }) => request<Record<string, unknown>>("POST", "/v1/staff/restrictions", b),
+    staffAppeals: () => request<Record<string, unknown>[]>("GET", "/v1/staff/appeals"),
+    decideAppeal: (id: string, overturn: boolean, note: string) => request<Record<string, unknown>>("POST", `/v1/staff/appeals/${encodeURIComponent(id)}/decide`, { overturn, note }),
+    sla: (from: string, to: string) => request<Record<string, unknown>>("GET", `/v1/staff/sla?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    createCityMarket: (b: { question: string; kind: "headcount" | "manual"; bellDay: string; place?: string; threshold?: number }) => request<Record<string, unknown>>("POST", "/v1/staff/city-markets", b),
+    resolveCityMarket: (id: string, result: "yes" | "no" | "void") => request<Record<string, unknown>>("POST", `/v1/staff/city-markets/${encodeURIComponent(id)}/resolve`, { result }),
+    hideRatio: (id: string) => request<{ hidden: boolean }>("POST", `/v1/staff/ratio/${encodeURIComponent(id)}/hide`),
+    altFlags: () => request<Record<string, unknown>[]>("GET", "/v1/staff/alt-flags"),
+    countrySwitch: (code: string, on: boolean) => request<Record<string, unknown>>("PUT", `/v1/staff/countries/${encodeURIComponent(code)}`, { on }),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
 }

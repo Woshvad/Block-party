@@ -57,6 +57,14 @@ describe("api client", () => {
     expect(await junk.me().catch((e) => [e.code, e.message])).toEqual(["HTTP_500", "something went wrong"]);
   });
 
+  it("says it's the Mini App on every request when told to, and not otherwise", async () => {
+    const s = server(() => json(200, {}));
+    await createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: s.f, client: "telegram-mini-app" }).me();
+    await createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: s.f }).me();
+    expect((s.seen[0]!.init.headers as Record<string, string>)["x-client"]).toBe("telegram-mini-app");
+    expect((s.seen[1]!.init.headers as Record<string, string>)["x-client"]).toBeUndefined();
+  });
+
   it("escapes handles in the path", async () => {
     const s = server(() => json(200, { available: true }));
     const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: s.f });
