@@ -50,6 +50,7 @@ export function makeApp(over: Partial<AppConfig> = {}) {
     roomsUrl: "https://rooms.test",
     ticketSecret: TICKET_SECRET,
     notifier: fakeNotifier,
+    receiptSecret: "p".repeat(40),
     ...over,
   });
 }

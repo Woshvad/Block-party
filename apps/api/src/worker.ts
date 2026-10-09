@@ -18,6 +18,7 @@ type Env = {
   TICKET_SECRET?: string;
   // "mock" for staging; the Polymarket feed plugs in here.
   ODDS_SOURCE?: string;
+  RECEIPT_SECRET?: string;
 };
 
 const oddsFor = (env: Env) => (env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
@@ -42,6 +43,7 @@ export default {
       ...(privyVerify ? { privyVerify } : {}),
       notifier: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }),
       ...(oddsFor(env) ? { odds: oddsFor(env) } : {}),
+      ...(env.RECEIPT_SECRET ? { receiptSecret: env.RECEIPT_SECRET } : {}),
     });
     const res = await app.fetch(req);
     ctx.waitUntil(close());

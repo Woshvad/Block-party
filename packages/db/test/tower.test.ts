@@ -16,6 +16,9 @@ import {
   createCrew,
   createInvite,
   redeemInvite,
+  receipt,
+  rightList,
+  settleCalls,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -348,5 +351,146 @@ describe("database guards (bypassing app code)", () => {
     await client`UPDATE markets SET status = 'resolved', outcome = true WHERE id = ${id}`;
     await expect(client`UPDATE markets SET outcome = false WHERE id = ${id}`).rejects.toThrow(/final/);
     await expect(client`DELETE FROM markets WHERE id = ${id}`).rejects.toThrow();
+  });
+});
+
+describe("settling, receipts and the Right List", () => {
+  const fren = async (x: string, y: string) => {
+    const [p, q] = x < y ? [x, y] : [y, x];
+    await client`INSERT INTO frens (a, b) VALUES (${p}, ${q})`;
+  };
+
+  it("scores every locked call once: Aura exact, a Tail scores 0, a voided market scores nobody", async () => {
+    const t = fresh();
+    const f = feed();
+    const m = f.add(t);
+    const v = f.add(t);
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const [id, vid] = [await idOf(m.externalId), await idOf(v.externalId)];
+    const [a, b, c] = [await makeResident(db), await makeResident(db), await makeResident(db)];
+    await fren(a, c);
+    const ca = await makeCall(db, a, { marketId: id, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + 1000) });
+    const cb = await makeCall(db, b, { marketId: id, side: "no", chance: 30, seenPrice: 50 }, { now: new Date(t + 1000) });
+    const cv = await makeCall(db, b, { marketId: vid, side: "no", chance: 30, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await pollOdds(db, f.provider, { now: new Date(t + MIN) });
+    const cc = await makeCall(db, c, { marketId: id, via: "tail", viaUserId: a, chance: 90, seenPrice: 50 }, { now: new Date(t + 2 * MIN) });
+    await pollOdds(db, f.provider, { now: new Date(t + 3 * MIN) });
+    m.resolved = true;
+    v.voided = true;
+    const r = await pollOdds(db, f.provider, { now: new Date(t + 12 * H) });
+    expect(r).toMatchObject({ settled: 3 });
+    expect((await callRow(ca.id)).aura_centi).toBe(1600);
+    expect((await callRow(cb.id)).aura_centi).toBe(-2400);
+    expect((await callRow(cc.id)).aura_centi).toBe(0);
+    expect((await callRow(cv.id)).aura_centi).toBeNull();
+    expect((await settleCalls(db, { now: new Date(t + 13 * H) })).settled).toBe(0);
+    // The Tail's receipt never shows Aura.
+    expect((await receipt(db, cc.id, { now: new Date(t + 2 * D) }))!.aura).toBeNull();
+    expect((await receipt(db, ca.id, { now: new Date(t + 2 * D) }))!.aura).toBe(16);
+  });
+
+  it("a call in the last 30 minutes settles at half", async () => {
+    const t = fresh();
+    const f = feed();
+    const m = f.add(t);
+    await pollOdds(db, f.provider, { now: new Date(t + 10 * H - 25 * MIN) });
+    const id = await idOf(m.externalId);
+    const u = await makeResident(db);
+    const c = await makeCall(db, u, { marketId: id, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + 10 * H - 24 * MIN) });
+    await pollOdds(db, f.provider, { now: new Date(t + 10 * H - 23 * MIN) });
+    m.resolved = true;
+    await pollOdds(db, f.provider, { now: new Date(t + 12 * H) });
+    expect((await callRow(c.id)).aura_centi).toBe(800);
+  });
+
+  it("racing settlers score each call exactly once", async () => {
+    const t = fresh();
+    const f = feed();
+    const m = f.add(t);
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const id = await idOf(m.externalId);
+    const us = await Promise.all(Array.from({ length: 8 }, () => makeResident(db)));
+    for (const u of us) await makeCall(db, u, { marketId: id, side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await pollOdds(db, f.provider, { now: new Date(t + MIN) });
+    await client`UPDATE markets SET status = 'resolved', outcome = false, resolved_at = ${new Date(t + 12 * H).toISOString()} WHERE id = ${id}`;
+    const res = await Promise.all(Array.from({ length: 4 }, () => settleCalls(db)));
+    expect(res.reduce((a, r) => a + r.settled, 0)).toBe(8);
+  });
+
+  it("your streak grows with your first locked call of the day", async () => {
+    const t = fresh();
+    const f = feed();
+    const ms = [f.add(t), f.add(t)];
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const u = await makeResident(db);
+    for (const m of ms) await makeCall(db, u, { marketId: await idOf(m.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await pollOdds(db, f.provider, { now: new Date(t + MIN) });
+    const [s] = await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`;
+    expect(s).toMatchObject({ current: 1, last_day: new Date(t).toISOString().slice(0, 10) });
+  });
+
+  it("a receipt is sealed until the bell, then stamped; a Tail's shows no Aura; only locked calls have one", async () => {
+    const t = fresh();
+    const f = feed();
+    const m = f.add(t);
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const id = await idOf(m.externalId);
+    const [a, b] = [await makeResident(db), await makeResident(db)];
+    const ca = await makeCall(db, a, { marketId: id, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + 1000) });
+    const cb = await makeCall(db, b, { marketId: id, side: "no", chance: 30, seenPrice: 50 }, { now: new Date(t + 1000) });
+    expect(await receipt(db, ca.id, { now: new Date(t + 2000) })).toBeNull(); // still pending
+    await pollOdds(db, f.provider, { now: new Date(t + MIN) });
+    m.resolved = true;
+    const settledAt = new Date(t + 12 * H); // 21:00 UTC
+    await pollOdds(db, f.provider, { now: settledAt });
+    const sealed = await receipt(db, ca.id, { now: new Date(settledAt.getTime() + H) });
+    expect(sealed).toMatchObject({ stamp: "IN THE MEMPOOL", aura: null, side: "yes", chance: 70, world: 50, city: null });
+    expect(sealed!.bellAt.toISOString()).toBe(new Date(t + D - 9 * H).toISOString()); // the next 00:00 UTC
+    const after = new Date(t + D);
+    expect(await receipt(db, ca.id, { now: after })).toMatchObject({ stamp: "CALLED IT", aura: 16 });
+    expect(await receipt(db, cb.id, { now: after })).toMatchObject({ stamp: "REKT", aura: -24 });
+    const json = JSON.stringify(await receipt(db, ca.id, { now: after }));
+    expect(json).not.toMatch(/wallet|usdc|amount|real/i);
+  });
+
+  it("the Right List: 10 settled to appear, steady beats a hot streak, revealed results only, rusty after 14 days", async () => {
+    const t = fresh();
+    const f = feed();
+    const ms = Array.from({ length: 13 }, () => f.add(t, { freezesAt: new Date(t + 2 * H), settlesBy: new Date(t + 3 * H) }));
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const ids = await Promise.all(ms.map((m) => idOf(m.externalId)));
+    const [steady, few, meh] = [await makeResident(db), await makeResident(db), await makeResident(db)];
+    const topUp = (u: string) => client`INSERT INTO tickets (user_id, balance, as_of) VALUES (${u}, 9, ${new Date(t).toISOString().slice(0, 10)}) ON CONFLICT (user_id) DO UPDATE SET balance = 9`;
+    // steady: 12 calls at YES 60 (all YES); few: 3 calls at YES 99
+    await client`UPDATE tickets SET balance = 9 WHERE user_id = ${steady}`;
+    for (const [i, id] of ids.entries()) {
+      if (i % 3 === 0) {
+        await topUp(steady);
+        await topUp(meh);
+      }
+      if (i < 12) await makeCall(db, steady, { marketId: id, side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+      if (i >= 2) await makeCall(db, meh, { marketId: id, side: "yes", chance: 52, seenPrice: 50 }, { now: new Date(t + 1000) });
+      if (i < 3) await makeCall(db, few, { marketId: id, side: "yes", chance: 99, seenPrice: 50 }, { now: new Date(t + 1000) });
+    }
+    await pollOdds(db, f.provider, { now: new Date(t + MIN) });
+    // steady tails meh on the 13th market: a Tail never counts on the Right List.
+    const [p, q] = steady < meh ? [steady, meh] : [meh, steady];
+    await client`INSERT INTO frens (a, b) VALUES (${p}, ${q})`;
+    await topUp(steady);
+    await makeCall(db, steady, { marketId: ids[12], via: "tail", viaUserId: meh, chance: 60, seenPrice: 50 }, { now: new Date(t + 2 * MIN) });
+    await pollOdds(db, f.provider, { now: new Date(t + 3 * MIN) });
+    for (const m of ms) m.resolved = true;
+    await pollOdds(db, f.provider, { now: new Date(t + 4 * H) });
+    expect((await rightList(db, { now: new Date(t + 5 * H), userId: steady })).me).toBeNull(); // not revealed before the bell
+    const after = await rightList(db, { now: new Date(t + D), userId: steady });
+    expect(after.me).toMatchObject({ settled: 12, rusty: false });
+    expect(after.me!.perCall).toBeCloseTo((12 * 900) / 27 / 100, 6); // +9 a call over 12+15
+    expect(after.rows.some((r) => r.userId === few)).toBe(false); // 3 settled isn't enough
+    expect(after.rows.find((r) => r.userId === steady)!.handle).toBeTruthy();
+    const order = after.rows.filter((r) => r.userId === steady || r.userId === meh).map((r) => r.userId);
+    expect(order).toEqual([steady, meh]); // +9 a call beats +1.96
+    expect(after.rows.find((r) => r.userId === meh)!.rank).toBeGreaterThan(after.me!.rank);
+    const later = await rightList(db, { now: new Date(t + 20 * D), season: after.season, userId: steady });
+    expect(later.me).toMatchObject({ settled: 12, rusty: true }); // still listed, marked rusty
   });
 });

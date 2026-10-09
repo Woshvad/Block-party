@@ -711,3 +711,36 @@ describe("the Tower over HTTP", () => {
     expect((await call("POST", "/internal/tower/poll", { headers: { "x-internal-secret": SECRET } })).status).toBe(503);
   });
 });
+
+describe("receipts and the Right List over HTTP", () => {
+  it("a locked call gets a public receipt link; it's sealed until the bell; forged links are 404s", async () => {
+    const { client } = await import("./harness");
+    const t0 = Date.now();
+    const spec = { externalId: `rcpt-${crypto.randomUUID()}`, question: "Will the receipt print?", category: "crypto" as const, openAt: new Date(t0 - 3_600_000), freezesAt: new Date(t0 + 3_600_000), settlesBy: new Date(t0 + 2 * 3_600_000), start: 50, outcome: true };
+    // A fixed price, so the call always locks.
+    const tower = makeApp({
+      odds: {
+        source: "fixed",
+        fetch: async () => [{ externalId: spec.externalId, question: spec.question, category: spec.category, ladder: null, freezesAt: spec.freezesAt, settlesBy: spec.settlesBy, price: 50, resolved: null, voided: false }],
+      },
+    });
+    const internal = { "x-internal-secret": SECRET };
+    await call("POST", "/internal/tower/poll", { headers: internal, via: tower });
+    const [m] = await client`SELECT id, price FROM markets WHERE external_id = ${spec.externalId}`;
+    const me = await resident();
+    const made = await call("POST", "/v1/tower/calls", { token: me.token, via: tower, body: { marketId: m!.id, side: "yes", chance: Math.min(99, m!.price + 10), seenPrice: m!.price } });
+    await new Promise((r) => setTimeout(r, 5));
+    await call("POST", "/internal/tower/poll", { headers: internal, via: tower });
+    const mine = (await call("GET", `/v1/tower/calls/${made.body.id}`, { token: me.token, via: tower })).body;
+    expect(mine.status).toBe("locked");
+    expect(mine.receiptLink).toMatch(/^\/v1\/receipts\//);
+    const pub = await call("GET", mine.receiptLink, { via: tower }); // no session needed
+    expect(pub.status).toBe(200);
+    expect(pub.body).toMatchObject({ stamp: "IN THE MEMPOOL", aura: null, handle: me.handle, side: "yes" });
+    expect(JSON.stringify(pub.body)).not.toContain(me.userId);
+    const forged = mine.receiptLink.replace(/.$/, (ch: string) => (ch === "A" ? "B" : "A"));
+    expect((await call("GET", forged, { via: tower })).status).toBe(404);
+    expect((await call("GET", "/v1/receipts/nope", { via: tower })).status).toBe(404);
+    expect((await call("GET", "/v1/tower/right-list", { token: me.token, via: tower })).body).toMatchObject({ season: expect.any(Number), rows: expect.any(Array) });
+  });
+});

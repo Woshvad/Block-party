@@ -2,8 +2,17 @@ import {
   type FeedMarket,
   type OddsProvider,
   type Side,
+  RIGHT_LIST,
+  SEASON_EPOCH,
+  SEASON_LENGTH_DAYS,
   TOWER,
+  addDays,
+  auraCenti,
   chanceOnSide,
+  revealAt,
+  rightListScore,
+  rightListSpread,
+  seasonOf,
   cityDay,
   daysBetween,
   median,
@@ -14,6 +23,7 @@ import {
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { areFrens } from "./chat";
+import { recordStreakDay } from "./daily";
 import { moodState } from "./moods";
 import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
@@ -101,7 +111,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     await db.insert(feedPolls).values({ source: provider.source, ok: false, error: String((e as Error)?.message ?? e).slice(0, 500), at: now });
     return { ok: false as const, skipped: false };
   }
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [got] = await tx.execute<{ ok: boolean }>(sql`SELECT pg_try_advisory_xact_lock(${POLL_LOCK}) AS ok`);
     if (!got?.ok) return { ok: true as const, skipped: true };
     let ticked = 0;
@@ -172,6 +182,8 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
         if (Math.abs(tick!.price - c.seenPrice) <= TOWER.maxSlip) {
           const half = !c.onSlate && market.freezesAt.getTime() - now.getTime() < TOWER.halfAuraLastMinutes * 60_000;
           await tx.update(calls).set({ status: "locked", tickId: tick!.id, lockedPrice: tick!.price, lockedAt: now, half }).where(eq(calls.id, c.id));
+          // Your streak grows with your first call of the day.
+          await recordStreakDay(tx, c.userId, { now });
           locked++;
         } else {
           await tx.update(calls).set({ status: "price_moved" }).where(eq(calls.id, c.id));
@@ -200,6 +212,136 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     await tx.insert(feedPolls).values({ source: provider.source, ok: true, markets: feed.length, at: now, ...(bad ? { error: `${bad} malformed market(s) skipped` } : {}) });
     return { ok: true as const, skipped: false, ticked, locked, moved, expired: stale.length, bad };
   });
+  if (result.skipped) return result;
+  return { ...result, settled: (await settleCalls(db, { now })).settled };
+}
+
+// --- Settling -------------------------------------------------------------------------
+
+// Scores every locked call on a resolved market, once (the database refuses a
+// second score). A Tail scores nothing; a voided market scores nobody.
+export async function settleCalls(db: Db, opts: { now?: Date; batch?: number } = {}) {
+  const due = await db
+    .select({ id: calls.id })
+    .from(calls)
+    .innerJoin(markets, eq(markets.id, calls.marketId))
+    .where(and(eq(calls.status, "locked"), isNull(calls.auraCenti), eq(markets.status, "resolved")))
+    .limit(opts.batch ?? 5000);
+  let settled = 0;
+  for (const { id } of due) {
+    const done = await db.transaction(async (tx) => {
+      const [c] = await tx
+        .select({ id: calls.id, chance: calls.chance, lockedPrice: calls.lockedPrice, half: calls.half, via: calls.via, outcome: markets.outcome })
+        .from(calls)
+        .innerJoin(markets, eq(markets.id, calls.marketId))
+        .where(and(eq(calls.id, id), isNull(calls.auraCenti)))
+        .for("no key update", { of: calls, skipLocked: true });
+      if (!c || c.outcome === null) return false;
+      const aura = c.via === "tail" ? 0 : auraCenti(c.outcome, c.lockedPrice!, c.chance, c.half);
+      await tx.update(calls).set({ auraCenti: aura }).where(eq(calls.id, c.id));
+      return true;
+    });
+    if (done) settled++;
+  }
+  return { settled };
+}
+
+// --- Receipts -----------------------------------------------------------------------------
+
+// What a receipt shows: who, what, which side, how sure, the World and City at
+// the time, and, after the bell, the stamp and the Aura. Never an amount,
+// never a wallet, never whether it was backed for real.
+export async function receipt(db: Db, callId: string, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const [r] = await db
+    .select({
+      id: calls.id,
+      handle: residents.handle,
+      question: markets.question,
+      marketId: markets.id,
+      side: calls.side,
+      chance: calls.chance,
+      world: calls.lockedPrice,
+      lockedAt: calls.lockedAt,
+      settlesBy: markets.settlesBy,
+      status: markets.status,
+      outcome: markets.outcome,
+      resolvedAt: markets.resolvedAt,
+      aura: calls.auraCenti,
+      via: calls.via,
+    })
+    .from(calls)
+    .innerJoin(markets, eq(markets.id, calls.marketId))
+    .innerJoin(residents, eq(residents.userId, calls.userId))
+    .where(and(eq(calls.id, callId), eq(calls.status, "locked")));
+  if (!r) return null;
+  const cityRows = await db.select({ chance: calls.chance }).from(calls).where(and(eq(calls.marketId, r.marketId), eq(calls.status, "locked")));
+  const city = cityRows.length >= TOWER.cityBarMin ? median(cityRows.map((x) => x.chance)) : null;
+  const revealed = r.status === "resolved" && r.resolvedAt !== null && now >= revealAt(r.resolvedAt);
+  return {
+    id: r.id,
+    handle: r.handle,
+    question: r.question,
+    side: r.side,
+    chance: r.chance,
+    world: r.world,
+    city,
+    vibeGap: vibeGap(r.world!, city),
+    lockedAt: r.lockedAt,
+    bellAt: r.resolvedAt ? revealAt(r.resolvedAt) : revealAt(r.settlesBy),
+    // Sealed until the bell, even when the world settled hours earlier.
+    stamp: !revealed ? (r.status === "void" ? "VOID" : "IN THE MEMPOOL") : (r.side === "yes") === r.outcome ? "CALLED IT" : "REKT",
+    aura: revealed && r.via !== "tail" && r.aura !== null ? r.aura / 100 : null,
+  };
+}
+
+// --- The Right List -------------------------------------------------------------------------
+
+const seasonStart = (season: number) => new Date(`${addDays(SEASON_EPOCH, (season - 1) * SEASON_LENGTH_DAYS)}T00:00:00Z`);
+
+async function seasonTotals(db: Db, season: number, now: Date) {
+  const from = seasonStart(season);
+  const to = seasonStart(season + 1);
+  // Revealed only: settled before the last bell.
+  const lastBell = new Date(`${cityDay(now)}T00:00:00Z`);
+  const until = lastBell < to ? lastBell : to;
+  return db.execute<{ user_id: string; aura: string; settled: number; auras: number[]; last_call: Date }>(sql`
+    SELECT c.user_id, SUM(c.aura_centi)::text AS aura, count(*)::int AS settled, array_agg(c.aura_centi) AS auras, max(c.locked_at) AS last_call
+    FROM calls c JOIN markets m ON m.id = c.market_id
+    WHERE c.status = 'locked' AND c.aura_centi IS NOT NULL AND c.via IS DISTINCT FROM 'tail'
+      AND m.status = 'resolved' AND m.resolved_at >= ${from.toISOString()}::timestamptz AND m.resolved_at < ${until.toISOString()}::timestamptz
+    GROUP BY c.user_id`);
+}
+
+// Season Aura ÷ (settled calls + 15), shown as "Aura +6.2 per call ± 3.1".
+// 10 settled calls to appear; no call in 14 days marks you rusty, not gone.
+export async function rightList(db: Db, opts: { now?: Date; season?: number; limit?: number; userId?: string } = {}) {
+  const now = opts.now ?? new Date();
+  const season = opts.season ?? seasonOf(cityDay(now));
+  const [cur, prev] = await Promise.all([seasonTotals(db, season, now), season > 1 ? seasonTotals(db, season - 1, now) : Promise.resolve([])]);
+  const last = new Map([...prev].map((r) => [r.user_id, { auraCenti: Number(r.aura), settled: r.settled }]));
+  const rows = [...cur]
+    .filter((r) => r.settled >= RIGHT_LIST.minSettled)
+    .map((r) => ({
+      userId: r.user_id,
+      perCall: rightListScore(Number(r.aura), r.settled, last.get(r.user_id)),
+      spread: rightListSpread(r.auras),
+      settled: r.settled,
+      rusty: now.getTime() - new Date(r.last_call).getTime() > RIGHT_LIST.rustyAfterDays * 86_400_000,
+    }))
+    .sort((a, b) => b.perCall - a.perCall || a.userId.localeCompare(b.userId));
+  const ranked = rows.map((r, i) => ({ rank: i + 1, ...r }));
+  const handles = new Map(
+    ranked.length
+      ? (await db.select({ id: residents.userId, handle: residents.handle }).from(residents).where(inArray(residents.userId, ranked.slice(0, opts.limit ?? 100).map((r) => r.userId)))).map((h) => [h.id, h.handle])
+      : [],
+  );
+  const me = opts.userId ? (ranked.find((r) => r.userId === opts.userId) ?? null) : null;
+  return {
+    season,
+    rows: ranked.slice(0, Math.min(opts.limit ?? 100, 500)).map((r) => ({ ...r, handle: handles.get(r.userId) ?? null })),
+    me,
+  };
 }
 
 // "Network congested: odds paused at 20:41" once polls stop succeeding.

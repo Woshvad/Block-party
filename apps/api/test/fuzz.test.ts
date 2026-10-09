@@ -3,7 +3,7 @@ import { reconcile } from "@bp/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { app, call, client, close, db, logs, ready, resident } from "./harness";
 
-const PUBLIC = new Set(["GET /health", "GET /v1/catalogue", "POST /v1/auth/guest", "POST /v1/auth/telegram", "POST /v1/auth/privy"]);
+const PUBLIC = new Set(["GET /health", "GET /v1/catalogue", "POST /v1/auth/guest", "POST /v1/auth/telegram", "POST /v1/auth/privy", "GET /v1/receipts/:token"]);
 // Server-only actions that must never get a route.
 const FORBIDDEN = /streak|mint|grant|burn|halving|set-?up-?home|collect-?rent|record|tilt|cozy|staff\/(grant|add|roles)|evidence/i;
 

@@ -1,5 +1,7 @@
 import {
   type OddsProvider,
+  receiptToken,
+  verifyReceiptToken,
   faucetFrenAnswer,
   bigNights,
   areaOf,
@@ -146,6 +148,8 @@ import {
   myTickets,
   openMarkets,
   pollOdds,
+  receipt,
+  rightList,
   setCrewBotMutes,
   startNap,
   cancelLongAction,
@@ -208,6 +212,8 @@ export type AppConfig = {
   notifier?: NotificationSender;
   // The odds feed (Polymarket in production; a mock in development).
   odds?: OddsProvider;
+  // Signs public receipt links (32+ characters).
+  receiptSecret?: string;
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -785,7 +791,31 @@ export function createApp(cfg: AppConfig) {
   });
   app.get("/v1/tower/calls/:id", auth, async (c) => {
     const k = await myCall(db, c.get("userId"), uuid(c, "id"));
-    return c.json({ id: k.id, marketId: k.marketId, side: k.side, chance: k.chance, status: k.status, lockedPrice: k.lockedPrice, lockedAt: k.lockedAt, half: k.half, via: k.via, aura: k.auraCenti === null ? null : k.auraCenti / 100 });
+    // Aura shows once the bell reveals it (the receipt applies the seal).
+    const r = k.status === "locked" ? await receipt(db, k.id, opts()) : null;
+    return c.json({
+      id: k.id,
+      marketId: k.marketId,
+      side: k.side,
+      chance: k.chance,
+      status: k.status,
+      lockedPrice: k.lockedPrice,
+      lockedAt: k.lockedAt,
+      half: k.half,
+      via: k.via,
+      stamp: r?.stamp ?? null,
+      aura: r?.aura ?? null,
+      receiptLink: r && cfg.receiptSecret ? `/v1/receipts/${await receiptToken(k.id, cfg.receiptSecret)}` : null,
+    });
+  });
+  app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
+  // Public: anyone with the link sees the receipt, nobody can fake one.
+  app.get("/v1/receipts/:token", async (c) => {
+    await limit(c, `receipt-ip:${ip(c)}`, limits.readsPerUserPerMinute, 60);
+    const id = cfg.receiptSecret ? await verifyReceiptToken(c.req.param("token"), cfg.receiptSecret) : null;
+    const r = id ? await receipt(db, id, opts()) : null;
+    if (!r) throw new ApiError(404, "NOT_FOUND", "no such receipt");
+    return c.json(r);
   });
 
   // --- Long actions and the city clock ---------------------------------------

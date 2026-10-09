@@ -1,6 +1,6 @@
 // The API Worker. Deploy: pnpm --filter @bp/api build && wrangler deploy
 // Secrets (wrangler secret put ...): TELEGRAM_BOT_TOKEN, INTERNAL_SECRET (32+
-// chars, shared with the rooms Worker), TICKET_SECRET (shared with rooms),
+// chars, shared with the rooms Worker), TICKET_SECRET (shared with rooms), RECEIPT_SECRET,
 // OPENAI_API_KEY, PRIVY_APP_ID, PRIVY_VERIFICATION_KEY.
 {
   "name": "block-party-api",
