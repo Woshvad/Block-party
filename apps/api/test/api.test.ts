@@ -324,3 +324,61 @@ describe("City Hall over HTTP", () => {
     expect((await call("POST", "/v1/election/vote", { token: voter.token, body: { candidateId: cand.userId }, via: city })).body.error.code).toBe("ALREADY_VOTED");
   });
 });
+
+describe("safety over HTTP", () => {
+  const REASON = "Asked several residents for their seed phrases in DMs.";
+
+  it("the pre-send check blocks seed phrases and strips links for new accounts", async () => {
+    const u = await resident();
+    const seed = "abandon ability able about above absent absorb abstract absurd abuse access accident";
+    const v = await call("POST", "/v1/moderation/check", { token: u.token, body: { text: seed } });
+    expect(v.body).toMatchObject({ ok: false, reason: "SECRET" });
+    const link = await call("POST", "/v1/moderation/check", { token: u.token, body: { text: "chart at https://dexscreener.com/x" } });
+    expect(link.body).toMatchObject({ ok: true, text: "chart at [link removed]" }); // a brand-new account
+  });
+
+  it("block, mute and report, with no client-supplied evidence", async () => {
+    const [a, b] = [await resident(), await resident()];
+    expect((await call("POST", `/v1/blocks/${b.userId}`, { token: a.token })).status).toBe(200);
+    expect((await call("POST", `/v1/blocks/${a.userId}`, { token: a.token })).body.error.code).toBe("NOT_SELF");
+    expect((await call("POST", `/v1/mutes/${b.userId}`, { token: a.token, body: { hours: 2 } })).status).toBe(200);
+    const r = await call("POST", "/v1/reports", { token: a.token, body: { targetUserId: b.userId, reason: "scam", evidence: [{ at: "x", authorId: b.userId, text: "forged" }] } });
+    expect(r.status).toBe(201);
+    const { client } = await import("./harness");
+    const [row] = await client`SELECT evidence FROM reports WHERE id = ${r.body.id}`;
+    expect(row!.evidence).toEqual([]); // the forged evidence was ignored
+  });
+
+  it("staff routes are staff-only; a suspension blocks writes but not reading, logging out or appealing", async () => {
+    const { client } = await import("./harness");
+    const [mod, other, b] = [await resident(), await resident(), await resident()];
+    expect((await call("GET", "/v1/staff/reports", { token: b.token })).status).toBe(403);
+    await client`INSERT INTO staff (user_id, role) VALUES (${mod.userId}, 'moderator'), (${other.userId}, 'admin')`;
+    const restr = await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: b.userId, kind: "suspended", reason: REASON } });
+    expect(restr.status).toBe(201);
+
+    const blocked = await call("POST", "/v1/gm", { token: b.token });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error).toMatchObject({ code: "RESTRICTED" });
+    expect(blocked.body.error.message).toContain(REASON); // the statement of reasons
+    expect((await call("GET", "/v1/me", { token: b.token })).status).toBe(200);
+    expect((await call("GET", "/v1/restrictions", { token: b.token })).body).toEqual([expect.objectContaining({ kind: "suspended", reason: REASON })]);
+
+    const appeal = await call("POST", `/v1/restrictions/${restr.body.id}/appeal`, { token: b.token, body: { text: "I was helping a friend recover their wallet." } });
+    expect(appeal.status).toBe(201);
+    expect((await call("POST", `/v1/staff/appeals/${appeal.body.id}/decide`, { token: other.token, body: { overturn: true, note: "Good-faith help, lifted." } })).status).toBe(200);
+    expect((await call("POST", "/v1/gm", { token: b.token })).status).toBe(200); // lifted
+    expect((await call("POST", "/v1/auth/logout", { token: b.token })).status).toBe(200);
+  });
+
+  it("names and pitches are queued for the AI check; the worker needs a provider", async () => {
+    const { client } = await import("./harness");
+    const u = await resident();
+    const [q] = await client`SELECT count(*)::int AS n FROM moderation_items WHERE author_id = ${u.userId} AND kind = 'resident_name'`;
+    expect(q!.n).toBe(1);
+    expect((await call("POST", "/internal/moderation/run", { headers: { "x-internal-secret": SECRET } })).status).toBe(503);
+    const withAi = makeApp({ moderation: { classify: async (ts) => ts.map(() => ({ flagged: false, categories: [] })) } });
+    const ran = await call("POST", "/internal/moderation/run", { headers: { "x-internal-secret": SECRET }, via: withAi });
+    expect(ran.body.checked).toBeGreaterThan(0);
+  });
+});

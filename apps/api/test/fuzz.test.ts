@@ -5,7 +5,7 @@ import { app, call, client, close, db, logs, ready, resident } from "./harness";
 
 const PUBLIC = new Set(["GET /health", "GET /v1/catalogue", "POST /v1/auth/guest", "POST /v1/auth/telegram", "POST /v1/auth/privy"]);
 // Server-only actions that must never get a route.
-const FORBIDDEN = /streak|mint|grant|burn|halving|set-?up-?home|collect-?rent|record|tilt|cozy/i;
+const FORBIDDEN = /streak|mint|grant|burn|halving|set-?up-?home|collect-?rent|record|tilt|cozy|staff\/(grant|add|roles)|evidence/i;
 
 const routes = [
   ...new Map(
@@ -67,7 +67,7 @@ const NASTY: unknown[] = [
   { $gt: "" },
   [[[[[[[[[[[]]]]]]]]]]],
 ];
-const FIELDS = ["pitch", "candidateId", "lawId", "hideCandleColor", "name", "handle", "look", "traits", "goal", "kitStyle", "pieceId", "code", "amount", "answers", "room", "placement", "layer", "x", "y", "rot", "color", "wall", "floor", "doorOpen", "deputy", "userId", "ttlHours", "joinPolicy", "banner", "ageAck", "initData", "accessToken"];
+const FIELDS = ["text", "firstDm", "targetUserId", "reason", "place", "note", "hours", "action", "restriction", "overturn", "kind", "pitch", "candidateId", "lawId", "hideCandleColor", "name", "handle", "look", "traits", "goal", "kitStyle", "pieceId", "code", "amount", "answers", "room", "placement", "layer", "x", "y", "rot", "color", "wall", "floor", "doorOpen", "deputy", "userId", "ttlHours", "joinPolicy", "banner", "ageAck", "initData", "accessToken"];
 
 function hostileBody(rand: (n: number) => number): unknown {
   const kind = rand(5);

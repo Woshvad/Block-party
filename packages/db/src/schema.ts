@@ -704,3 +704,152 @@ export const mayorTerms = pgTable("mayor_terms", {
   lawId: text("law_id"),
   lawChosenAt: timestamp("law_chosen_at", { withTimezone: true }),
 });
+
+// --- Moderation and safety ------------------------------------------------
+
+export const blocks = pgTable(
+  "blocks",
+  {
+    blockerId: uuid("blocker_id")
+      .notNull()
+      .references(() => users.id),
+    blockedId: uuid("blocked_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] }), check("blocks_not_self", sql`${t.blockerId} <> ${t.blockedId}`), index("blocks_blocked").on(t.blockedId)],
+);
+
+export const mutes = pgTable(
+  "mutes",
+  {
+    muterId: uuid("muter_id")
+      .notNull()
+      .references(() => users.id),
+    mutedId: uuid("muted_id")
+      .notNull()
+      .references(() => users.id),
+    until: timestamp("until", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.muterId, t.mutedId] }), check("mutes_not_self", sql`${t.muterId} <> ${t.mutedId}`)],
+);
+
+export const reportReason = pgEnum("report_reason", ["impersonation", "scam", "unwanted_romance", "under_18", "harassment", "spam", "other"]);
+export const reportStatus = pgEnum("report_status", ["open", "actioned", "dismissed"]);
+
+export const reports = pgTable(
+  "reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reporterId: uuid("reporter_id")
+      .notNull()
+      .references(() => users.id),
+    targetUserId: uuid("target_user_id")
+      .notNull()
+      .references(() => users.id),
+    reason: reportReason("reason").notNull(),
+    place: text("place"),
+    note: text("note"),
+    // Snapshotted by the server (the last messages), never sent by the client.
+    evidence: jsonb("evidence").$type<Array<{ at: string; authorId: string; text: string }>>().notNull().default([]),
+    priority: boolean("priority").notNull().default(false),
+    status: reportStatus("status").notNull().default("open"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: uuid("resolved_by").references(() => users.id),
+    resolution: text("resolution"),
+  },
+  (t) => [
+    index("reports_open_due").on(t.dueAt).where(sql`${t.status} = 'open'`),
+    uniqueIndex("reports_one_open").on(t.reporterId, t.targetUserId, t.reason).where(sql`${t.status} = 'open'`),
+    check("reports_not_self", sql`${t.reporterId} <> ${t.targetUserId}`),
+    check("reports_resolved", sql`(${t.status} = 'open') = (${t.resolvedAt} IS NULL)`),
+    check("reports_resolution_text", sql`${t.status} = 'open' OR char_length(${t.resolution}) >= 10`),
+  ],
+);
+
+export const staffRole = pgEnum("staff_role", ["moderator", "admin"]);
+
+// Granted in the database only; no route grants a staff role.
+export const staff = pgTable("staff", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  role: staffRole("role").notNull(),
+  grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const restrictionKind = pgEnum("restriction_kind", ["chat_mute", "suspended"]);
+
+// Every restriction carries a written reason the player can read (the EU
+// statement of reasons).
+export const restrictions = pgTable(
+  "restrictions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    kind: restrictionKind("kind").notNull(),
+    reason: text("reason").notNull(),
+    reportId: uuid("report_id").references(() => reports.id),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    liftedAt: timestamp("lifted_at", { withTimezone: true }),
+    liftedBy: uuid("lifted_by").references(() => users.id),
+  },
+  (t) => [
+    index("restrictions_user").on(t.userId),
+    check("restrictions_reason", sql`char_length(${t.reason}) >= 20`),
+    check("restrictions_window", sql`${t.endsAt} IS NULL OR ${t.endsAt} > ${t.startsAt}`),
+  ],
+);
+
+export const appealStatus = pgEnum("appeal_status", ["open", "upheld", "overturned"]);
+
+export const appeals = pgTable(
+  "appeals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    restrictionId: uuid("restriction_id")
+      .notNull()
+      .unique()
+      .references(() => restrictions.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    text: text("text").notNull(),
+    status: appealStatus("status").notNull().default("open"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+  },
+  (t) => [check("appeals_decided", sql`(${t.status} = 'open') = (${t.decidedAt} IS NULL)`)],
+);
+
+export const moderationStatus = pgEnum("moderation_status", ["pending", "clean", "flagged", "error"]);
+
+// Text waiting for (or past) the AI moderation check, run in batches.
+export const moderationItems = pgTable(
+  "moderation_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: text("kind").notNull(), // chat, pitch, resident_name, crew_name, ...
+    ref: text("ref").notNull(),
+    authorId: uuid("author_id").references(() => users.id),
+    text: text("text").notNull(),
+    status: moderationStatus("status").notNull().default("pending"),
+    categories: jsonb("categories").$type<string[]>().notNull().default([]),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+  },
+  (t) => [index("moderation_items_pending").on(t.createdAt).where(sql`${t.status} = 'pending'`)],
+);

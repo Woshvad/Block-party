@@ -134,6 +134,13 @@
       "when": 1791525346691,
       "tag": "0018_copium_price",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791526983309,
+      "tag": "0019_moderation",
+      "breakpoints": true
     }
   ]
 }

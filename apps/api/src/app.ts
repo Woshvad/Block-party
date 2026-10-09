@@ -1,4 +1,6 @@
 import {
+  type ModerationProvider,
+  checkMessage,
   BUYABLE_IDS,
   CATALOGUE,
   FLOOR_FINISHES,
@@ -34,6 +36,22 @@ import {
   getHome,
   getResident,
   isHandleAvailable,
+  accountAgeDays,
+  activeRestrictions,
+  appealRestriction,
+  blockUser,
+  decideAppeal,
+  enqueueModeration,
+  fileReport,
+  muteUser,
+  openAppeals,
+  openReports,
+  reportSla,
+  resolveReport,
+  restrictUser,
+  runModerationBatch,
+  unblockUser,
+  unmuteUser,
   castVote,
   chooseLaw,
   cityHall,
@@ -114,6 +132,10 @@ export type AppConfig = {
   // Where a resident is right now. Live rooms provide it; until then voting
   // in person is refused.
   presence?: PresenceCheck;
+  // The AI moderation check (OpenAI's free endpoint in production).
+  moderation?: ModerationProvider;
+  // Staff-maintained blocked words for chat.
+  blockedWords?: readonly string[];
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -228,6 +250,14 @@ export function createApp(cfg: AppConfig) {
     c.set("sessionToken", token);
     const write = c.req.method !== "GET";
     await limit(c, `user:${s.userId}:${write ? "w" : "r"}`, write ? limits.writesPerUserPerMinute : limits.readsPerUserPerMinute, 60);
+    // A suspended resident can read, log out and appeal; nothing else.
+    if (write && !/^\/v1\/(auth\/logout|restrictions\/[^/]+\/appeal$)/.test(c.req.path)) {
+      const active = await activeRestrictions(db, s.userId, now());
+      const suspended = active.filter((r) => r.kind === "suspended");
+      if (suspended.length > 0) {
+        throw new ApiError(403, "RESTRICTED", `your account is suspended: ${suspended.map((r) => r.reason).join("; ")}`);
+      }
+    }
     // The play clock behind Rested and Chart-brain (throttled to once a minute).
     await touchActivity(db, s.userId, { now: now() });
     await next();
@@ -321,12 +351,19 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ...pick, handle: await suggestFreeHandle(db) });
   });
   app.get("/v1/handles/:handle/available", auth, async (c) => c.json({ available: await isHandleAvailable(db, c.req.param("handle") ?? "") }));
-  app.post("/v1/resident", auth, async (c) => c.json(await createResident(db, c.get("userId"), await body(c)), 201));
+  app.post("/v1/resident", auth, async (c) => {
+    const r = await createResident(db, c.get("userId"), await body(c));
+    await enqueueModeration(db, { kind: "resident_name", ref: r.userId, authorId: r.userId, text: `${r.handle} ${r.name}` });
+    return c.json(r, 201);
+  });
   app.patch("/v1/resident", auth, async (c) => {
     const b = await body(c);
     const userId = c.get("userId");
     let r = await getResident(db, userId);
-    if (b.name !== undefined) r = await updateName(db, userId, b.name);
+    if (b.name !== undefined) {
+      r = await updateName(db, userId, b.name);
+      await enqueueModeration(db, { kind: "resident_name", ref: userId, authorId: userId, text: r.name });
+    }
     if (b.look !== undefined) r = await updateLook(db, userId, b.look);
     if (b.goal !== undefined) r = await updateGoal(db, userId, b.goal);
     if (b.hideCandleColor !== undefined) r = await setHideCandleColor(db, userId, b.hideCandleColor);
@@ -374,7 +411,9 @@ export function createApp(cfg: AppConfig) {
 
   app.post("/v1/crews", auth, async (c) => {
     const b = await body(c);
-    return c.json(await createCrew(db, c.get("userId"), { name: b.name, joinPolicy: b.joinPolicy, banner: b.banner }), 201);
+    const crew = await createCrew(db, c.get("userId"), { name: b.name, joinPolicy: b.joinPolicy, banner: b.banner });
+    await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: c.get("userId"), text: crew.name });
+    return c.json(crew, 201);
   });
   app.get("/v1/crews/mine", auth, async (c) => c.json(await mine(c)));
   app.patch("/v1/crews/mine", auth, async (c) => c.json(await editCrew(db, c.get("userId"), await body(c))));
@@ -446,7 +485,11 @@ export function createApp(cfg: AppConfig) {
 
   app.get("/v1/laws", auth, (c) => c.json(LAWS));
   app.get("/v1/city-hall", auth, async (c) => c.json(await cityHall(db, c.get("userId"), opts())));
-  app.post("/v1/election/candidacy", auth, async (c) => c.json(await declareCandidacy(db, c.get("userId"), (await body(c)).pitch, opts()), 201));
+  app.post("/v1/election/candidacy", auth, async (c) => {
+    const cand = await declareCandidacy(db, c.get("userId"), (await body(c)).pitch, opts());
+    await enqueueModeration(db, { kind: "pitch", ref: `${cand.week}:${cand.userId}`, authorId: cand.userId, text: cand.pitch });
+    return c.json(cand, 201);
+  });
   app.delete("/v1/election/candidacy", auth, async (c) => {
     await withdrawCandidacy(db, c.get("userId"), opts());
     return c.json({ ok: true });
@@ -455,6 +498,63 @@ export function createApp(cfg: AppConfig) {
     c.json(await castVote(db, c.get("userId"), (await body(c)).candidateId, { ...opts(), ...(cfg.presence ? { presence: cfg.presence } : {}) })),
   );
   app.post("/v1/mayor/law", auth, async (c) => c.json(await chooseLaw(db, c.get("userId"), (await body(c)).lawId, opts())));
+
+  // --- Safety --------------------------------------------------------------
+
+  // The chat UI can check a message before sending (rooms run the same check).
+  app.post("/v1/moderation/check", auth, async (c) => {
+    const b = await body(c);
+    const age = await accountAgeDays(db, c.get("userId"), now());
+    return c.json(checkMessage(b.text, { accountAgeDays: age, firstDm: b.firstDm === true, ...(cfg.blockedWords ? { blockedWords: cfg.blockedWords } : {}) }));
+  });
+  app.post("/v1/blocks/:userId", auth, async (c) => {
+    await blockUser(db, c.get("userId"), uuid(c, "userId"));
+    return c.json({ ok: true });
+  });
+  app.delete("/v1/blocks/:userId", auth, async (c) => {
+    await unblockUser(db, c.get("userId"), uuid(c, "userId"));
+    return c.json({ ok: true });
+  });
+  app.post("/v1/mutes/:userId", auth, async (c) => {
+    await muteUser(db, c.get("userId"), uuid(c, "userId"), { hours: (await body(c)).hours, now: now() });
+    return c.json({ ok: true });
+  });
+  app.delete("/v1/mutes/:userId", auth, async (c) => {
+    await unmuteUser(db, c.get("userId"), uuid(c, "userId"));
+    return c.json({ ok: true });
+  });
+  // No evidence from the client: rooms and DMs attach their own snapshot.
+  app.post("/v1/reports", auth, async (c) => {
+    const b = await body(c);
+    const r = await fileReport(db, c.get("userId"), { target: b.targetUserId, reason: b.reason, place: b.place, note: b.note }, opts());
+    return c.json({ id: r.id, status: r.status, dueAt: r.dueAt }, 201);
+  });
+  app.get("/v1/restrictions", auth, async (c) => c.json(await activeRestrictions(db, c.get("userId"), now())));
+  app.post("/v1/restrictions/:id/appeal", auth, async (c) => c.json(await appealRestriction(db, c.get("userId"), uuid(c, "id"), (await body(c)).text, opts()), 201));
+
+  // Staff (role granted in the database only).
+  app.get("/v1/staff/reports", auth, async (c) => c.json(await openReports(db, c.get("userId"))));
+  app.post("/v1/staff/reports/:id/resolve", auth, async (c) => {
+    const b = await body(c);
+    const restriction = b.restriction as { kind: unknown; hours?: unknown; reason: unknown } | undefined;
+    return c.json(await resolveReport(db, c.get("userId"), uuid(c, "id"), { action: b.action, note: b.note, ...(restriction && typeof restriction === "object" ? { restriction } : {}) }, opts()));
+  });
+  app.post("/v1/staff/restrictions", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await restrictUser(db, c.get("userId"), { userId: b.userId, kind: b.kind, hours: b.hours, reason: b.reason }, opts()), 201);
+  });
+  app.get("/v1/staff/appeals", auth, async (c) => c.json(await openAppeals(db, c.get("userId"))));
+  app.post("/v1/staff/appeals/:id/decide", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await decideAppeal(db, c.get("userId"), uuid(c, "id"), { overturn: b.overturn, note: b.note }, opts()));
+  });
+  app.get("/v1/staff/sla", auth, async (c) => {
+    await openReports(db, c.get("userId")); // staff check
+    const from = new Date(c.req.query("from") ?? "");
+    const to = new Date(c.req.query("to") ?? "");
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw new ApiError(400, "INVALID_INPUT", "from and to must be dates, from before to");
+    return c.json(await reportSla(db, { from, to, now: now() }));
+  });
 
   // --- Moods ---------------------------------------------------------------
 
@@ -480,6 +580,10 @@ export function createApp(cfg: AppConfig) {
     await next();
   };
   app.post("/internal/bell", internal, async (c) => c.json(await runBell(db, opts())));
+  app.post("/internal/moderation/run", internal, async (c) => {
+    if (!cfg.moderation) throw new ApiError(503, "MODERATION_DISABLED", "no moderation provider configured");
+    return c.json(await runModerationBatch(db, cfg.moderation, opts()));
+  });
   app.get("/internal/economy", internal, async (c) => {
     const from = new Date(c.req.query("from") ?? "");
     const to = new Date(c.req.query("to") ?? "");

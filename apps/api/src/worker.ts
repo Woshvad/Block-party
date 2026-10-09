@@ -1,4 +1,4 @@
-import { createPrivyVerifier } from "@bp/core";
+import { createPrivyVerifier, openAiModeration } from "@bp/core";
 import { createDb } from "@bp/db";
 import { createApp } from "./app";
 
@@ -11,6 +11,7 @@ type Env = {
   ALLOWED_ORIGINS: string;
   PRIVY_APP_ID?: string;
   PRIVY_VERIFICATION_KEY?: string;
+  OPENAI_API_KEY?: string;
 };
 
 export default {
@@ -26,6 +27,7 @@ export default {
       internalSecret: env.INTERNAL_SECRET,
       allowedOrigins: env.ALLOWED_ORIGINS.split(","),
       clientIpHeader: "cf-connecting-ip",
+      ...(env.OPENAI_API_KEY ? { moderation: openAiModeration({ apiKey: env.OPENAI_API_KEY }) } : {}),
       ...(privyVerify ? { privyVerify } : {}),
     });
     const res = await app.fetch(req);

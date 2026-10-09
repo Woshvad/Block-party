@@ -9,6 +9,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@scure/bip39": "^2.4.0",
     "jose": "^6.2.12"
   },
   "devDependencies": {
