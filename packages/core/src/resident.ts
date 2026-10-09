@@ -190,7 +190,7 @@ export function graphemeCount(s: string): number {
   return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s)].length;
 }
 
-export function normalizeName(input: unknown): string {
+export function normalizeName(input: unknown, maxGraphemes: number = NAME_MAX_GRAPHEMES): string {
   if (typeof input !== "string") throw new ResidentInputError("name", "required");
   const segments = new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(input.normalize("NFKC"));
   const n = [...segments]
@@ -199,7 +199,7 @@ export function normalizeName(input: unknown): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!n) throw new ResidentInputError("name", "required");
-  if (graphemeCount(n) > NAME_MAX_GRAPHEMES) throw new ResidentInputError("name", `at most ${NAME_MAX_GRAPHEMES} characters`);
+  if (graphemeCount(n) > maxGraphemes) throw new ResidentInputError("name", `at most ${maxGraphemes} characters`);
   if (URLISH.test(n)) throw new ResidentInputError("name", "no links");
   if (!/[\p{L}\p{N}]/u.test(n)) throw new ResidentInputError("name", "needs a letter or digit");
   const r = reservedReason(n);

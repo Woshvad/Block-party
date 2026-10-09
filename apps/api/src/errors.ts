@@ -10,6 +10,8 @@ import {
   HomeError,
   type HomeErrorCode,
   MoodError,
+  PoliticsError,
+  type PoliticsErrorCode,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -96,7 +98,20 @@ const BAD_INPUT_SQLSTATES = new Set(["22P02", "22021", "22001", "22003", "22007"
 
 const MOODS: Record<MoodError["code"], number> = { NOTHING_TO_CLEAR: 409, NO_RESIDENT: 404, INVALID_INPUT: 400 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS };
+const POLITICS: Record<PoliticsErrorCode, number> = {
+  INVALID_INPUT: 400,
+  NO_RESIDENT: 404,
+  NOT_PON: 403,
+  WRONG_PHASE: 409,
+  NOT_A_CANDIDATE: 404,
+  ALREADY_VOTED: 409,
+  NOT_AT_CITY_HALL: 403,
+  NOT_MAYOR: 403,
+  LAW_ALREADY_CHOSEN: 409,
+  NO_SUCH_LAW: 400,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -118,6 +133,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof HomeError) return out(HOME[e.code], e.code, e.message);
   if (e instanceof EconomyError) return out(ECONOMY[e.code], e.code, e.message);
   if (e instanceof MoodError) return out(MOODS[e.code], e.code, e.message);
+  if (e instanceof PoliticsError) return out(POLITICS[e.code], e.code, e.message);
   // Postgres "data exception" errors are bad input that slipped past a
   // validator (a null byte, a malformed value, a number out of range): a 400,
   // never a 500. Each one still deserves a validator; this is the backstop.

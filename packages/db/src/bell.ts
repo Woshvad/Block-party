@@ -1,9 +1,10 @@
-import { HALVING_LINE, SYS_BURN, addDays, cityDay, halvingBurn, halvingDue, isSaturday, seasonLastDay } from "@bp/core";
+import { HALVING_LINE, SYS_BURN, addDays, cityDay, cityWeekday, halvingBurn, halvingDue, isSaturday, seasonLastDay } from "@bp/core";
 import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { settleCrewChain } from "./chain";
 import type { Db } from "./client";
 import { collectRent } from "./economy";
 import { lockAccounts, post } from "./ledger";
+import { finalizeElection } from "./politics";
 import { bellSteps, crews, gmAccounts, halvings, residents } from "./schema";
 
 type StepResult = Record<string, unknown>;
@@ -16,7 +17,7 @@ export type BellOptions = {
   // another writer try to race in.
   onHalvingAccount?: (accountId: string, index: number, balanceRead: number) => void | Promise<void>;
   // Run only these steps (ops tooling and tests). The default runs every due step.
-  only?: Array<"chains" | "rent" | "halving">;
+  only?: Array<"chains" | "rent" | "halving" | "election">;
 };
 
 // Keyset pagination over a sorted id column. Each page starts strictly after
@@ -153,12 +154,16 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     { day: bellDay, step: "chains", run: () => stepChains(db, now, pageSize) },
   ];
   if (isSaturday(today)) due.push({ day: bellDay, step: "rent", run: () => stepRent(db, now, pageSize) });
+  // Monday 00:00: last week's count closes and the new Mayor is sworn in.
+  if (cityWeekday(today) === 1) {
+    due.push({ day: bellDay, step: "election", run: async () => ({ ...(await finalizeElection(db, addDays(today, -7), { now })) }) });
+  }
   const season = halvingDue(today);
   if (season !== null) {
     due.push({ day: seasonLastDay(season), step: "halving", run: () => stepHalving(db, season, pageSize, opts.onHalvingAccount) });
   }
 
-  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "halving")) : due;
+  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "halving" | "election")) : due;
 
   // One runner at a time: a transaction-scoped advisory lock held for the
   // whole run. Steps do their own work in their own transactions; the done

@@ -5,6 +5,7 @@ import {
   type TiltSignals,
   type Trait,
   candleMood,
+  copiumPriceUnder,
   cozyMinutesToClear,
   nextBell,
   playState,
@@ -15,6 +16,7 @@ import {
 import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { burn } from "./ledger";
+import { currentLaw } from "./politics";
 import { copiumCredits, copiumUses, moods, playSessions, residents } from "./schema";
 
 export class MoodError extends Error {
@@ -204,7 +206,7 @@ export async function useCopium(db: Db, userId: string, idempotencyKey: string, 
     const [prior] = await tx.select().from(copiumUses).where(eq(copiumUses.key, idempotencyKey));
     if (prior) {
       if (prior.userId !== userId) throw new MoodError("NOTHING_TO_CLEAR", "nothing to clear");
-      return { replayed: true, paid: prior.paid, cleared: prior.cleared as Mood[] };
+      return { replayed: true, paid: prior.paid, price: prior.price, cleared: prior.cleared as Mood[] };
     }
     await closeExpired(tx, userId, now);
     const targets = await tx
@@ -218,13 +220,15 @@ export async function useCopium(db: Db, userId: string, idempotencyKey: string, 
     if (credits && credits.free > 0) {
       await tx.update(copiumCredits).set({ free: credits.free - 1 }).where(eq(copiumCredits.userId, userId));
     } else {
-      await burn(tx, { accountId: userAccountId(userId), amount: MOOD.copiumPrice, kind: "copium", idempotencyKey: `copium:${idempotencyKey}` });
-      paid = MOOD.copiumPrice;
+      // The Law of the Week can put Copium on subsidy.
+      const price = copiumPriceUnder(await currentLaw(tx, { now }), MOOD.copiumPrice);
+      await burn(tx, { accountId: userAccountId(userId), amount: price, kind: "copium", idempotencyKey: `copium:${idempotencyKey}` });
+      paid = price;
     }
     await tx.update(moods).set({ clearedAt: now, clearedBy: "copium" }).where(inArray(moods.id, targets.map((t) => t.id)));
     const cleared = targets.map((t) => t.mood);
-    await tx.insert(copiumUses).values({ key: idempotencyKey, userId, paid: paid > 0, cleared });
-    return { replayed: false, paid: paid > 0, cleared };
+    await tx.insert(copiumUses).values({ key: idempotencyKey, userId, paid: paid > 0, price: paid, cleared });
+    return { replayed: false, paid: paid > 0, price: paid, cleared };
   });
 }
 

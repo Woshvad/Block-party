@@ -291,3 +291,36 @@ describe("moods over HTTP", () => {
     expect(r!.n).toBe(1);
   });
 });
+
+describe("City Hall over HTTP", () => {
+  it("shows the wall; voting in person is refused until rooms exist", async () => {
+    const { client } = await import("./harness");
+    const u = await resident();
+    await client`UPDATE users SET proof_of_neighbour_at = now() WHERE id = ${u.userId}`;
+    const hall = await call("GET", "/v1/city-hall", { token: u.token });
+    expect(hall.status).toBe(200);
+    expect(hall.body.election).toHaveProperty("phase");
+    expect((await call("GET", "/v1/laws", { token: u.token })).body.map((l: { id: string }) => l.id)).toContain("copium_subsidy");
+    const vote = await call("POST", "/v1/election/vote", { token: u.token, body: { candidateId: u.userId } });
+    expect([403, 409]).toContain(vote.status); // NOT_AT_CITY_HALL, or WRONG_PHASE outside Fri-Sun
+    expect((await call("POST", "/v1/mayor/law", { token: u.token, body: { lawId: "gas_holiday" } })).body.error.code).toBe("NOT_MAYOR");
+  });
+
+  it("with a presence check wired in, a neighbour at City Hall can vote", async () => {
+    const { client } = await import("./harness");
+    // Next week, so the sessions made now (30-day lifetime) are still valid.
+    const now = new Date();
+    const daysToMonday = ((8 - now.getUTCDay()) % 7) || 7;
+    const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysToMonday, 12));
+    const friday = new Date(monday.getTime() + 4 * 86_400_000);
+    let clock = monday;
+    const city = makeApp({ now: () => clock, presence: async () => true });
+    const cand = await resident();
+    const voter = await resident();
+    await client`UPDATE users SET proof_of_neighbour_at = now() WHERE id IN (${cand.userId}, ${voter.userId})`;
+    expect((await call("POST", "/v1/election/candidacy", { token: cand.token, body: { pitch: "Touch grass Tuesdays" }, via: city })).status).toBe(201);
+    clock = friday;
+    expect((await call("POST", "/v1/election/vote", { token: voter.token, body: { candidateId: cand.userId }, via: city })).body).toEqual({ voted: true });
+    expect((await call("POST", "/v1/election/vote", { token: voter.token, body: { candidateId: cand.userId }, via: city })).body.error.code).toBe("ALREADY_VOTED");
+  });
+});

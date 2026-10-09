@@ -643,6 +643,64 @@ export const copiumUses = pgTable("copium_uses", {
     .notNull()
     .references(() => users.id),
   paid: boolean("paid").notNull(),
+  price: integer("price").notNull().default(0),
   cleared: text("cleared").array().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// --- City Hall: the weekly Mayor -------------------------------------------
+
+export const electionStatus = pgEnum("election_status", ["open", "finalized"]);
+
+// One election per week (keyed by the Monday it runs), electing the Mayor
+// for the following week.
+export const elections = pgTable("elections", {
+  week: date("week", { mode: "string" }).primaryKey(),
+  status: electionStatus("status").notNull().default("open"),
+  winnerUserId: uuid("winner_user_id").references(() => users.id),
+  turnout: integer("turnout"),
+  finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+});
+
+export const candidates = pgTable(
+  "candidates",
+  {
+    week: date("week", { mode: "string" })
+      .notNull()
+      .references(() => elections.week),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    pitch: text("pitch").notNull(),
+    declaredAt: timestamp("declared_at", { withTimezone: true }).notNull(),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+    // Secret ballot: a counter, never a row per ballot, so nothing can line
+    // up who voted with what they voted for.
+    votes: integer("votes").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.week, t.userId] }), check("candidates_votes", sql`${t.votes} >= 0`)],
+);
+
+// Who voted (one vote each), never what.
+export const electionVoters = pgTable(
+  "election_voters",
+  {
+    week: date("week", { mode: "string" })
+      .notNull()
+      .references(() => elections.week),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (t) => [primaryKey({ columns: [t.week, t.userId] })],
+);
+
+// A Mayor's term, keyed by the Monday it starts.
+export const mayorTerms = pgTable("mayor_terms", {
+  week: date("week", { mode: "string" }).primaryKey(),
+  mayorUserId: uuid("mayor_user_id")
+    .notNull()
+    .references(() => users.id),
+  lawId: text("law_id"),
+  lawChosenAt: timestamp("law_chosen_at", { withTimezone: true }),
 });

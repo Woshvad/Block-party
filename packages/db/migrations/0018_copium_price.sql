@@ -1,0 +1,1 @@
+ALTER TABLE "copium_uses" ADD COLUMN "price" integer DEFAULT 0 NOT NULL;

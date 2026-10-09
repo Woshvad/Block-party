@@ -2,6 +2,7 @@ import {
   BUYABLE_IDS,
   CATALOGUE,
   FLOOR_FINISHES,
+  LAWS,
   type PrivyVerifier,
   WALL_FINISHES,
   cryptoRandomInt,
@@ -33,6 +34,12 @@ import {
   getHome,
   getResident,
   isHandleAvailable,
+  castVote,
+  chooseLaw,
+  cityHall,
+  declareCandidacy,
+  type PresenceCheck,
+  withdrawCandidacy,
   moodState,
   setHideCandleColor,
   touchActivity,
@@ -104,6 +111,9 @@ export type AppConfig = {
   limits?: Partial<Limits>;
   maxBodyBytes?: number;
   log?: (msg: string, extra: Record<string, unknown>) => void;
+  // Where a resident is right now. Live rooms provide it; until then voting
+  // in person is refused.
+  presence?: PresenceCheck;
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -431,6 +441,20 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ok: true });
   });
   app.patch("/v1/crews/mine/house", auth, async (c) => c.json(await setCrewFinishes(db, c.get("userId"), await body(c))));
+
+  // --- City Hall -----------------------------------------------------------
+
+  app.get("/v1/laws", auth, (c) => c.json(LAWS));
+  app.get("/v1/city-hall", auth, async (c) => c.json(await cityHall(db, c.get("userId"), opts())));
+  app.post("/v1/election/candidacy", auth, async (c) => c.json(await declareCandidacy(db, c.get("userId"), (await body(c)).pitch, opts()), 201));
+  app.delete("/v1/election/candidacy", auth, async (c) => {
+    await withdrawCandidacy(db, c.get("userId"), opts());
+    return c.json({ ok: true });
+  });
+  app.post("/v1/election/vote", auth, async (c) =>
+    c.json(await castVote(db, c.get("userId"), (await body(c)).candidateId, { ...opts(), ...(cfg.presence ? { presence: cfg.presence } : {}) })),
+  );
+  app.post("/v1/mayor/law", auth, async (c) => c.json(await chooseLaw(db, c.get("userId"), (await body(c)).lawId, opts())));
 
   // --- Moods ---------------------------------------------------------------
 

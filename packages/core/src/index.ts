@@ -10,3 +10,4 @@ export * from "./crew";
 export * from "./home";
 export * from "./economy";
 export * from "./moods";
+export * from "./politics";
