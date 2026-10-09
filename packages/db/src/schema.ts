@@ -1418,3 +1418,41 @@ export const duels = pgTable(
     check("duels_settled", sql`(${t.status} = 'settled') = (${t.winnerId} IS NOT NULL)`),
   ],
 );
+
+// Who first invited a resident into the city (a crew invite they redeemed).
+export const inviters = pgTable("inviters", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  inviterId: uuid("inviter_id")
+    .notNull()
+    .references(() => users.id),
+  invitedAt: timestamp("invited_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const grudgeStatus = pgEnum("grudge_status", ["offered", "active", "declined", "cancelled", "expired", "settled", "tied"]);
+
+// The Grudge Match: newcomer vs the friend who invited them, once per pair.
+export const grudgeMatches = pgTable(
+  "grudge_matches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cityDay: date("city_day", { mode: "string" }).notNull(), // the Slate they play
+    newcomerId: uuid("newcomer_id")
+      .notNull()
+      .references(() => users.id),
+    inviterId: uuid("inviter_id")
+      .notNull()
+      .references(() => users.id),
+    status: grudgeStatus("status").notNull().default("offered"),
+    winnerId: uuid("winner_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("grudge_once_per_pair").on(sql`LEAST(${t.newcomerId}, ${t.inviterId})`, sql`GREATEST(${t.newcomerId}, ${t.inviterId})`),
+    index("grudge_day").on(t.cityDay, t.status),
+    check("grudge_two_people", sql`${t.newcomerId} <> ${t.inviterId}`),
+    check("grudge_winner", sql`(${t.status} = 'settled') = (${t.winnerId} IS NOT NULL) AND (${t.winnerId} IS NULL OR ${t.winnerId} IN (${t.newcomerId}, ${t.inviterId}))`),
+  ],
+);

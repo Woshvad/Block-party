@@ -161,6 +161,8 @@ describe("making a call", () => {
 
   it("one call per market, no edits, even racing", async () => {
     const { t, id, u } = await setup();
+    // The barrier locks the ticket row, so it has to exist before the racers start.
+    await client`INSERT INTO tickets (user_id, balance, as_of) VALUES (${u}, 3, ${new Date(t).toISOString().slice(0, 10)})`;
     const res = await releaseTogether(client, "SELECT 1 FROM tickets WHERE user_id = $1 FOR UPDATE", [u], 1, [70, 80, 60, 90].map((ch) => () => code(makeCall(db, u, { marketId: id, side: "yes", chance: ch, seenPrice: 50 }, { now: new Date(t + 1000) }))));
     expect(res.map((r) => (r.ok ? r.v : "THREW")).sort()).toEqual(["ALREADY_CALLED", "ALREADY_CALLED", "ALREADY_CALLED", "OK"]);
     expect((await myTickets(db, u, { now: new Date(t) })).tickets).toBe(2); // the refused ones didn't cost a ticket

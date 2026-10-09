@@ -788,3 +788,12 @@ describe("Fade Duels over HTTP", () => {
     expect((await call("GET", "/v1/duels", { token: me.token })).body).toEqual([]);
   });
 });
+
+describe("the Grudge Match over HTTP", () => {
+  it("no inviter: a clear refusal; junk ids 404", async () => {
+    const me = await resident();
+    expect((await call("POST", "/v1/grudge", { token: me.token })).body.error.code).toBe("NO_INVITER");
+    expect((await call("POST", `/v1/grudge/${crypto.randomUUID()}/respond`, { token: me.token, body: { accept: true } })).status).toBe(404);
+    expect((await call("GET", "/v1/grudge", { token: me.token })).body).toEqual([]);
+  });
+});

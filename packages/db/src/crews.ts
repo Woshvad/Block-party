@@ -17,7 +17,7 @@ import {
 import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { burn, getBalance, openEscrowAccount, transfer } from "./ledger";
-import { crewInvites, crewJoinRequests, crewMembers, crews, residents } from "./schema";
+import { crewInvites, crewJoinRequests, crewMembers, crews, inviters, residents } from "./schema";
 
 export type CrewErrorCode =
   | "INVALID_INPUT"
@@ -282,6 +282,8 @@ export async function redeemInvite(db: Db, userId: string, code: unknown, opts: 
     if (!inviter) throw new CrewError("INVITE_INVALID", "this invite has expired");
     const auto = crew.joinPolicy === "open" || (inv.preApproved && invitePreApproved(inviter.role));
     const out = await requestOrJoin(tx, crew.id, userId, auto, inv.createdBy);
+    // The friend who first invited them (for the Grudge Match).
+    if (inv.createdBy !== userId) await tx.insert(inviters).values({ userId, inviterId: inv.createdBy }).onConflictDoNothing();
     await tx.update(crewInvites).set({ uses: sql`${crewInvites.uses} + 1` }).where(eq(crewInvites.code, code));
     return out;
   });

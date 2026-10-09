@@ -24,3 +24,15 @@ export function retreatSplit(stake: number): { toOpponent: number; burned: numbe
 
 // Doubling never takes a stake past the cap.
 export const canDouble = (stake: number) => stake * 2 <= DUEL.maxStake;
+
+// The Grudge Match: the one duel a newcomer can play from minute one, against
+// the friend who invited them, head to head on tomorrow's Slate. 10 GM each,
+// no Snap, once per pair, never real money.
+export const GRUDGE = { stake: 10 } as const;
+export const grudgeAccountId = (matchId: string) => escrowAccountId("grudge", matchId);
+
+// Higher Slate Aura wins the pot; a tie gives both stakes back.
+export function grudgeWinner(a: { id: string; auraCenti: number }, b: { id: string; auraCenti: number }): string | null {
+  if (a.auraCenti === b.auraCenti) return null;
+  return a.auraCenti > b.auraCenti ? a.id : b.id;
+}

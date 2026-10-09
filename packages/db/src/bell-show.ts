@@ -2,6 +2,7 @@ import { type CityDay, NPC_IDS, addDays, bellScoreMilli, bellStampFor, cityDay, 
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { chainStatus } from "./chain";
 import { duelLines, settleDuels } from "./duels";
+import { settleGrudges } from "./grudge";
 import type { Db } from "./client";
 import { economyReport } from "./economy";
 import { mint } from "./ledger";
@@ -32,6 +33,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   await settleCalls(db, { now });
   // Duels settle at the bell too: the bell is the reveal.
   const duelsSettled = (await settleDuels(db, { now })).settled;
+  const grudgesSettled = (await settleGrudges(db, bellDay, now)).settled;
   const from = dayStart(bellDay);
   const to = dayStart(addDays(bellDay, 1));
   const receipts = await db
@@ -126,7 +128,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
       .values({ bellDay, crewId, chips: t.chips, longShots: t.longShots, chainDays, scoreMilli: bellScoreMilli({ ...t, chainDays }) })
       .onConflictDoNothing();
   }
-  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled };
+  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled };
 }
 
 // --- Bell Stamps ------------------------------------------------------------------------

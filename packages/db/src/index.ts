@@ -27,3 +27,4 @@ export * from "./bell-show";
 export * from "./cast";
 export * from "./close";
 export * from "./duels";
+export * from "./grudge";

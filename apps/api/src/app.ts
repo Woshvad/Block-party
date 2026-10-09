@@ -164,6 +164,10 @@ import {
   retreat,
   myDuels,
   runLastCall,
+  offerGrudge,
+  respondGrudge,
+  cancelGrudge,
+  myGrudges,
   reel,
   setCrewBotMutes,
   startNap,
@@ -861,6 +865,11 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/duels/:id/cancel", auth, async (c) => c.json(await cancelOffer(db, c.get("userId"), uuid(c, "id"), opts())));
   app.post("/v1/duels/:id/snap", auth, async (c) => c.json(await snap(db, c.get("userId"), uuid(c, "id"), opts())));
   app.post("/v1/duels/:id/retreat", auth, async (c) => c.json(await retreat(db, c.get("userId"), uuid(c, "id"), opts())));
+  // The Grudge Match: newcomer vs the friend who invited them, on tomorrow's Slate.
+  app.get("/v1/grudge", auth, async (c) => c.json(await myGrudges(db, c.get("userId"))));
+  app.post("/v1/grudge", auth, async (c) => c.json(await offerGrudge(db, c.get("userId"), opts()), 201));
+  app.post("/v1/grudge/:id/respond", auth, async (c) => c.json(await respondGrudge(db, c.get("userId"), uuid(c, "id"), (await body(c)).accept, opts())));
+  app.post("/v1/grudge/:id/cancel", auth, async (c) => c.json(await cancelGrudge(db, c.get("userId"), uuid(c, "id"), opts())));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.

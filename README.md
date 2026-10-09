@@ -91,6 +91,8 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Guards:** opt-in both ways, Proof of Neighbour, 300 GM, 3 open at a time (checked under locks), one per pair a week (declines count), never the cast, never across a block, no Snap while tilted, and a Snap the other side can't cover is refused with nothing moved.
    - **At the bell:** duels settle at the bell; a won Snap doubles the crew's Bell Score, and the reel and the Daily Close print "@a ate @b's Snap", naming only residents who allow it.
    - **Tests:** every scenario checks that no GM is created or lost.
+30. **The Grudge Match** (done). The one duel a newcomer can play from minute one: against the friend whose crew invite they redeemed (now recorded, first inviter wins), head to head on tomorrow's Slate. 10 GM each in its own escrow, no Snap, once per pair ever in either direction (a unique index, so racing offers make one match), never across a block. Settled at that day's bell only: higher Slate Aura takes the 20 GM pot, a tie gives both back, an unanswered offer goes home.
+   - Also fixed: a brick 23 race test whose barrier locked a row that didn't exist yet (flaky), and a test that assumed which Coin Flip sits in which Slate slot.
 
 ## Deploying
 

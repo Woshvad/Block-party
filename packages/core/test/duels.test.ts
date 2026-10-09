@@ -20,3 +20,13 @@ describe("Fade Duel rules", () => {
     expect(duelAccountId("abc")).toBe("escrow:duel:abc");
   });
 });
+
+describe("Grudge Match rules", () => {
+  it("higher Slate Aura wins; a tie is a draw; its own escrow", async () => {
+    const { grudgeWinner, grudgeAccountId } = await import("../src");
+    expect(grudgeWinner({ id: "a", auraCenti: 100 }, { id: "b", auraCenti: -50 })).toBe("a");
+    expect(grudgeWinner({ id: "a", auraCenti: -1 }, { id: "b", auraCenti: 0 })).toBe("b");
+    expect(grudgeWinner({ id: "a", auraCenti: 0 }, { id: "b", auraCenti: 0 })).toBeNull();
+    expect(grudgeAccountId("x")).toBe("escrow:grudge:x");
+  });
+});

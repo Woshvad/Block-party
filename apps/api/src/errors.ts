@@ -24,6 +24,7 @@ import {
   TowerError,
   BellShowError,
   DuelError,
+  GrudgeError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -210,7 +211,19 @@ const DUEL: Record<DuelError["code"], number> = {
   CANT_COVER: 409,
 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL };
+const GRUDGE: Record<GrudgeError["code"], number> = {
+  NO_INVITER: 409,
+  ONCE_PER_PAIR: 409,
+  NOT_ENOUGH_GM: 409,
+  BLOCKED: 403,
+  NO_SUCH_MATCH: 404,
+  NOT_YOURS: 403,
+  WRONG_STATE: 409,
+  TOO_LATE: 409,
+  INVALID_INPUT: 400,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -236,6 +249,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
+  if (e instanceof GrudgeError) return out(GRUDGE[e.code], e.code, e.message);
   if (e instanceof DuelError) return out(DUEL[e.code], e.code, e.message);
   if (e instanceof BellShowError) return out(BELL_SHOW[e.code], e.code, e.message);
   if (e instanceof TowerError) return out(TOWER[e.code], e.code, e.message);
