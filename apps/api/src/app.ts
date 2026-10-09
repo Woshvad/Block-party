@@ -313,7 +313,8 @@ export function createApp(cfg: AppConfig) {
     "*",
     cors({
       origin: (origin) => (cfg.allowedOrigins.includes(origin) ? origin : null),
-      allowHeaders: ["authorization", "content-type", "idempotency-key"],
+      // x-client tells the API it's the Telegram Mini App (no real trades there).
+      allowHeaders: ["authorization", "content-type", "idempotency-key", "x-client"],
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
       maxAge: 600,
     }),
