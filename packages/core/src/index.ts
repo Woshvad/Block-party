@@ -19,3 +19,4 @@ export * from "./rides";
 export * from "./away";
 export * from "./notifications";
 export * from "./life";
+export * from "./relationships";

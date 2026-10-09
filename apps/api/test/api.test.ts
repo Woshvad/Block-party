@@ -643,3 +643,25 @@ describe("naps and the city clock over HTTP", () => {
     expect((await call("POST", "/internal/actions/run")).status).toBe(404);
   });
 });
+
+describe("relationships over HTTP", () => {
+  it("best frens, rivals and the overview; strangers and junk refused", async () => {
+    const { client } = await import("./harness");
+    const [a, b, stranger] = [await resident(), await resident(), await resident()];
+    const [x, y] = a.userId < b.userId ? [a.userId, b.userId] : [b.userId, a.userId];
+    await client`INSERT INTO frens (a, b) VALUES (${x}, ${y})`;
+    expect((await call("PUT", `/v1/frens/${b.userId}/best`, { token: a.token, body: { on: true } })).body).toEqual({ bestFren: true });
+    expect((await call("PUT", `/v1/frens/${stranger.userId}/best`, { token: a.token, body: { on: true } })).status).toBe(409);
+    expect((await call("PUT", `/v1/frens/${b.userId}/best`, { token: a.token, body: { on: "yes" } })).status).toBe(400);
+    expect((await call("POST", `/v1/rivals/${b.userId}`, { token: a.token })).body).toEqual({ status: "pending" });
+    expect((await call("POST", `/v1/rivals/${a.userId}/accept`, { token: b.token })).body).toEqual({ status: "active" });
+    expect((await call("POST", `/v1/rivals/${stranger.userId}/accept`, { token: b.token })).status).toBe(404);
+    const rel = await call("GET", "/v1/relationships", { token: a.token });
+    expect(rel.body).toMatchObject({ bestFrens: [b.userId], rivals: [{ userId: b.userId }] });
+    expect((await call("DELETE", `/v1/rivals/${a.userId}`, { token: b.token })).status).toBe(204);
+    expect((await call("GET", "/v1/relationships", { token: a.token })).body.rivals).toEqual([]);
+    // A block over HTTP ends it all.
+    await call("POST", `/v1/blocks/${a.userId}`, { token: b.token });
+    expect((await call("GET", "/v1/relationships", { token: a.token })).body.frens).toEqual([]);
+  });
+});

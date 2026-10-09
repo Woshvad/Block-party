@@ -12,6 +12,7 @@ export * from "./ledger";
 export * from "./moods";
 export * from "./notify";
 export * from "./life";
+export * from "./relationships";
 export * from "./politics";
 export * from "./pon";
 export * from "./ratelimit";

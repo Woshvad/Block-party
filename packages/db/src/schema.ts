@@ -1134,3 +1134,46 @@ export const longActions = pgTable(
     check("long_actions_finished", sql`(${t.status} = 'running') = (${t.finishedAt} IS NULL)`),
   ],
 );
+
+// Best frens: up to 3 picks from your frens. A pick is private; the badge
+// shows only when it's mutual.
+export const bestFrens = pgTable(
+  "best_frens",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    frenId: uuid("fren_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.frenId] }), check("best_frens_not_self", sql`${t.userId} <> ${t.frenId}`), index("best_frens_fren").on(t.frenId)],
+);
+
+// Friendly rivals: both agree, either ends it. Bragging rights only.
+export const rivalryStatus = pgEnum("rivalry_status", ["pending", "active"]);
+export const rivalries = pgTable(
+  "rivalries",
+  {
+    a: uuid("a")
+      .notNull()
+      .references(() => users.id),
+    b: uuid("b")
+      .notNull()
+      .references(() => users.id),
+    proposedBy: uuid("proposed_by")
+      .notNull()
+      .references(() => users.id),
+    status: rivalryStatus("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.a, t.b] }),
+    check("rivalries_ordered", sql`${t.a} < ${t.b}`),
+    check("rivalries_proposer", sql`${t.proposedBy} IN (${t.a}, ${t.b})`),
+    check("rivalries_accepted", sql`(${t.status} = 'active') = (${t.acceptedAt} IS NOT NULL)`),
+    index("rivalries_b").on(t.b),
+  ],
+);

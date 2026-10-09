@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
 import { accountAgeDays, allowNewDmThread, enqueueModeration, isBlockedEitherWay, isRestricted } from "./safety";
-import { blocks, boardFollows, crewMembers, dmThreads, frenTaps, frens, messages, mutes, users } from "./schema";
+import { bestFrens, blocks, boardFollows, crewMembers, dmThreads, frenTaps, frens, messages, mutes, users } from "./schema";
 
 export type ChatErrorCode =
   | "INVALID_INPUT"
@@ -95,6 +95,7 @@ export async function unfren(db: Db, userId: string, target: unknown) {
   await db.transaction(async (tx) => {
     await tx.delete(frens).where(and(eq(frens.a, a), eq(frens.b, b)));
     await tx.delete(frenTaps).where(or(and(eq(frenTaps.fromId, userId), eq(frenTaps.toId, other)), and(eq(frenTaps.fromId, other), eq(frenTaps.toId, userId))));
+    await tx.delete(bestFrens).where(or(and(eq(bestFrens.userId, userId), eq(bestFrens.frenId, other)), and(eq(bestFrens.userId, other), eq(bestFrens.frenId, userId))));
   });
 }
 

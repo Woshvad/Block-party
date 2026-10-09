@@ -8,7 +8,7 @@ import {
 import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
-import { appeals, blocks, moderationItems, mutes, reports, restrictions, staff, users } from "./schema";
+import { appeals, bestFrens, blocks, frenTaps, frens, moderationItems, mutes, reports, restrictions, rivalries, staff, users } from "./schema";
 
 export type SafetyErrorCode =
   | "INVALID_INPUT"
@@ -48,7 +48,15 @@ async function requireUser(db: Db, id: unknown): Promise<string> {
 export async function blockUser(db: Db, blockerId: string, target: unknown) {
   const blockedId = await requireUser(db, target);
   if (blockedId === blockerId) throw new SafetyError("NOT_SELF", "you can't block yourself");
-  await db.insert(blocks).values({ blockerId, blockedId }).onConflictDoNothing();
+  const [a, b] = blockerId < blockedId ? [blockerId, blockedId] : [blockedId, blockerId];
+  // A block ends everything between the two: frenship, fren taps, best-fren picks, rivalry.
+  await db.transaction(async (tx) => {
+    await tx.insert(blocks).values({ blockerId, blockedId }).onConflictDoNothing();
+    await tx.delete(frens).where(and(eq(frens.a, a), eq(frens.b, b)));
+    await tx.delete(frenTaps).where(or(and(eq(frenTaps.fromId, a), eq(frenTaps.toId, b)), and(eq(frenTaps.fromId, b), eq(frenTaps.toId, a))));
+    await tx.delete(bestFrens).where(or(and(eq(bestFrens.userId, a), eq(bestFrens.frenId, b)), and(eq(bestFrens.userId, b), eq(bestFrens.frenId, a))));
+    await tx.delete(rivalries).where(and(eq(rivalries.a, a), eq(rivalries.b, b)));
+  });
 }
 
 export async function unblockUser(db: Db, blockerId: string, target: unknown) {

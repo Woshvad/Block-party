@@ -20,6 +20,7 @@ import {
   PonError,
   NotifyError,
   LifeError,
+  RelationshipError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -167,7 +168,9 @@ const NOTIFY: Record<NotifyError["code"], number> = { INVALID_INPUT: 400, NOT_AL
 
 const LIFE: Record<LifeError["code"], number> = { INVALID_INPUT: 400, NOT_HOME: 409, CANT_NAP_THERE: 409, BUSY: 409, NOTHING_RUNNING: 409 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE };
+const RELATIONSHIP: Record<RelationshipError["code"], number> = { INVALID_INPUT: 400, NO_SUCH_USER: 404, NOT_FRENS: 409, TOO_MANY: 409, BLOCKED: 403, NO_SUCH_REQUEST: 404 };
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -193,6 +196,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
+  if (e instanceof RelationshipError) return out(RELATIONSHIP[e.code], e.code, e.message);
   if (e instanceof LifeError) return out(LIFE[e.code], e.code, e.message);
   if (e instanceof NotifyError) return out(NOTIFY[e.code], e.code, e.message);
   if (e instanceof ChatError) return { ...out(CHAT[e.code], e.code, e.message), body: { error: { code: e.code, message: e.message, ...(e.reason ? { field: e.reason } : {}) } } };

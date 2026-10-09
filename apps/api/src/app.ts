@@ -141,6 +141,11 @@ import {
   cancelLongAction,
   myLongAction,
   finishDueActions,
+  myRelationships,
+  setBestFren,
+  proposeRivalry,
+  acceptRivalry,
+  endRivalry,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -711,6 +716,15 @@ export function createApp(cfg: AppConfig) {
   // --- Frens and chat --------------------------------------------------------
 
   app.get("/v1/frens", auth, async (c) => c.json(await frensOf(db, c.get("userId"))));
+  // Best frens, rivals and crew bonds.
+  app.get("/v1/relationships", auth, async (c) => c.json(await myRelationships(db, c.get("userId"), opts())));
+  app.put("/v1/frens/:userId/best", auth, async (c) => c.json(await setBestFren(db, c.get("userId"), uuid(c, "userId"), (await body(c)).on)));
+  app.post("/v1/rivals/:userId", auth, async (c) => c.json(await proposeRivalry(db, c.get("userId"), uuid(c, "userId"), opts())));
+  app.post("/v1/rivals/:userId/accept", auth, async (c) => c.json(await acceptRivalry(db, c.get("userId"), uuid(c, "userId"), opts())));
+  app.delete("/v1/rivals/:userId", auth, async (c) => {
+    await endRivalry(db, c.get("userId"), uuid(c, "userId"));
+    return c.body(null, 204);
+  });
   app.post("/v1/frens/:userId", auth, async (c) => c.json(await tapFren(db, c.get("userId"), uuid(c, "userId"), (await body(c)).place, where)));
   app.delete("/v1/frens/:userId", auth, async (c) => {
     await unfren(db, c.get("userId"), uuid(c, "userId"));
