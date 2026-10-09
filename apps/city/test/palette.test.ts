@@ -1,6 +1,6 @@
 import { BACKSTORIES, LOOK_PALETTES } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { HAIR, OUTFIT, SKIN, itemLabel, label } from "../src/palette";
+import { HAIR, OUTFIT, SKIN, itemLabel, label, plural } from "../src/palette";
 
 describe("palettes", () => {
   it("have exactly as many colours as the server allows", () => {
@@ -25,5 +25,14 @@ describe("labels", () => {
 
   it("every starter item gets a label with no underscores", () => {
     for (const b of Object.values(BACKSTORIES)) expect(itemLabel(b.starterItem)).not.toMatch(/_/);
+  });
+});
+
+describe("plural", () => {
+  it("counts right", () => {
+    expect(plural(1, "day")).toBe("1 day");
+    expect(plural(0, "day")).toBe("0 days");
+    expect(plural(1200, "neighbour")).toBe("1,200 neighbours");
+    expect(plural(2, "body", "bodies")).toBe("2 bodies");
   });
 });

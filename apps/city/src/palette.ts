@@ -22,3 +22,6 @@ export function itemLabel(id: string): string {
   const m = /^(poster|tee|cap)_(.+)$/.exec(id);
   return m ? `${label(m[2]!)} ${m[1]}` : label(id);
 }
+
+// "1 day", "3 days".
+export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;

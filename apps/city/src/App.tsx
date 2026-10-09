@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { type Screen, boot, screenFor } from "./boot";
+import type { PageId } from "./pages/More";
 import { initTelegram, launchData } from "./telegram";
 
 const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
@@ -12,6 +13,11 @@ const Tower = dynamic(() => import("./Tower"), { ssr: false });
 const Travel = dynamic(() => import("./Travel"), { ssr: false });
 const LiveRoom = dynamic(() => import("./LiveRoom"), { ssr: false });
 const HomeEditor = dynamic(() => import("./HomeEditor"), { ssr: false });
+const More = dynamic(() => import("./pages/More"), { ssr: false });
+const MePage = dynamic(() => import("./pages/MePage"), { ssr: false });
+const CityHall = dynamic(() => import("./pages/CityHall"), { ssr: false });
+const Results = dynamic(() => import("./pages/Results"), { ssr: false });
+const FaucetFren = dynamic(() => import("./pages/FaucetFren"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -114,19 +120,31 @@ export default function App() {
   }
 }
 
-type Tab = "city" | "home" | "today" | "tower";
+type Tab = "city" | "home" | "today" | "tower" | "more";
 
 // A resident's home screen: the city board and Today, with the tab bar.
 function Home({ api, me: first }: { api: Api; me: Me }) {
   const [tab, setTab] = useState<Tab>(() => {
     const h = typeof location !== "undefined" ? location.hash.slice(1) : "";
-    return h === "today" || h === "tower" || h === "home" ? h : "city";
+    return h === "today" || h === "tower" || h === "home" || h === "more" ? h : "city";
   });
   const [me, setMe] = useState(first);
   const [trip, setTrip] = useState<{ place: string; ridesFree: boolean } | null>(null);
   const [room, setRoom] = useState<string | null>(null);
+  const [page, setPage] = useState<PageId | null>(null);
+
+  // While the app is open and visible, a heartbeat each minute: play time
+  // (Rested, Chart-brain, the reality check) counts even without other calls.
+  useEffect(() => {
+    const beat = () => {
+      if (document.visibilityState === "visible") void api.heartbeat().catch(() => {});
+    };
+    const id = setInterval(beat, 60_000);
+    return () => clearInterval(id);
+  }, [api]);
   const go = (t: Tab) => {
     setTab(t);
+    setPage(null);
     history.replaceState(null, "", t === "city" ? location.pathname + location.search : `#${t}`);
   };
   const refreshGm = () => void api.me().then((m) => setMe(m)).catch(() => {});
@@ -143,9 +161,29 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       />
     );
   }
+  const back = () => setPage(null);
+  const pageView =
+    page === "me" ? (
+      <MePage api={api} me={me} onBack={back} onChanged={refreshGm} />
+    ) : page === "cityhall" ? (
+      <CityHall api={api} me={me} onBack={back} onGoToHall={() => (setPage(null), setTrip({ place: "city_hall", ridesFree: false }))} />
+    ) : page === "results" ? (
+      <Results api={api} onBack={back} />
+    ) : page === "faucet" ? (
+      <FaucetFren api={api} onBack={back} />
+    ) : page ? (
+      <div className="screen center">
+        <p>Coming in the next build.</p>
+        <button className="btn" onClick={back}>
+          Back
+        </button>
+      </div>
+    ) : null;
   return (
     <>
-      {tab === "city" && <CityBoard api={api} me={me} onOpenToday={() => go("today")} onPlace={(place, ridesFree) => setTrip({ place, ridesFree })} />}
+      {pageView}
+      {!pageView && tab === "more" && <More me={me} open={setPage} />}
+      {!pageView && tab === "city" && <CityBoard api={api} me={me} onOpenToday={() => go("today")} onPlace={(place, ridesFree) => setTrip({ place, ridesFree })} onOpenHall={() => setPage("cityhall")} onOpenMe={() => setPage("me")} />}
       {trip && (
         <Travel
           api={api}
@@ -160,9 +198,9 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
           }}
         />
       )}
-      {tab === "home" && <HomeEditor api={api} gm={me.gm} onGm={refreshGm} onGoInside={() => setTrip({ place: `home:${me.userId}`, ridesFree: false })} />}
-      {tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} />}
-      {tab === "tower" && <Tower api={api} />}
+      {!pageView && tab === "home" && <HomeEditor api={api} gm={me.gm} onGm={refreshGm} onGoInside={() => setTrip({ place: `home:${me.userId}`, ridesFree: false })} />}
+      {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} />}
+      {!pageView && tab === "tower" && <Tower api={api} />}
       <nav className="tabs">
         <button className={tab === "city" ? "on" : ""} onClick={() => go("city")}>
           City
@@ -175,6 +213,9 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
         </button>
         <button className={tab === "tower" ? "on" : ""} onClick={() => go("tower")}>
           Tower
+        </button>
+        <button className={tab === "more" ? "on" : ""} onClick={() => go("more")}>
+          More
         </button>
       </nav>
     </>

@@ -138,3 +138,26 @@ button.pill { border: 0; cursor: pointer; text-align: left; color: var(--ink); }
 .band { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 12px 0 2px; }
 .napbtn { position: fixed; right: 12px; top: calc(env(safe-area-inset-top) + 56px); z-index: 3; border: 0; cursor: pointer; }
 .toast.good { color: var(--green); }
+.pagehead { gap: 8px; }
+.pagehead h1 { margin: 0; }
+.grow { flex: 1; }
+.menuitem { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: var(--pill); border-radius: 16px; padding: 12px 14px; cursor: pointer; color: var(--ink); font: inherit; }
+.menuitem .ico { font-size: 22px; width: 32px; text-align: center; }
+.menuitem .txt { display: flex; flex-direction: column; flex: 1; gap: 1px; }
+.menuitem .chev { color: var(--muted); font-size: 20px; }
+.menu { display: flex; flex-direction: column; gap: 8px; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.field input, .field textarea, .field select { font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(20, 22, 31, 0.15); background: #fff; color: var(--ink); }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { border: 0; background: var(--ink); color: #fff; border-radius: 12px; padding: 10px 14px; font-size: 14px; cursor: pointer; }
+.btn.light { background: #f1efe8; color: var(--ink); }
+.btn.danger { background: #c0392b; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.stat { display: flex; justify-content: space-between; font-size: 14px; padding: 4px 0; }
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; padding: 6px 0; }
+.toggle input { width: 20px; height: 20px; }
+.bigq { font-size: 16px; font-weight: 600; }
+.paper p { margin: 6px 0; line-height: 1.4; }
+.ask { flex: 1; min-width: 0; font-size: 16px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(20, 22, 31, 0.15); }
+pre.grid { font-size: 22px; line-height: 1.2; margin: 6px 0; white-space: pre-wrap; }
+.banner { cursor: pointer; }

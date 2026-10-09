@@ -214,7 +214,7 @@ function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) 
   );
 }
 
-export default function CityBoard({ api, me, onOpenToday, onPlace }: { api: Api; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void }) {
+export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe }: { api: Api; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
   const hall = useLoad(() => api.cityHall(), [api]);
   const slate = useLoad(() => api.slate(), [api]);
   const now = useNow(1000);
@@ -231,7 +231,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace }: { api: Api;
   return (
     <>
       {/* Mock values until the API is wired in phase 1. */}
-      <div className="banner" role="status">
+      <div className="banner" role="button" onClick={onOpenHall}>
         {h?.mayor ? (
           <>
             Mayor <b>@{h.mayor.handle}</b>
@@ -254,9 +254,9 @@ export default function CityBoard({ api, me, onOpenToday, onPlace }: { api: Api;
       </div>
       <div className="hud">
         {me?.resident ? (
-          <div className="pill">
+          <button className="pill" onClick={onOpenMe}>
             @{me.resident.handle} · <b>{me.gm.toLocaleString("en-US")} GM</b>
-          </div>
+          </button>
         ) : null}
         <div className="pill">
           🔔 Bell in <b>{until(bellAt, now)}</b>
