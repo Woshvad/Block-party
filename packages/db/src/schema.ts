@@ -1349,3 +1349,15 @@ export const crewBellScores = pgTable(
   },
   (t) => [primaryKey({ columns: [t.bellDay, t.crewId] }), index("crew_bell_scores_rank").on(t.bellDay, t.scoreMilli)],
 );
+
+// The cast: labelled AI characters. Each has a user row (so its calls and
+// lines have an author) but no resident and no GM account, ever.
+export const npcs = pgTable("npcs", {
+  key: text("key").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id),
+  name: text("name").notNull(),
+  home: text("home").notNull(),
+});

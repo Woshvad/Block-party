@@ -154,6 +154,7 @@ import {
   myGrid,
   publishSlate,
   claimBellStamp,
+  npcCalls,
   reel,
   setCrewBotMutes,
   startNap,
@@ -870,6 +871,7 @@ export function createApp(cfg: AppConfig) {
     }
     await next();
   };
+  app.post("/internal/cast/calls", internal, async (c) => c.json(await npcCalls(db, opts())));
   app.post("/internal/slate/publish", internal, async (c) => c.json(await publishSlate(db, opts())));
   app.post("/internal/tower/poll", internal, async (c) => {
     if (!cfg.odds) throw new ApiError(503, "ODDS_DISABLED", "no odds feed configured");

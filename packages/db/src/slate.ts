@@ -1,4 +1,4 @@
-import { type CityDay, type Modifier, type SlateTier, addDays, cityDay, gridText, modifierFor, pickSlate, slateNumber, square } from "@bp/core";
+import { type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, cityDay, gridText, modifierFor, pickSlate, slateNumber, square } from "@bp/core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client";
 import { calls, markets, slateCards, slates } from "./schema";
@@ -114,7 +114,7 @@ export async function myGrid(db: Db, userId: string, day: unknown, opts: { now?:
   });
   // Where you landed: the share of today's players whose Slate Aura you beat.
   const totals = new Map<string, number>();
-  for (const c of all) totals.set(c.userId, (totals.get(c.userId) ?? 0) + (c.aura ?? 0));
+  for (const c of all) if (!NPC_IDS.includes(c.userId)) totals.set(c.userId, (totals.get(c.userId) ?? 0) + (c.aura ?? 0));
   const myTotal = totals.get(userId);
   const others = [...totals.entries()].filter(([u]) => u !== userId).map(([, v]) => v);
   const percentile = myTotal === undefined || !others.length ? null : Math.round((100 * others.filter((v) => v < myTotal).length) / others.length);

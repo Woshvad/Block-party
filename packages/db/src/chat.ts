@@ -1,4 +1,4 @@
-import { PLACE_RE, checkMessage } from "@bp/core";
+import { CAST, PLACE_RE, checkMessage, npcById } from "@bp/core";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
@@ -144,7 +144,13 @@ async function read(db: Db, readerId: string, where: Channel, opts: { before?: u
     .where(and(eq(messages.kind, where.kind), eq(messages.channel, where.channel), eq(messages.hidden, false), before ? lt(messages.createdAt, before) : undefined))
     .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(CHAT.pageSize);
-  return rows.filter((r) => !hidden.has(r.authorId));
+  // Every line from the cast carries its label.
+  return rows
+    .filter((r) => !hidden.has(r.authorId))
+    .map((r) => {
+      const k = npcById(r.authorId);
+      return k ? { ...r, npc: { name: CAST[k].name, label: CAST[k].label } } : r;
+    });
 }
 
 // --- Boards ---------------------------------------------------------------------

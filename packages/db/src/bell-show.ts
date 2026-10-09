@@ -1,4 +1,4 @@
-import { type CityDay, addDays, bellScoreMilli, bellStampFor, cityDay, median, userAccountId } from "@bp/core";
+import { type CityDay, NPC_IDS, addDays, bellScoreMilli, bellStampFor, cityDay, median, userAccountId } from "@bp/core";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { chainStatus } from "./chain";
 import type { Db } from "./client";
@@ -37,7 +37,9 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
     .innerJoin(markets, eq(markets.id, calls.marketId))
     .where(and(eq(calls.status, "locked"), eq(markets.status, "resolved"), gte(markets.resolvedAt, from), lt(markets.resolvedAt, to)));
   const byUser = new Map<string, { wins: number; losses: number }>();
+  // The cast doesn't get moods, tilt or Bell Score chips.
   for (const r of receipts) {
+    if (NPC_IDS.includes(r.userId)) continue;
     const u = byUser.get(r.userId) ?? { wins: 0, losses: 0 };
     if ((r.side === "yes") === r.outcome) u.wins++;
     else u.losses++;
@@ -70,14 +72,14 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
         .where(and(inArray(calls.marketId, slateIds), eq(calls.status, "locked"), eq(calls.onSlate, true)))
     : [];
   const reds = new Map<string, number>();
-  for (const c of slateCalls) if (c.aura !== null && c.aura < -200) reds.set(c.userId, (reds.get(c.userId) ?? 0) + 1);
+  for (const c of slateCalls) if (!NPC_IDS.includes(c.userId) && c.aura !== null && c.aura < -200) reds.set(c.userId, (reds.get(c.userId) ?? 0) + 1);
   let tilted = 0;
   for (const [userId, n] of reds) if (await maybeTilt(db, userId, { rektSquares: n }, { now })) tilted++;
 
   // Bell Scores: CALLED IT chips per crew, Long Shots caught, the gm chain.
   const longShot = slate.find((s) => s.tier === "long_shot")?.marketId;
   const golds = new Set(slateCalls.filter((c) => c.marketId === longShot && c.side === "yes" && c.outcome === true).map((c) => c.userId));
-  const winners = receipts.filter((r) => (r.side === "yes") === r.outcome).map((r) => r.userId);
+  const winners = receipts.filter((r) => (r.side === "yes") === r.outcome && !NPC_IDS.includes(r.userId)).map((r) => r.userId);
   const members = winners.length
     ? await db
         .select({ userId: crewMembers.userId, crewId: crewMembers.crewId })
@@ -149,9 +151,10 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     .orderBy(asc(slateCards.slot));
   const chances = cards.length
     ? await db
-        .select({ marketId: calls.marketId, chance: calls.chance })
+        .select({ userId: calls.userId, marketId: calls.marketId, chance: calls.chance })
         .from(calls)
         .where(and(inArray(calls.marketId, cards.map((c) => c.marketId)), eq(calls.status, "locked")))
+        .then((rows) => rows.filter((r) => !NPC_IDS.includes(r.userId)))
     : [];
   const top = await db
     .select({ crewId: crewBellScores.crewId, name: crews.name, chips: crewBellScores.chips, longShots: crewBellScores.longShots, scoreMilli: crewBellScores.scoreMilli })

@@ -76,6 +76,10 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Bell Stamps:** one tap after a locked call that day pays 25 GM (150 on Sundays), once, even with racing taps.
    - **The reel's data:** the Slate band by band with the Long Shot last, the top 3 crews and yours, the day's burn, your grid, and tomorrow's Long Shot. Only after the bell.
    - **Waits for later bricks:** the foil stamp for being on the Roof at the bell, the losing Bunkers' lights, the Ratio of the Day and Tower Lights.
+27. **The cast** (done).
+   - **Accounts:** NOTHING-9000, the Contrarian, Faucet Fren and Hash Brown are seeded by migration with fixed ids and a "NPC · AI" label on every call, receipt, Right List row and Board line. They have no resident and can never hold a GM account (a database trigger refuses one).
+   - **Their calls:** NOTHING-9000 says NO to every Slate card as soon as it's out; the Contrarian calls at 12:00 UTC against where the city leans (or against the world's favourite when nobody has called). They lock like anyone's but never record a streak, never move the City or Crew bars, never get moods, tilt or Bell Score chips, never count in a grid percentile, and fading one pings nobody. They never call a frozen card.
+   - **Board lines:** after the bell each posts one templated line on its home Board, at most 3 NPC lines a Board a day ("Nothing happened. Again."). Hash Brown's alpha is always fiction, and every line passes the NPC rules.
 
 ## Deploying
 

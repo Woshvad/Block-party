@@ -5,8 +5,11 @@ import {
   RIGHT_LIST,
   SEASON_EPOCH,
   SEASON_LENGTH_DAYS,
+  NPC_IDS,
   TOWER,
   addDays,
+  npcById,
+  CAST,
   auraCenti,
   chanceOnSide,
   revealAt,
@@ -183,8 +186,8 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
         if (Math.abs(tick!.price - c.seenPrice) <= TOWER.maxSlip) {
           const half = !c.onSlate && market.freezesAt.getTime() - now.getTime() < TOWER.halfAuraLastMinutes * 60_000;
           await tx.update(calls).set({ status: "locked", tickId: tick!.id, lockedPrice: tick!.price, lockedAt: now, half }).where(eq(calls.id, c.id));
-          // Your streak grows with your first call of the day.
-          await recordStreakDay(tx, c.userId, { now });
+          // Your streak grows with your first call of the day (the cast has no streak, and no GM).
+          if (!NPC_IDS.includes(c.userId)) await recordStreakDay(tx, c.userId, { now });
           locked++;
         } else {
           await tx.update(calls).set({ status: "price_moved" }).where(eq(calls.id, c.id));
@@ -273,15 +276,20 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
     })
     .from(calls)
     .innerJoin(markets, eq(markets.id, calls.marketId))
-    .innerJoin(residents, eq(residents.userId, calls.userId))
+    .leftJoin(residents, eq(residents.userId, calls.userId))
     .where(and(eq(calls.id, callId), eq(calls.status, "locked")));
   if (!r) return null;
-  const cityRows = await db.select({ chance: calls.chance }).from(calls).where(and(eq(calls.marketId, r.marketId), eq(calls.status, "locked")));
+  const npc = npcById((await db.select({ u: calls.userId }).from(calls).where(eq(calls.id, callId)))[0]!.u);
+  if (!r.handle && !npc) return null;
+  const cityRows = (await db.select({ userId: calls.userId, chance: calls.chance }).from(calls).where(and(eq(calls.marketId, r.marketId), eq(calls.status, "locked")))).filter(
+    (x) => !NPC_IDS.includes(x.userId),
+  );
   const city = cityRows.length >= TOWER.cityBarMin ? median(cityRows.map((x) => x.chance)) : null;
   const revealed = r.status === "resolved" && r.resolvedAt !== null && now >= revealAt(r.resolvedAt);
   return {
     id: r.id,
-    handle: r.handle,
+    handle: r.handle ?? CAST[npc!].name,
+    npc: npc ? CAST[npc].label : null,
     question: r.question,
     side: r.side,
     chance: r.chance,
@@ -338,9 +346,14 @@ export async function rightList(db: Db, opts: { now?: Date; season?: number; lim
       : [],
   );
   const me = opts.userId ? (ranked.find((r) => r.userId === opts.userId) ?? null) : null;
+  // The cast keeps its rows, labelled.
+  const label = (id: string) => {
+    const k = npcById(id);
+    return k ? { handle: CAST[k].name, npc: CAST[k].label } : { handle: handles.get(id) ?? null, npc: null };
+  };
   return {
     season,
-    rows: ranked.slice(0, Math.min(opts.limit ?? 100, 500)).map((r) => ({ ...r, handle: handles.get(r.userId) ?? null })),
+    rows: ranked.slice(0, Math.min(opts.limit ?? 100, 500)).map((r) => ({ ...r, ...label(r.userId) })),
     me,
   };
 }
@@ -430,7 +443,7 @@ export async function makeCall(db: Db, userId: string, input: CallInput, opts: {
     }
   });
   // They get pinged (opt-in) when someone fades them.
-  if (via === "fade" && viaUserId) {
+  if (via === "fade" && viaUserId && !NPC_IDS.includes(viaUserId)) {
     const [r] = await db.select({ handle: residents.handle }).from(residents).where(eq(residents.userId, userId));
     await notify(db, viaUserId, "faded", { handle: r!.handle }, { now });
   }
@@ -469,10 +482,13 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
   let cityCount = 0;
   let crewCount = 0;
   if (!blurred && !m.infoOnly) {
-    const locked = await db
-      .select({ userId: calls.userId, chance: calls.chance })
-      .from(calls)
-      .where(and(eq(calls.marketId, m.id), eq(calls.status, "locked")));
+    // The cast's calls never move the City or Crew bars.
+    const locked = (
+      await db
+        .select({ userId: calls.userId, chance: calls.chance })
+        .from(calls)
+        .where(and(eq(calls.marketId, m.id), eq(calls.status, "locked")))
+    ).filter((c) => !NPC_IDS.includes(c.userId));
     cityCount = locked.length;
     if (cityCount >= TOWER.cityBarMin) city = median(locked.map((c) => c.chance));
     const [myCrew] = await db.select({ crewId: crewMembers.crewId }).from(crewMembers).where(and(eq(crewMembers.userId, userId), isNull(crewMembers.leftAt)));
