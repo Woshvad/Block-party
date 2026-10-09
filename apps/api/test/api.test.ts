@@ -823,3 +823,11 @@ describe("syndicates over HTTP", () => {
     expect((await call("POST", `/v1/syndicates/${crypto.randomUUID()}/shake`, { token: me.token })).status).toBe(404);
   });
 });
+
+describe("the Crew League over HTTP", () => {
+  it("crewless: 404; champions: a list", async () => {
+    const me = await resident();
+    expect((await call("GET", "/v1/crews/mine/league", { token: me.token })).status).toBe(404);
+    expect(Array.isArray((await call("GET", "/v1/league/champions", { token: me.token })).body)).toBe(true);
+  });
+});

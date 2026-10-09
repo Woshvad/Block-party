@@ -253,6 +253,13 @@
       "when": 1791560702654,
       "tag": "0035_syndicates",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791561419311,
+      "tag": "0036_crew_league",
+      "breakpoints": true
     }
   ]
 }

@@ -176,6 +176,8 @@ import {
   proposeSyndicate,
   shakeSyndicate,
   crewTable,
+  leagueCard,
+  leagueChampions,
   reel,
   setCrewBotMutes,
   startNap,
@@ -891,6 +893,13 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/crews/mine/table", auth, async (c) => c.json(await crewTable(db, c.get("userId"), opts())));
   app.post("/v1/syndicates", auth, async (c) => c.json(await proposeSyndicate(db, c.get("userId"), await body(c), opts()), 201));
   app.post("/v1/syndicates/:id/shake", auth, async (c) => c.json(await shakeSyndicate(db, c.get("userId"), uuid(c, "id"), { chance: (await body(c)).chance }, opts())));
+  // The Crew League: your crew's card, and the banners flying this week.
+  app.get("/v1/crews/mine/league", auth, async (c) => {
+    const m = await myCrew(db, c.get("userId"));
+    if (!m) throw new ApiError(404, "NOT_FOUND", "you're not in a crew");
+    return c.json(await leagueCard(db, m.crew.id));
+  });
+  app.get("/v1/league/champions", auth, async (c) => c.json(await leagueChampions(db)));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.

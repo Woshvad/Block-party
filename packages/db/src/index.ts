@@ -30,3 +30,4 @@ export * from "./duels";
 export * from "./grudge";
 export * from "./city-markets";
 export * from "./syndicates";
+export * from "./league";

@@ -1556,3 +1556,34 @@ export const syndicateShakes = pgTable(
   },
   (t) => [primaryKey({ columns: [t.syndicateId, t.userId] })],
 );
+
+// The Crew League ladder: each crew's place in its size group (division = place / 10).
+export const crewLeague = pgTable(
+  "crew_league",
+  {
+    crewId: uuid("crew_id")
+      .primaryKey()
+      .references(() => crews.id),
+    sizeGroup: text("size_group").notNull(),
+    place: integer("place").notNull(),
+  },
+  (t) => [uniqueIndex("crew_league_place").on(t.sizeGroup, t.place)],
+);
+
+// Each week's table, kept for league cards and the banner.
+export const leagueWeeks = pgTable(
+  "league_weeks",
+  {
+    week: date("week", { mode: "string" }).notNull(), // its Monday
+    crewId: uuid("crew_id")
+      .notNull()
+      .references(() => crews.id),
+    sizeGroup: text("size_group").notNull(),
+    division: integer("division").notNull(),
+    rank: integer("rank").notNull(), // within the division, before moves
+    score: integer("score_milli"), // null: fewer than 5 callers
+    moved: text("moved").notNull(), // up, down or stayed
+    champion: boolean("champion").notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.week, t.crewId] })],
+);
