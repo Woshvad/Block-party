@@ -1289,3 +1289,30 @@ export const tickets = pgTable(
   },
   (t) => [check("tickets_range", sql`${t.balance} BETWEEN 0 AND 9`)],
 );
+
+// The Daily Slate: published once per city day, never changed after.
+export const slates = pgTable("slates", {
+  cityDay: date("city_day", { mode: "string" }).primaryKey(),
+  modifier: text("modifier").notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+});
+
+export const slateCards = pgTable(
+  "slate_cards",
+  {
+    cityDay: date("city_day", { mode: "string" })
+      .notNull()
+      .references(() => slates.cityDay),
+    slot: integer("slot").notNull(),
+    tier: text("tier").notNull(),
+    marketId: uuid("market_id")
+      .notNull()
+      .references(() => markets.id),
+  },
+  (t) => [
+    primaryKey({ columns: [t.cityDay, t.slot] }),
+    unique("slate_cards_market_once").on(t.cityDay, t.marketId),
+    index("slate_cards_market").on(t.marketId),
+    check("slate_cards_slot", sql`${t.slot} BETWEEN 0 AND 5`),
+  ],
+);

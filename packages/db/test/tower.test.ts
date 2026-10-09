@@ -96,6 +96,10 @@ describe("the odds feed", () => {
     f.provider.fail = true;
     expect(await pollOdds(db, f.provider, { now: new Date(t + 2 * MIN) })).toMatchObject({ ok: false });
     expect((await feedStatus(db, { now: new Date(t + 4 * MIN) })).paused).toBe(true);
+    // A poll stamped after "now" (clock skew, or a test elsewhere) says nothing about now.
+    f.provider.fail = false;
+    await pollOdds(db, f.provider, { now: new Date(t + 365 * D) });
+    expect((await feedStatus(db, { now: new Date(t + 5 * MIN) })).paused).toBe(true);
   });
 
   it("a poller that finds another one running skips; a repeat poll for the same moment adds no tick", async () => {

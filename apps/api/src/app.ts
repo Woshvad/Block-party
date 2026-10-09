@@ -150,6 +150,9 @@ import {
   pollOdds,
   receipt,
   rightList,
+  todaySlate,
+  myGrid,
+  publishSlate,
   setCrewBotMutes,
   startNap,
   cancelLongAction,
@@ -808,6 +811,17 @@ export function createApp(cfg: AppConfig) {
       receiptLink: r && cfg.receiptSecret ? `/v1/receipts/${await receiptToken(k.id, cfg.receiptSecret)}` : null,
     });
   });
+  // The Daily Slate and your grid (sealed until the bell).
+  app.get("/v1/slate", auth, async (c) => {
+    const s = await todaySlate(db, c.get("userId"), opts());
+    if (!s) throw new ApiError(404, "NOT_FOUND", "today's Slate isn't out yet");
+    return c.json(s);
+  });
+  app.get("/v1/slate/:day/grid", auth, async (c) => {
+    const g = await myGrid(db, c.get("userId"), c.req.param("day"), opts());
+    if (!g) throw new ApiError(404, "NOT_FOUND", "no Slate that day");
+    return c.json(g);
+  });
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
   app.get("/v1/receipts/:token", async (c) => {
@@ -847,6 +861,7 @@ export function createApp(cfg: AppConfig) {
     }
     await next();
   };
+  app.post("/internal/slate/publish", internal, async (c) => c.json(await publishSlate(db, opts())));
   app.post("/internal/tower/poll", internal, async (c) => {
     if (!cfg.odds) throw new ApiError(503, "ODDS_DISABLED", "no odds feed configured");
     return c.json(await pollOdds(db, cfg.odds, opts()));

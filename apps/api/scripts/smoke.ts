@@ -51,6 +51,13 @@ if (process.env.SMOKE_TOWER) {
     const c = await step("the call", "GET", `/v1/tower/calls/${made?.id}`, { token });
     console.log(`     call ${c?.status} at ${c?.lockedPrice ?? "-"}`);
     await step("the market", "GET", `/v1/tower/markets/${m.id}`, { token });
+    await step("publish the Slate (internal)", "POST", "/internal/slate/publish", { secret: true });
+    const slate = await step("today's Slate", "GET", "/v1/slate", { token });
+    console.log(`     Slate #${slate?.number}: ${slate?.cards?.length} cards, ${slate?.modifier}`);
+    if (slate?.cards?.length !== 6) {
+      failures++;
+      console.log("FAIL the Slate should have 6 cards");
+    }
   } else {
     failures++;
     console.log("FAIL the Floor is empty");

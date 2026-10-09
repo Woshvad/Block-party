@@ -197,6 +197,13 @@
       "when": 1791549833375,
       "tag": "0027_tower_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791551707769,
+      "tag": "0028_slate",
+      "breakpoints": true
     }
   ]
 }

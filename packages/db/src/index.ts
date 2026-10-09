@@ -22,3 +22,4 @@ export * from "./safety";
 export * from "./schema-status";
 export * as schema from "./schema";
 export * from "./tower";
+export * from "./slate";

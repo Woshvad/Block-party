@@ -20,13 +20,14 @@ import {
   ticketsAfter,
   vibeGap,
 } from "@bp/core";
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { areFrens } from "./chat";
 import { recordStreakDay } from "./daily";
 import { moodState } from "./moods";
 import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
+import { isOnSlate, slateModifier } from "./slate";
 import { calls, crewMembers, feedPolls, marketTicks, markets, residents, tickets } from "./schema";
 
 export class TowerError extends Error {
@@ -347,7 +348,12 @@ export async function rightList(db: Db, opts: { now?: Date; season?: number; lim
 // "Network congested: odds paused at 20:41" once polls stop succeeding.
 export async function feedStatus(db: Db, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
-  const [last] = await db.select({ at: feedPolls.at }).from(feedPolls).where(eq(feedPolls.ok, true)).orderBy(desc(feedPolls.at)).limit(1);
+  const [last] = await db
+    .select({ at: feedPolls.at })
+    .from(feedPolls)
+    .where(and(eq(feedPolls.ok, true), lte(feedPolls.at, now)))
+    .orderBy(desc(feedPolls.at))
+    .limit(1);
   const paused = !last || now.getTime() - last.at.getTime() > TOWER.feedPausedAfterSeconds * 1000;
   return { paused, lastTickAt: last?.at ?? null };
 }
@@ -375,7 +381,7 @@ export async function makeCall(db: Db, userId: string, input: CallInput, opts: {
   if (market.status !== "open" || now >= market.freezesAt) throw new TowerError("MARKET_CLOSED", "calls are closed on this market");
   if ((await feedStatus(db, { now })).paused) throw new TowerError("FEED_PAUSED", "odds are paused; try again when they're back");
   if (Math.abs(market.price - seen) > TOWER.maxSlip) throw new TowerError("PRICE_MOVED", "price moved; call again?");
-  const onSlate = (await opts.onSlate?.(market.id)) ?? false;
+  const onSlate = opts.onSlate ? await opts.onSlate(market.id) : await isOnSlate(db, market.id, now);
 
   // Tail copies a fren's side; Fade takes the other one.
   let side = input.side as Side;
@@ -452,9 +458,11 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
     .select()
     .from(calls)
     .where(and(eq(calls.userId, userId), eq(calls.marketId, m.id), inArray(calls.status, ["pending", "locked"])));
-  const onSlate = (await opts.onSlate?.(m.id)) ?? false;
+  const onSlate = opts.onSlate ? await opts.onSlate(m.id) : await isOnSlate(db, m.id, now);
   const mood = await moodState(db, userId, { now });
   const blurred = (onSlate && mine?.status !== "locked") || mood.chartBrain.hideCrowdBars;
+  // Blind Slate: even your crew's sides stay hidden until the bell.
+  const blind = onSlate && (await slateModifier(db, now)) === "blind_slate";
 
   let city: number | null = null;
   let crew: number | null = null;
@@ -474,7 +482,7 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
       );
       const crewChances = locked.filter((c) => mates.has(c.userId)).map((c) => c.chance);
       crewCount = crewChances.length;
-      if (crewCount >= TOWER.crewBarMin) crew = median(crewChances);
+      if (crewCount >= TOWER.crewBarMin && !blind) crew = median(crewChances);
     }
   }
   return {

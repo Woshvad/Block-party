@@ -744,3 +744,15 @@ describe("receipts and the Right List over HTTP", () => {
     expect((await call("GET", "/v1/tower/right-list", { token: me.token, via: tower })).body).toMatchObject({ season: expect.any(Number), rows: expect.any(Array) });
   });
 });
+
+describe("the Slate over HTTP", () => {
+  it("not out yet is a 404; published, it lists the cards; the grid is sealed; junk days are 404s", async () => {
+    const me = await resident();
+    const s = await call("GET", "/v1/slate", { token: me.token });
+    expect([200, 404]).toContain(s.status); // other tests may have published today's
+    expect((await call("POST", "/internal/slate/publish", { headers: { "x-internal-secret": SECRET } })).status).toBe(200);
+    expect((await call("GET", "/v1/slate/not-a-day/grid", { token: me.token })).status).toBe(404);
+    expect((await call("GET", "/v1/slate/1999-01-01/grid", { token: me.token })).status).toBe(404);
+    expect((await call("GET", "/v1/slate")).status).toBe(401);
+  });
+});

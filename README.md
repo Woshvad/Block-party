@@ -64,6 +64,12 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Streaks:** a locked call records the day's streak, so streaks and their GM bonus finally grow.
    - **Receipts:** a public link per call, signed so it can't be faked or guessed, sealed ("IN THE MEMPOOL") until the bell after settlement, then stamped CALLED IT or REKT with its Aura. Never an amount, a wallet, a user id or whether it was real.
    - **The Right List:** season Aura ÷ (settled calls + 15), revealed results only, 10 settled calls to appear, Tails excluded, rusty after 14 days without a call, and a new season starting from 25% of last season's Aura per call.
+25. **The Daily Slate** (done).
+   - **Publishing:** one shared puzzle a day, published once (racing publishers agree; the database refuses any later change). It's 1 Lock, 2 Coin Flips, 2 Spicy and 1 Long Shot. Every card is callable for 15+ hours and settles before the next bell, with at least 2 non-crypto, at most 2 from one price ladder, and never politics. The nearest tier fills an empty slot, and the pick is deterministic so every server agrees. Six cards as soon as six fit; a short Slate only after 02:00 UTC.
+   - **Calls:** Slate calls take no ticket and earn full Aura to the freeze.
+   - **Bell Modifier:** one a day (Contrarian Day, NOTHING Day, Blind Slate); Blind Slate hides your crew's bar even after you lock.
+   - **The grid:** sealed until the bell, then coloured by Aura (🟩 ⬜ 🟥 ⬛, 🟨 for a Long Shot YES that hit, grey for a voided card, ⏳ for one not settled by the bell), plus the share line ("Block Party #5 🟩⬜🟥⬛🟩🟨") and your city percentile (a tie isn't a win). Calls made before the Slate went out don't count on it.
+   - **Fixed here:** the feed status could read a poll stamped later than "now" as proof the feed was alive.
 
 ## Deploying
 
