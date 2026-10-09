@@ -110,6 +110,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **The winner:** most wins, then win rate, then the earliest entry. It plays on the reel and prints on that market's receipts, and pays no GM.
    - **Fixed here:** the prompt could have picked a stale market from an earlier day.
 37. **Tower Lights** (done; bidding is behind `FEATURE_TOWER_LIGHTS`, off until mid-beta as the plan says). The lead or a deputy bids from the crew pot to light the Tower at tonight's bell: at least the reserve (1,000 GM, or half last week's median winning bid once there's a week of winners), raised but never lowered (a raise moves only the difference). Bids sit in one escrow per night, one bidder at a time. The Tower shows the top bid all day and tells crews they've been outbid. At the bell the top bid burns and lights the Tower (on the reel), and every other bid goes back to its pot.
+38. **Alt checks** (done). Nightly, after the bell's payouts: a flow graph of GM between each pair of residents over 14 days, across duels (the loser's stake, a retreat's ante), Grudge Matches and City markets (each loser's stake split to winners by stake). More than 500 GM one way with under 20% back is flagged, once a day, for staff review. A flagged pair can't Fade Duel or Grudge Match each other for 14 days. This is the check the plan waits for before switching duels on.
 
 ## Deploying
 

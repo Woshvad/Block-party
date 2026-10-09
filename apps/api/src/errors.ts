@@ -213,9 +213,11 @@ const DUEL: Record<DuelError["code"], number> = {
   TILTED: 409,
   AT_THE_CAP: 409,
   CANT_COVER: 409,
+  ALT_FLAGGED: 403,
 };
 
 const GRUDGE: Record<GrudgeError["code"], number> = {
+  ALT_FLAGGED: 403,
   NO_INVITER: 409,
   ONCE_PER_PAIR: 409,
   NOT_ENOUGH_GM: 409,

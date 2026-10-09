@@ -179,6 +179,7 @@ import {
   takeDownRatioEntry,
   bidLights,
   lightsBoard,
+  staffAltFlags,
   createCityMarket,
   resolveCityMarket,
   stakeCity,
@@ -937,6 +938,12 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/tower-lights/bid", auth, async (c) => {
     if (!cfg.features?.towerLights) throw new ApiError(503, "LIGHTS_NOT_YET", "Tower Lights switch on mid-beta");
     return c.json(await bidLights(db, c.get("userId"), (await body(c)).amount, opts()), 201);
+  });
+  // Alt checks, for staff review.
+  app.get("/v1/staff/alt-flags", auth, async (c) => {
+    const flags = await staffAltFlags(db, c.get("userId"));
+    if (!flags) throw new ApiError(403, "NOT_STAFF", "staff only");
+    return c.json(flags);
   });
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));

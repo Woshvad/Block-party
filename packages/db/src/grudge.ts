@@ -1,13 +1,14 @@
 import { type CityDay, GRUDGE, NPC_IDS, addDays, cityDay, grudgeAccountId, grudgeWinner, userAccountId } from "@bp/core";
 import { and, eq, inArray, or } from "drizzle-orm";
 import type { Db } from "./client";
+import { isFlaggedPair } from "./alts";
 import { openEscrowAccount, transfer } from "./ledger";
 import { isBlockedEitherWay } from "./safety";
 import { calls, grudgeMatches, inviters, slateCards } from "./schema";
 
 export class GrudgeError extends Error {
   constructor(
-    readonly code: "NO_INVITER" | "ONCE_PER_PAIR" | "NOT_ENOUGH_GM" | "BLOCKED" | "NO_SUCH_MATCH" | "NOT_YOURS" | "WRONG_STATE" | "TOO_LATE" | "INVALID_INPUT",
+    readonly code: "ALT_FLAGGED" | "NO_INVITER" | "ONCE_PER_PAIR" | "NOT_ENOUGH_GM" | "BLOCKED" | "NO_SUCH_MATCH" | "NOT_YOURS" | "WRONG_STATE" | "TOO_LATE" | "INVALID_INPUT",
     message: string,
   ) {
     super(message);
@@ -37,6 +38,7 @@ export async function offerGrudge(db: Db, newcomerId: string, opts: { now?: Date
   const [inv] = await db.select().from(inviters).where(eq(inviters.userId, newcomerId));
   if (!inv || NPC_IDS.includes(inv.inviterId)) throw new GrudgeError("NO_INVITER", "a Grudge Match is against the friend who invited you");
   if (await isBlockedEitherWay(db, newcomerId, inv.inviterId)) throw new GrudgeError("BLOCKED", "you can't");
+  if (await isFlaggedPair(db, newcomerId, inv.inviterId, now)) throw new GrudgeError("ALT_FLAGGED", "these two accounts can't play each other right now");
   const day = addDays(cityDay(now), 1);
   try {
     return await db.transaction(async (tx) => {

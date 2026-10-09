@@ -1,6 +1,7 @@
 import { DUEL, NPC_IDS, canDouble, duelAccountId, nextBell, retreatSplit, userAccountId } from "@bp/core";
 import { and, eq, gte, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
+import { isFlaggedPair } from "./alts";
 import { burn, getBalance, openEscrowAccount, transfer } from "./ledger";
 import { maybeTilt, moodState } from "./moods";
 import { notify } from "./notify";
@@ -25,7 +26,8 @@ export class DuelError extends Error {
       | "SNAP_USED"
       | "TILTED"
       | "AT_THE_CAP"
-      | "CANT_COVER",
+      | "CANT_COVER"
+      | "ALT_FLAGGED",
     message: string,
   ) {
     super(message);
@@ -107,6 +109,7 @@ export async function challenge(db: Db, challengerId: string, input: { marketId?
   if (!mine || !theirs || mine.side === theirs.side) throw new DuelError("NOT_ACROSS", "you duel someone on the other side of a market you've both called");
   if (!(await prefs(db, challengerId)).duelsOn || !(await prefs(db, opponentId)).duelsOn) throw new DuelError("DUELS_OFF", "both of you need duels switched on");
   if (await isBlockedEitherWay(db, challengerId, opponentId)) throw new DuelError("BLOCKED", "you can't");
+  if (await isFlaggedPair(db, challengerId, opponentId, now)) throw new DuelError("ALT_FLAGGED", "these two accounts can't duel each other right now");
   await eligible(db, challengerId);
 
   const duel = await db.transaction(async (tx) => {

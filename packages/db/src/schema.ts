@@ -1657,3 +1657,23 @@ export const lightBids = pgTable(
   },
   (t) => [primaryKey({ columns: [t.cityDay, t.crewId] }), check("light_bids_amount", sql`${t.amount} > 0`), index("light_bids_day").on(t.cityDay, t.status)],
 );
+
+// Alt checks: pairs of accounts flagged for staff (one row per pair per day).
+export const altFlags = pgTable(
+  "alt_flags",
+  {
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    low: uuid("low")
+      .notNull()
+      .references(() => users.id),
+    high: uuid("high")
+      .notNull()
+      .references(() => users.id),
+    fromUser: uuid("from_user").notNull(),
+    toUser: uuid("to_user").notNull(),
+    amount: integer("amount").notNull(),
+    back: integer("back").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.cityDay, t.low, t.high] }), index("alt_flags_pair").on(t.low, t.high), check("alt_flags_order", sql`${t.low} < ${t.high}`)],
+);
