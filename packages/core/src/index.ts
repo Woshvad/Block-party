@@ -30,3 +30,4 @@ export * from "./cast";
 export * from "./close";
 export * from "./duels";
 export * from "./city-markets";
+export * from "./syndicates";

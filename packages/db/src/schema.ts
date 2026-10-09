@@ -1495,9 +1495,9 @@ export const cityPositions = pgTable(
     marketId: uuid("market_id")
       .notNull()
       .references(() => cityMarkets.id),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id),
+    // A resident's own stake, or a crew's syndicate stake from its pot.
+    userId: uuid("user_id").references(() => users.id),
+    crewId: uuid("crew_id").references(() => crews.id),
     side: callSide("side").notNull(),
     stake: integer("stake").notNull(),
     payout: integer("payout"),
@@ -1505,7 +1505,54 @@ export const cityPositions = pgTable(
   },
   (t) => [
     uniqueIndex("city_positions_one").on(t.marketId, t.userId),
+    uniqueIndex("city_positions_one_crew").on(t.marketId, t.crewId),
     index("city_positions_user").on(t.userId),
-    check("city_positions_stake", sql`${t.stake} BETWEEN 1 AND 800 AND (${t.payout} IS NULL OR ${t.payout} >= 0)`),
+    check("city_positions_owner", sql`(${t.userId} IS NULL) <> (${t.crewId} IS NULL)`),
+    check("city_positions_stake", sql`${t.stake} >= 1 AND (${t.crewId} IS NOT NULL OR ${t.stake} <= 800) AND (${t.payout} IS NULL OR ${t.payout} >= 0)`),
   ],
+);
+
+// Syndicate calls: proposed by a member, live once enough of the crew shakes.
+export const syndicateStatus = pgEnum("syndicate_status", ["proposed", "live", "expired"]);
+
+export const syndicates = pgTable(
+  "syndicates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    crewId: uuid("crew_id")
+      .notNull()
+      .references(() => crews.id),
+    proposerId: uuid("proposer_id")
+      .notNull()
+      .references(() => users.id),
+    marketId: uuid("market_id").references(() => markets.id), // a Tower market: a coordinated call
+    cityMarketId: uuid("city_market_id").references(() => cityMarkets.id), // a City market: a pot stake
+    side: callSide("side").notNull(),
+    perShake: integer("per_shake"), // City only: GM from the pot per member who shook
+    needed: integer("needed").notNull(),
+    status: syndicateStatus("status").notNull().default("proposed"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    liveAt: timestamp("live_at", { withTimezone: true }),
+  },
+  (t) => [
+    check("syndicates_target", sql`(${t.marketId} IS NULL) <> (${t.cityMarketId} IS NULL)`),
+    check("syndicates_per_shake", sql`(${t.cityMarketId} IS NULL) = (${t.perShake} IS NULL) AND (${t.perShake} IS NULL OR ${t.perShake} BETWEEN 1 AND 50)`),
+    uniqueIndex("syndicates_one_open_tower").on(t.crewId, t.marketId).where(sql`${t.status} IN ('proposed', 'live') AND ${t.marketId} IS NOT NULL`),
+    uniqueIndex("syndicates_one_open_city").on(t.crewId, t.cityMarketId).where(sql`${t.status} IN ('proposed', 'live') AND ${t.cityMarketId} IS NOT NULL`),
+  ],
+);
+
+export const syndicateShakes = pgTable(
+  "syndicate_shakes",
+  {
+    syndicateId: uuid("syndicate_id")
+      .notNull()
+      .references(() => syndicates.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.syndicateId, t.userId] })],
 );

@@ -99,6 +99,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Payouts:** winners split the losers' stakes by stake, minus the 2% bell burn on wins over 50 (capped at 500), and rounding dust burns. Paid + burned = staked (property-tested), and a winner never loses GM. One-sided or voided markets refund everyone; an unresolved manual market waits for a later bell.
    - **Headcounts:** count Proof of Neighbour residents who made a call that day and were in the room at the moment, never away residents or the cast.
    - **Season Stack:** GM profit on City markets and Fade Duels this season, counted by the market's bell day. City results open the reel.
+33. **Syndicate calls** (done). A member proposes; the crew gets the opt-in "syndicate needs your shake" ping; it goes live once 5 members (or a quarter of those who said gm today, if fewer, at least 1) shake within 2 hours. On a Tower market each shake is the shaker's own free call on that side (nobody shakes against a call they already made, and real money is never pooled). On a City market it stakes from the crew pot, up to 50 GM per member who shook, topped up as more shake but never past what the pot holds, and winnings go back to the pot. One open syndicate per crew per market. The Crew Table shows who shook, never who traded for real. Racing shakes stake exactly once each.
 
 ## Deploying
 

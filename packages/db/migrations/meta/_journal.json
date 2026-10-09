@@ -246,6 +246,13 @@
       "when": 1791559930447,
       "tag": "0034_city_markets",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791560702654,
+      "tag": "0035_syndicates",
+      "breakpoints": true
     }
   ]
 }

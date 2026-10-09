@@ -1,4 +1,4 @@
-import { CITY, type CityDay, PLACE_RE, PON, SEASON_EPOCH, SEASON_LENGTH_DAYS, addDays, cityAccountId, cityDay, cityStakeCap, seasonOf, settleCity, userAccountId } from "@bp/core";
+import { CITY, type CityDay, PLACE_RE, PON, SEASON_EPOCH, SEASON_LENGTH_DAYS, addDays, cityAccountId, cityDay, cityStakeCap, crewPotAccountId, seasonOf, settleCity, userAccountId } from "@bp/core";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { burn, getBalance, openEscrowAccount, transfer } from "./ledger";
@@ -148,7 +148,9 @@ export async function settleCityMarkets(db: Db, bellDay: CityDay, now: Date) {
             );
       for (const p of positions) {
         const amount = plan.payouts.get(p.id) ?? 0;
-        if (amount > 0) await transfer(tx, { from: cityAccountId(m.id), to: userAccountId(p.userId), amount, kind: result === null ? "city_refund" : "city_payout", idempotencyKey: `city:${m.id}:${p.userId}:payout` });
+        // A crew's syndicate stake pays back into its pot.
+        const to = p.crewId ? crewPotAccountId(p.crewId) : userAccountId(p.userId!);
+        if (amount > 0) await transfer(tx, { from: cityAccountId(m.id), to, amount, kind: result === null ? "city_refund" : "city_payout", idempotencyKey: `city:${m.id}:${p.crewId ?? p.userId}:payout` });
         await tx.update(cityPositions).set({ payout: amount }).where(eq(cityPositions.id, p.id));
       }
       if (plan.burned > 0) await burn(tx, { accountId: cityAccountId(m.id), amount: plan.burned, kind: "city_bell_burn", idempotencyKey: `city:${m.id}:bell_burn` });
@@ -186,7 +188,7 @@ export async function seasonStack(db: Db, opts: { now?: Date; season?: number; l
     WITH flows AS (
       SELECT p.user_id, p.payout - p.stake AS profit
       FROM city_positions p JOIN city_markets m ON m.id = p.market_id
-      WHERE m.status IN ('settled', 'refunded') AND p.payout IS NOT NULL
+      WHERE m.status IN ('settled', 'refunded') AND p.payout IS NOT NULL AND p.user_id IS NOT NULL
         AND m.bell_day >= ${from.slice(0, 10)}::date AND m.bell_day < ${to.slice(0, 10)}::date
       UNION ALL
       SELECT d.winner_id, CASE WHEN d.winner_id = d.challenger_id THEN d.stake_opponent ELSE d.stake_challenger END

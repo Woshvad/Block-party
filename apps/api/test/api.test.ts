@@ -814,3 +814,12 @@ describe("City markets over HTTP", () => {
     expect((await call("GET", "/v1/season-stack", { token: me.token })).body).toMatchObject({ season: expect.any(Number) });
   });
 });
+
+describe("syndicates over HTTP", () => {
+  it("crewless residents are refused; junk is a 400", async () => {
+    const me = await resident();
+    expect((await call("GET", "/v1/crews/mine/table", { token: me.token })).body.error.code).toBe("NOT_IN_CREW");
+    expect((await call("POST", "/v1/syndicates", { token: me.token, body: { side: "yes" } })).body.error.code).toBe("NOT_IN_CREW");
+    expect((await call("POST", `/v1/syndicates/${crypto.randomUUID()}/shake`, { token: me.token })).status).toBe(404);
+  });
+});

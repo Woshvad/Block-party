@@ -26,6 +26,7 @@ import {
   DuelError,
   GrudgeError,
   CityMarketError,
+  SyndicateError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -236,7 +237,19 @@ const CITY_MARKET: Record<CityMarketError["code"], number> = {
   WRONG_STATE: 409,
 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET };
+const SYNDICATE: Record<SyndicateError["code"], number> = {
+  NOT_IN_CREW: 403,
+  INVALID_INPUT: 400,
+  NO_SUCH_MARKET: 404,
+  MARKET_CLOSED: 409,
+  ALREADY_PROPOSED: 409,
+  NO_SUCH_SYNDICATE: 404,
+  EXPIRED: 409,
+  ALREADY_SHOOK: 409,
+  OTHER_SIDE: 409,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET, SYNDICATE };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -262,6 +275,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
+  if (e instanceof SyndicateError) return out(SYNDICATE[e.code], e.code, e.message);
   if (e instanceof CityMarketError) return out(CITY_MARKET[e.code], e.code, e.message);
   if (e instanceof GrudgeError) return out(GRUDGE[e.code], e.code, e.message);
   if (e instanceof DuelError) return out(DUEL[e.code], e.code, e.message);

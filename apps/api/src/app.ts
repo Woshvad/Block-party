@@ -173,6 +173,9 @@ import {
   stakeCity,
   openCityMarkets,
   seasonStack,
+  proposeSyndicate,
+  shakeSyndicate,
+  crewTable,
   reel,
   setCrewBotMutes,
   startNap,
@@ -884,6 +887,10 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/season-stack", auth, async (c) => c.json(await seasonStack(db, opts())));
   app.post("/v1/staff/city-markets", auth, async (c) => c.json(await createCityMarket(db, c.get("userId"), await body(c), opts()), 201));
   app.post("/v1/staff/city-markets/:id/resolve", auth, async (c) => c.json(await resolveCityMarket(db, c.get("userId"), uuid(c, "id"), (await body(c)).result, opts())));
+  // Syndicate calls at the Crew Table.
+  app.get("/v1/crews/mine/table", auth, async (c) => c.json(await crewTable(db, c.get("userId"), opts())));
+  app.post("/v1/syndicates", auth, async (c) => c.json(await proposeSyndicate(db, c.get("userId"), await body(c), opts()), 201));
+  app.post("/v1/syndicates/:id/shake", auth, async (c) => c.json(await shakeSyndicate(db, c.get("userId"), uuid(c, "id"), { chance: (await body(c)).chance }, opts())));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
