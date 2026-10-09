@@ -47,17 +47,17 @@ describe("the mint and the burn, in shards", () => {
   });
 
   it("each account always uses one shard; many accounts spread over all of them", () => {
-    const ids = Array.from({ length: 2000 }, () => userAccountId(randomUUID()));
+    const ids = Array.from({ length: 100 * SYS_SHARDS }, () => userAccountId(randomUUID()));
     for (const id of ids.slice(0, 50)) expect(burnAccountFor(id)).toBe(burnAccountFor(id));
     const counts = new Map<string, number>();
     for (const id of ids) counts.set(burnAccountFor(id), (counts.get(burnAccountFor(id)) ?? 0) + 1);
     expect(counts.size).toBe(SYS_SHARDS);
-    for (const n of counts.values()) expect(n).toBeGreaterThan(2000 / SYS_SHARDS / 2); // no shard starves or hogs
+    for (const n of counts.values()) expect(n).toBeGreaterThan(100 / 2); // no shard starves or hogs
     for (const id of ids) {
       expect(isBurnAccount(burnAccountFor(id))).toBe(true);
       expect(MINT_SHARDS).toContain(mintAccountFor(id));
     }
-    expect(isBurnAccount("sys:burn:16")).toBe(false);
+    expect(isBurnAccount(`sys:burn:${SYS_SHARDS}`)).toBe(false);
     expect(isBurnAccount("sys:burnt")).toBe(false);
   });
 

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx src/node.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "load": "tsx scripts/load.ts",
     "test": "node build.mjs && vitest run",
     "typecheck": "tsc -p .",
     "build": "node build.mjs"

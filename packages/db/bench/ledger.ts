@@ -33,6 +33,15 @@ async function run(label: string, sink: (a: string) => string) {
   console.log(`${label.padEnd(10)} ${N * ROUNDS} burns in ${ms.toFixed(0)} ms = ${((N * ROUNDS) / (ms / 1000)).toFixed(0)}/s`);
 }
 
-await run("one row", () => "sys:burn");
-await run("sharded", burnAccountFor);
+// The same accounts on 16 shards (each 64-shard index folded down to 16), for comparison.
+const sixteen = (a: string) => {
+  const id = burnAccountFor(a);
+  const n = id === "sys:burn" ? 0 : Number(id.split(":")[2]) % 16;
+  return n === 0 ? "sys:burn" : `sys:burn:${n}`;
+};
+for (let round = 0; round < 2; round++) {
+  await run(`one row ${round}`, () => "sys:burn");
+  await run(`16 shards ${round}`, sixteen);
+  await run(`64 shards ${round}`, burnAccountFor);
+}
 await close();

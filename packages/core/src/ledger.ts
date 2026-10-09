@@ -70,11 +70,11 @@ export const SYS_MINT = "sys:mint"; // every GM ever created leaves here; runs n
 export const SYS_BURN = "sys:burn"; // every GM ever destroyed lands here
 
 // Every mint and burn in the city used to lock one of those two rows, so all
-// GM flows queued behind each other. Each is now 16 shards; the shard is
+// GM flows queued behind each other. Each is now 64 shards (16 at first; a load test showed shard locks were the hot spot); the shard is
 // picked from the other account, so one resident always uses the same shard
 // and different residents mostly don't collide. Shard 0 keeps the old id, so
 // history before sharding stays where it was. Reports sum all shards.
-export const SYS_SHARDS = 16;
+export const SYS_SHARDS = 64;
 const shardIds = (base: string) => Array.from({ length: SYS_SHARDS }, (_, i) => (i === 0 ? base : `${base}:${i}`));
 export const MINT_SHARDS: readonly string[] = shardIds(SYS_MINT);
 export const BURN_SHARDS: readonly string[] = shardIds(SYS_BURN);

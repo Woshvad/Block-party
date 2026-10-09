@@ -10,7 +10,7 @@ const need = (k: string) => {
   if (!v) throw new Error(`${k} is not set`);
   return v;
 };
-const { db } = createDb(need("DATABASE_URL"));
+const { db } = createDb(need("DATABASE_URL"), { max: Number(process.env.DB_POOL ?? 10) });
 const schema = await schemaStatus(db);
 if (!schema.upToDate) {
   console.error(`database has ${schema.applied}/${schema.expected} migrations; run pnpm db:migrate first`);
@@ -21,6 +21,8 @@ const app = createApp({
   telegramBotToken: need("TELEGRAM_BOT_TOKEN"),
   internalSecret: need("INTERNAL_SECRET"),
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000").split(","),
+  // Dev and load tests only: trust a header for the client IP (Cloudflare's cf-connecting-ip in production).
+  ...(process.env.CLIENT_IP_HEADER ? { clientIpHeader: process.env.CLIENT_IP_HEADER } : {}),
   ...(process.env.ODDS_SOURCE === "mock" ? { odds: mockProvider(() => sampleMarkets(new Date())) } : {}),
 });
 const port = Number(process.env.PORT ?? 8787);
