@@ -3,22 +3,24 @@ import { Html, MapControls } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { BOARD, clampTarget, fitCamera, shortCount } from "./camera";
-import type { Me } from "./api";
+import { BOARD, clampTarget, fitCamera } from "./camera";
+import type { Api, Me } from "./api";
+import { until, useNow } from "./clock";
+import { useLoad } from "./useLoad";
 import { PerfProbe } from "./PerfHud";
 import { haptic, initTelegram } from "./telegram";
 
 // The city board: low-poly blocks from an angled camera, a pin with a live
 // headcount over every place. Bright by day, neon at night (the plan's look).
 
-type Place = { key: string; name: string; icon: string; x: number; z: number; w: number; d: number; h: number; day: string; night: string; here: number };
+type Place = { key: string; name: string; icon: string; x: number; z: number; w: number; d: number; h: number; day: string; night: string; info: string };
 const PLACES: Place[] = [
-  { key: "tower", name: "Prediction Tower", icon: "🔮", x: 0, z: 0, w: 3, d: 3, h: 11, day: "#6b63c9", night: "#5a4fb0", here: 212 },
-  { key: "city_hall", name: "City Hall", icon: "🏛️", x: -8, z: -3, w: 4.5, d: 3.5, h: 3.6, day: "#8fb1e0", night: "#4a5c94", here: 48 },
-  { key: "watch_party", name: "Watch Party Hall", icon: "📺", x: 8, z: -3, w: 4.5, d: 3.5, h: 3.2, day: "#8f7cc0", night: "#5b437f", here: 96 },
-  { key: "gm_wall", name: "gm Wall", icon: "☀️", x: 5, z: 6, w: 3.5, d: 1.2, h: 2, day: "#97c459", night: "#4b6b3f", here: 64 },
-  { key: "faucet", name: "The Faucet", icon: "🚰", x: -2, z: 8, w: 2, d: 2, h: 1.6, day: "#85b7eb", night: "#38608a", here: 17 },
-  { key: "diner", name: "Gwei Diner", icon: "🍔", x: 10, z: 5, w: 3.2, d: 2.6, h: 2.2, day: "#f09595", night: "#7a4040", here: 31 },
+  { key: "tower", name: "Prediction Tower", icon: "🔮", x: 0, z: 0, w: 3, d: 3, h: 11, day: "#6b63c9", night: "#5a4fb0", info: "The odds wall and every call" },
+  { key: "city_hall", name: "City Hall", icon: "🏛️", x: -8, z: -3, w: 4.5, d: 3.5, h: 3.6, day: "#8fb1e0", night: "#4a5c94", info: "The Mayor, the Law and the election" },
+  { key: "watch_party", name: "Watch Party Hall", icon: "📺", x: 8, z: -3, w: 4.5, d: 3.5, h: 3.2, day: "#8f7cc0", night: "#5b437f", info: "Big games on the big screen" },
+  { key: "gm_wall", name: "gm Wall", icon: "☀️", x: 5, z: 6, w: 3.5, d: 1.2, h: 2, day: "#97c459", night: "#4b6b3f", info: "Say gm with the city" },
+  { key: "faucet", name: "The Faucet", icon: "🚰", x: -2, z: 8, w: 2, d: 2, h: 1.6, day: "#85b7eb", night: "#38608a", info: "Free GM help from Faucet Fren" },
+  { key: "diner", name: "Gwei Diner", icon: "🍔", x: 10, z: 5, w: 3.2, d: 2.6, h: 2.2, day: "#f09595", night: "#7a4040", info: "Booths for you and your crew" },
 ];
 // Districts painted on the ground, and empty lots for what's coming next.
 const DISTRICTS = [
@@ -46,14 +48,17 @@ function Building({ p, night, onTap }: { p: Place; night: boolean; onTap: (p: Pl
         <meshBasicMaterial color={night ? (p.key === "tower" ? "#1d9e75" : "#fac775") : "#f4f1ea"} transparent opacity={night ? 0.9 : 0.35} />
       </mesh>
       <Html position={[0, p.h + 0.9, 0]} center distanceFactor={40} zIndexRange={[1, 0]}>
-        <button className="pin" onClick={() => onTap(p)} aria-label={`${p.name}, ${p.here} here`}>
+        {/* Live headcounts arrive with the rooms' presence endpoint; until then, no made-up numbers. */}
+        <button className="pin" onClick={() => onTap(p)} aria-label={p.name}>
           <span className="ico">{p.icon}</span>
-          <span className="n">{shortCount(p.here)}</span>
         </button>
       </Html>
     </group>
   );
 }
+
+// The bell rings at 00:00 UTC; used until the Slate (which carries it) loads.
+const nextBell = (now: number) => new Date(Math.floor(now / 86_400_000 + 1) * 86_400_000).toISOString();
 
 // The Tower's top glows with the market: green when the city's favourites are up, red when down.
 function TowerTop({ night }: { night: boolean }) {
@@ -193,9 +198,8 @@ function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) 
         </mesh>
       ))}
       <Html position={[-9.4, 2.6, 4.5]} center distanceFactor={40} zIndexRange={[1, 0]}>
-        <button className="pin" onClick={() => onTap({ ...PLACES[0]!, key: "crew_row", name: "Crew Row", icon: "🏠", here: 140 })} aria-label="Crew Row, 140 here">
+        <button className="pin" onClick={() => onTap({ ...PLACES[0]!, key: "crew_row", name: "Crew Row", icon: "🏠", info: "Homes, and the crews' houses" })} aria-label="Crew Row">
           <span className="ico">🏠</span>
-          <span className="n">140</span>
         </button>
       </Html>
       <instancedMesh ref={dots} args={[STROLLER, undefined, residents.length]}>
@@ -205,7 +209,13 @@ function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) 
   );
 }
 
-export default function CityBoard({ me }: { me?: Me | null }) {
+export default function CityBoard({ api, me, onOpenToday }: { api: Api; me: Me; onOpenToday?: () => void }) {
+  const hall = useLoad(() => api.cityHall(), [api]);
+  const slate = useLoad(() => api.slate(), [api]);
+  const now = useNow(1000);
+  const h = hall.data;
+  const s = slate.data;
+  const bellAt = s?.bellAt ?? nextBell(now);
   const hour = new Date().getHours();
   const [night, setNight] = useState(hour >= 19 || hour < 6);
   const [picked, setPicked] = useState<Place | null>(null);
@@ -217,7 +227,25 @@ export default function CityBoard({ me }: { me?: Me | null }) {
     <>
       {/* Mock values until the API is wired in phase 1. */}
       <div className="banner" role="status">
-        <span className="live" /> 1,284 online · Mayor <b>ada.eth</b> · Law: <b>Double Faucet</b>
+        {h?.mayor ? (
+          <>
+            Mayor <b>@{h.mayor.handle}</b>
+          </>
+        ) : (
+          "No Mayor yet"
+        )}
+        {" · "}
+        {h?.law ? (
+          <>
+            Law: <b>{h.law.name}</b>
+          </>
+        ) : h?.election?.phase === "voting" ? (
+          <>
+            Polls close in <b>{until(h.election.pollsClose, now)}</b>
+          </>
+        ) : (
+          "No Law this week"
+        )}
       </div>
       <div className="hud">
         {me?.resident ? (
@@ -225,8 +253,14 @@ export default function CityBoard({ me }: { me?: Me | null }) {
             @{me.resident.handle} · <b>{me.gm.toLocaleString("en-US")} GM</b>
           </div>
         ) : null}
-        <div className="pill">gm · Bell in 2h 14m</div>
-        <div className="pill">World 8% · City 61% · Vibe Gap +53</div>
+        <div className="pill">
+          🔔 Bell in <b>{until(bellAt, now)}</b>
+        </div>
+        {s && (
+          <button className="pill" onClick={onOpenToday}>
+            Slate #{s.number} · {s.cards.filter((c) => c.mine).length}/{s.cards.length} called ›
+          </button>
+        )}
         <button className="pill" onClick={() => setNight((n) => !n)}>
           {night ? "Show day" : "Show night"}
         </button>
@@ -237,7 +271,7 @@ export default function CityBoard({ me }: { me?: Me | null }) {
       {picked && (
         <div className="sheet" onClick={() => setPicked(null)}>
           <strong>{picked.name}</strong>
-          <span>{picked.here} here now</span>
+          <span className="muted">{picked.info}</span>
           <span className="go">Walk (free) · Rollup 5 GM · Priority 15 GM</span>
         </div>
       )}
@@ -278,12 +312,6 @@ export default function CityBoard({ me }: { me?: Me | null }) {
           <PerfProbe target={perf} />
         </Canvas>
       </div>
-      <nav className="tabs">
-        <a className="on" href="/">City</a>
-        <a href="/room-test">Room</a>
-        <a href="#">Today</a>
-        <a href="#">Tower</a>
-      </nav>
     </>
   );
 }

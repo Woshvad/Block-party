@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { mockProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { createApp } from "./app";
+import { runMinute } from "./cron";
 
 // Local dev server. Production runs src/worker.ts on Cloudflare Workers.
 const need = (k: string) => {
@@ -25,6 +26,24 @@ const app = createApp({
   ...(process.env.CLIENT_IP_HEADER ? { clientIpHeader: process.env.CLIENT_IP_HEADER } : {}),
   ...(process.env.ODDS_SOURCE === "mock" ? { odds: mockProvider(() => sampleMarkets(new Date())) } : {}),
 });
+// LOCAL_CRON=1: run the Worker's minute cron here too, so a local city has a
+// bell, live odds and a Slate. Notifications aren't sent (no real bot locally).
+if (process.env.LOCAL_CRON === "1") {
+  const odds = process.env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined;
+  let running = false;
+  const tick = async () => {
+    if (running) return; // a slow minute never overlaps the next
+    running = true;
+    try {
+      for (const r of await runMinute(db, new Date(), odds ? { odds } : {})) if (r.status === "rejected") console.error("cron job failed:", r.reason);
+    } finally {
+      running = false;
+    }
+  };
+  void tick();
+  setInterval(tick, 60_000);
+  console.log("local cron on: every minute");
+}
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port });
 console.log(`api listening on http://localhost:${port}`);

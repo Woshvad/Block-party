@@ -102,6 +102,17 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     pickForMe: () => request<ResidentDraft>("GET", "/v1/resident/pick-for-me"),
     handleAvailable: (handle: string) => request<{ available: boolean }>("GET", `/v1/handles/${encodeURIComponent(handle)}/available`),
     moveIn: (draft: ResidentDraft) => request<Resident>("POST", "/v1/resident", draft),
+    today: () => request<Today>("GET", "/v1/today"),
+    gm: () => request<GmResult>("POST", "/v1/gm"),
+    cityHall: () => request<CityHall>("GET", "/v1/city-hall"),
+    // 404 until the bell publishes the day's Slate: that's "not out yet", not an error.
+    slate: () => request<Slate>("GET", "/v1/slate").catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))),
+    feed: () => request<{ paused: boolean; lastTickAt: string | null }>("GET", "/v1/tower/feed"),
+    market: (id: string) => request<MarketView>("GET", `/v1/tower/markets/${encodeURIComponent(id)}`),
+    call: (c: { marketId: string; side: Side; chance: number; seenPrice: number }) => request<CallMade>("POST", "/v1/tower/calls", c),
+    myCall: (id: string) => request<CallStatus>("GET", `/v1/tower/calls/${encodeURIComponent(id)}`),
+    markets: () => request<MarketRow[]>("GET", "/v1/tower/markets"),
+    tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
 }
 
@@ -116,3 +127,42 @@ export type Resident = ResidentDraft & { userId: string; backstory: string; star
 export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null };
 
 export const apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
+
+export type Side = "yes" | "no";
+export type Today = { cityDay: string; bellAt: string; saidGm: boolean; streak: number; playedToday: boolean; alive: boolean; hodlNeeded: number; longest: number; hodlDays: number };
+export type GmResult = { cityDay: string; already: boolean; drip: number; brokeFloor: boolean; balance: number };
+export type CityHall = {
+  mayor: { userId: string; handle: string } | null;
+  law: { id: string; name: string } | null;
+  election: { week: string; phase: string; votingOpens: string; pollsClose: string; candidates: unknown[]; turnout: unknown; youVoted: boolean } | null;
+};
+export type SlateCard = {
+  slot: number;
+  tier: "lock" | "coin_flip" | "spicy" | "long_shot";
+  marketId: string;
+  question: string;
+  category: string;
+  world: number;
+  freezesAt: string;
+  open: boolean;
+  mine: { side: Side; chance: number; status: CallState } | null;
+};
+export type Slate = { cityDay: string; number: number; modifier: string; bellAt: string; sealed: boolean; cards: SlateCard[] };
+export type MarketView = {
+  id: string;
+  question: string;
+  category: string;
+  status: string;
+  infoOnly: boolean;
+  freezesAt: string;
+  world: number;
+  city: number | null;
+  vibeGap: number | null;
+  onSlate: boolean;
+  mine: { id: string; side: Side; chance: number; status: CallState; lockedPrice: number | null } | null;
+  source: string;
+};
+export type CallMade = { id: string; status: CallState; side: Side; chance: number; onSlate: boolean; ticket: boolean };
+export type CallStatus = { id: string; marketId: string; side: Side; chance: number; status: CallState; lockedPrice: number | null };
+export type CallState = "pending" | "locked" | "price_moved" | "expired";
+export type MarketRow = { id: string; question: string; category: string; price: number; freezesAt: string; infoOnly: boolean };

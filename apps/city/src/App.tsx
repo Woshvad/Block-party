@@ -1,12 +1,14 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiBase, browserTokenStore, createApi } from "./api";
+import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { type Screen, boot, screenFor } from "./boot";
 import { initTelegram, launchData } from "./telegram";
 
 const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
 const MoveIn = dynamic(() => import("./MoveIn"), { ssr: false });
+const Today = dynamic(() => import("./Today"), { ssr: false });
+const Tower = dynamic(() => import("./Tower"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -24,6 +26,9 @@ export default function App() {
   const [ageAccepted, setAgeAccepted] = useState(false);
   const [initData, setInitData] = useState<string | null | undefined>(undefined);
   const run = useRef(0);
+  // One boot at a time: each Telegram sign-in rotates the session, so two
+  // overlapping boots could store a token the other has already revoked.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     initTelegram();
@@ -38,8 +43,10 @@ export default function App() {
       if (initData === undefined) return;
       const mine = ++run.current; // a slower, older boot never overwrites a newer one
       setScreen(null);
-      const s = await boot(api, { initData, ageAccepted: ack });
-      if (mine === run.current) setScreen(s);
+      const next = queue.current.then(() => (mine === run.current ? boot(api, { initData, ageAccepted: ack }) : null));
+      queue.current = next.catch(() => {});
+      const s = await next;
+      if (s && mine === run.current) setScreen(s);
     },
     [api, initData],
   );
@@ -81,7 +88,7 @@ export default function App() {
     case "guest":
       return (
         <>
-          <CityBoard me={screen.me} />
+          <CityBoard api={api} me={screen.me} />
           <div className="claim">
             <b>You're looking around as a guest.</b>
             <span>Open Block Party in Telegram to move in and get your own room.</span>
@@ -100,6 +107,40 @@ export default function App() {
         </>
       );
     case "city":
-      return <CityBoard me={screen.me} />;
+      return <Home api={api} me={screen.me} />;
   }
+}
+
+type Tab = "city" | "today" | "tower";
+
+// A resident's home screen: the city board and Today, with the tab bar.
+function Home({ api, me: first }: { api: Api; me: Me }) {
+  const [tab, setTab] = useState<Tab>(() => {
+    const h = typeof location !== "undefined" ? location.hash.slice(1) : "";
+    return h === "today" || h === "tower" ? h : "city";
+  });
+  const [me, setMe] = useState(first);
+  const go = (t: Tab) => {
+    setTab(t);
+    history.replaceState(null, "", t === "city" ? location.pathname + location.search : `#${t}`);
+  };
+  return (
+    <>
+      {tab === "city" && <CityBoard api={api} me={me} onOpenToday={() => go("today")} />}
+      {tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} />}
+      {tab === "tower" && <Tower api={api} />}
+      <nav className="tabs">
+        <button className={tab === "city" ? "on" : ""} onClick={() => go("city")}>
+          City
+        </button>
+        <a href="/room-test">Room</a>
+        <button className={tab === "today" ? "on" : ""} onClick={() => go("today")}>
+          Today
+        </button>
+        <button className={tab === "tower" ? "on" : ""} onClick={() => go("tower")}>
+          Tower
+        </button>
+      </nav>
+    </>
+  );
 }
