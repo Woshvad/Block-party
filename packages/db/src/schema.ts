@@ -853,3 +853,89 @@ export const moderationItems = pgTable(
   },
   (t) => [index("moderation_items_pending").on(t.createdAt).where(sql`${t.status} = 'pending'`)],
 );
+
+// --- Frens and persistent chat ----------------------------------------------
+
+// A fren tap, made while sharing a room. Two taps make frens.
+export const frenTaps = pgTable(
+  "fren_taps",
+  {
+    fromId: uuid("from_id")
+      .notNull()
+      .references(() => users.id),
+    toId: uuid("to_id")
+      .notNull()
+      .references(() => users.id),
+    place: text("place").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.fromId, t.toId] }), check("fren_taps_not_self", sql`${t.fromId} <> ${t.toId}`)],
+);
+
+// Frens, stored once per pair with a < b.
+export const frens = pgTable(
+  "frens",
+  {
+    a: uuid("a")
+      .notNull()
+      .references(() => users.id),
+    b: uuid("b")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.a, t.b] }), check("frens_ordered", sql`${t.a} < ${t.b}`), index("frens_b").on(t.b)],
+);
+
+export const chatKind = pgEnum("chat_kind", ["board", "crew", "dm"]);
+
+// Board posts, crew chat and DMs share one table, told apart by kind and
+// channel (a place, a crew id or a DM thread id).
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: chatKind("kind").notNull(),
+    channel: text("channel").notNull(),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => users.id),
+    text: text("text").notNull(),
+    hidden: boolean("hidden").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("messages_channel").on(t.kind, t.channel, t.createdAt),
+    check("messages_text", sql`char_length(${t.text}) BETWEEN 1 AND 4000`),
+  ],
+);
+
+export const boardFollows = pgTable(
+  "board_follows",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    place: text("place").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.place] })],
+);
+
+export const dmThreads = pgTable(
+  "dm_threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    a: uuid("a")
+      .notNull()
+      .references(() => users.id),
+    b: uuid("b")
+      .notNull()
+      .references(() => users.id),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("dm_threads_pair").on(t.a, t.b), check("dm_threads_ordered", sql`${t.a} < ${t.b}`)],
+);

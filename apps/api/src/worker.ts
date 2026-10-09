@@ -1,6 +1,7 @@
 import { createPrivyVerifier, openAiModeration } from "@bp/core";
 import { createDb } from "@bp/db";
 import { createApp } from "./app";
+import { httpRoomsClient } from "./rooms-client";
 
 // Cloudflare Workers entry. Postgres goes through Hyperdrive; one small pool
 // per request, closed when the response is done.
@@ -12,6 +13,8 @@ type Env = {
   PRIVY_APP_ID?: string;
   PRIVY_VERIFICATION_KEY?: string;
   OPENAI_API_KEY?: string;
+  ROOMS_URL?: string;
+  TICKET_SECRET?: string;
 };
 
 export default {
@@ -28,6 +31,9 @@ export default {
       allowedOrigins: env.ALLOWED_ORIGINS.split(","),
       clientIpHeader: "cf-connecting-ip",
       ...(env.OPENAI_API_KEY ? { moderation: openAiModeration({ apiKey: env.OPENAI_API_KEY }) } : {}),
+      ...(env.ROOMS_URL && env.TICKET_SECRET
+        ? { rooms: httpRoomsClient({ url: env.ROOMS_URL, secret: env.INTERNAL_SECRET }), roomsUrl: env.ROOMS_URL, ticketSecret: env.TICKET_SECRET }
+        : {}),
       ...(privyVerify ? { privyVerify } : {}),
     });
     const res = await app.fetch(req);

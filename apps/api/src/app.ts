@@ -1,4 +1,6 @@
 import {
+  PLACE_RE,
+  signRoomTicket,
   type ModerationProvider,
   checkMessage,
   BUYABLE_IDS,
@@ -37,6 +39,25 @@ import {
   getResident,
   isHandleAvailable,
   accountAgeDays,
+  endCozy,
+  evidenceFor,
+  followBoard,
+  frensOf,
+  grantMood,
+  hideMessage,
+  isBlockedEitherWay,
+  isRestricted,
+  myThreads,
+  postToBoard,
+  postToCrew,
+  readBoard,
+  readCrew,
+  readDm,
+  sendDm,
+  tapFren,
+  unfollowBoard,
+  unfren,
+  hiddenFor,
   activeRestrictions,
   appealRestriction,
   blockUser,
@@ -102,6 +123,7 @@ import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import { ApiError, toResponse } from "./errors";
+import type { RoomsClient } from "./rooms-client";
 
 export type Limits = {
   authPerIpPerMinute: number;
@@ -136,6 +158,10 @@ export type AppConfig = {
   moderation?: ModerationProvider;
   // Staff-maintained blocked words for chat.
   blockedWords?: readonly string[];
+  // The live rooms: presence, evidence and takedowns, plus tickets to get in.
+  rooms?: RoomsClient;
+  roomsUrl?: string;
+  ticketSecret?: string;
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -495,7 +521,7 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ok: true });
   });
   app.post("/v1/election/vote", auth, async (c) =>
-    c.json(await castVote(db, c.get("userId"), (await body(c)).candidateId, { ...opts(), ...(cfg.presence ? { presence: cfg.presence } : {}) })),
+    c.json(await castVote(db, c.get("userId"), (await body(c)).candidateId, { ...opts(), ...(presence ? { presence } : {}) })),
   );
   app.post("/v1/mayor/law", auth, async (c) => c.json(await chooseLaw(db, c.get("userId"), (await body(c)).lawId, opts())));
 
@@ -526,7 +552,19 @@ export function createApp(cfg: AppConfig) {
   // No evidence from the client: rooms and DMs attach their own snapshot.
   app.post("/v1/reports", auth, async (c) => {
     const b = await body(c);
-    const r = await fileReport(db, c.get("userId"), { target: b.targetUserId, reason: b.reason, place: b.place, note: b.note }, opts());
+    // Evidence is snapshotted here, from the conversation or room it came from.
+    let evidence: Array<{ at: string; authorId: string; text: string }> = [];
+    const ctx = b.context as { kind?: unknown; id?: unknown; copy?: unknown } | undefined;
+    if (ctx && typeof ctx === "object") {
+      if (ctx.kind === "room") {
+        if (!cfg.rooms || typeof ctx.id !== "string" || !PLACE_RE.test(ctx.id) || !Number.isSafeInteger(ctx.copy)) throw new ApiError(400, "INVALID_INPUT", "which room?");
+        const lines = await cfg.rooms.where(c.get("userId"), ctx.id).then((copy) => (copy === ctx.copy ? cfg.rooms!.evidence(ctx.id as string, ctx.copy as number) : []));
+        evidence = lines.map((l) => ({ at: new Date(l.at).toISOString(), authorId: l.userId, text: l.text }));
+      } else {
+        evidence = await evidenceFor(db, c.get("userId"), { kind: ctx.kind, id: ctx.id });
+      }
+    }
+    const r = await fileReport(db, c.get("userId"), { target: b.targetUserId, reason: b.reason, place: b.place, note: b.note, evidence }, opts());
     return c.json({ id: r.id, status: r.status, dueAt: r.dueAt }, 201);
   });
   app.get("/v1/restrictions", auth, async (c) => c.json(await activeRestrictions(db, c.get("userId"), now())));
@@ -556,6 +594,77 @@ export function createApp(cfg: AppConfig) {
     return c.json(await reportSla(db, { from, to, now: now() }));
   });
 
+  // --- Live rooms ----------------------------------------------------------
+
+  const where = async (u: string, place: string) => (cfg.rooms ? cfg.rooms.where(u, place) : null);
+  // Voting in person: you're at City Hall if the rooms Worker says so.
+  const presence: PresenceCheck | undefined = cfg.presence ?? (cfg.rooms ? async (u, place) => (await cfg.rooms!.where(u, place)) !== null : undefined);
+
+  // Who may enter where is decided here, when the ticket is signed.
+  app.post("/v1/rooms/ticket", auth, async (c) => {
+    if (!cfg.ticketSecret || !cfg.roomsUrl) throw new ApiError(503, "ROOMS_DISABLED", "the city isn't open yet");
+    const place = (await body(c)).place;
+    if (typeof place !== "string" || !PLACE_RE.test(place)) throw new ApiError(400, "INVALID_INPUT", "which place?", "place");
+    const userId = c.get("userId");
+    const resident = await getResident(db, userId);
+    if (!resident) throw new ApiError(404, "NO_RESIDENT", "move in first");
+    const [kind, owner] = place.split(":");
+    const crew = await myCrew(db, userId);
+    if (kind === "home") {
+      if (!owner || !UUID.test(owner)) throw new ApiError(404, "NOT_FOUND", "no such home");
+      if (owner !== userId) {
+        const home = await getHome(db, owner);
+        if (!home?.doorOpen) throw new ApiError(403, "DOOR_CLOSED", "their door is closed");
+        if (await isBlockedEitherWay(db, userId, owner)) throw new ApiError(403, "DOOR_CLOSED", "their door is closed");
+      }
+    } else if (kind === "crew_house") {
+      if (!crew || crew.crew.id !== owner) throw new ApiError(403, "NOT_ALLOWED", "members only");
+    } else if (owner !== undefined) {
+      throw new ApiError(404, "NOT_FOUND", "no such place");
+    }
+    const t = now();
+    const hidden = [...(await hiddenFor(db, userId, t))];
+    const ticket = await signRoomTicket(
+      {
+        u: userId,
+        h: resident.handle,
+        crew: crew?.crew.id ?? null,
+        place,
+        hidden,
+        frens: await frensOf(db, userId),
+        chat: !(await isRestricted(db, userId, "chat_mute", t)),
+        age: Math.floor(await accountAgeDays(db, userId, t)),
+      },
+      cfg.ticketSecret,
+      t,
+    );
+    return c.json({ ticket, url: `${cfg.roomsUrl}/connect?ticket=${encodeURIComponent(ticket)}` });
+  });
+
+  // --- Frens and chat --------------------------------------------------------
+
+  app.get("/v1/frens", auth, async (c) => c.json(await frensOf(db, c.get("userId"))));
+  app.post("/v1/frens/:userId", auth, async (c) => c.json(await tapFren(db, c.get("userId"), uuid(c, "userId"), (await body(c)).place, where)));
+  app.delete("/v1/frens/:userId", auth, async (c) => {
+    await unfren(db, c.get("userId"), uuid(c, "userId"));
+    return c.json({ ok: true });
+  });
+  app.get("/v1/boards/:place", auth, async (c) => c.json(await readBoard(db, c.get("userId"), c.req.param("place"), { before: c.req.query("before"), now: now() })));
+  app.post("/v1/boards/:place", auth, async (c) => c.json(await postToBoard(db, c.get("userId"), c.req.param("place"), (await body(c)).text, opts()), 201));
+  app.post("/v1/boards/:place/follow", auth, async (c) => {
+    await followBoard(db, c.get("userId"), c.req.param("place"));
+    return c.json({ ok: true });
+  });
+  app.delete("/v1/boards/:place/follow", auth, async (c) => {
+    await unfollowBoard(db, c.get("userId"), c.req.param("place"));
+    return c.json({ ok: true });
+  });
+  app.get("/v1/crews/mine/chat", auth, async (c) => c.json(await readCrew(db, c.get("userId"), { before: c.req.query("before"), now: now() })));
+  app.post("/v1/crews/mine/chat", auth, async (c) => c.json(await postToCrew(db, c.get("userId"), (await body(c)).text, opts()), 201));
+  app.get("/v1/dms", auth, async (c) => c.json(await myThreads(db, c.get("userId"))));
+  app.get("/v1/dms/:threadId", auth, async (c) => c.json(await readDm(db, c.get("userId"), uuid(c, "threadId"), { before: c.req.query("before"), now: now() })));
+  app.post("/v1/dms/to/:userId", auth, async (c) => c.json(await sendDm(db, c.get("userId"), uuid(c, "userId"), (await body(c)).text, opts()), 201));
+
   // --- Moods ---------------------------------------------------------------
 
   app.get("/v1/moods", auth, async (c) => c.json(await moodState(db, c.get("userId"), opts())));
@@ -582,7 +691,43 @@ export function createApp(cfg: AppConfig) {
   app.post("/internal/bell", internal, async (c) => c.json(await runBell(db, opts())));
   app.post("/internal/moderation/run", internal, async (c) => {
     if (!cfg.moderation) throw new ApiError(503, "MODERATION_DISABLED", "no moderation provider configured");
-    return c.json(await runModerationBatch(db, cfg.moderation, opts()));
+    return c.json(
+      await runModerationBatch(db, cfg.moderation, {
+        ...opts(),
+        // Take flagged content down where it lives.
+        onFlagged: async (f) => {
+          if (f.kind === "board" || f.kind === "crew" || f.kind === "dm") await hideMessage(db, f.ref);
+          if (f.kind === "room" && cfg.rooms) {
+            const [place, copy, lineId] = f.ref.split("#");
+            if (place && copy && lineId) await cfg.rooms.takedown(place, Number(copy), lineId).catch(() => undefined);
+          }
+        },
+      }),
+    );
+  });
+
+  // The rooms Worker reports what happened: Cozy, and room chat for the AI check.
+  app.post("/internal/rooms/effects", internal, async (c) => {
+    const b = await body(c);
+    const place = b.place;
+    const copy = b.copy;
+    const effects = b.effects;
+    if (typeof place !== "string" || !PLACE_RE.test(place) || !Number.isSafeInteger(copy) || !Array.isArray(effects)) throw new ApiError(400, "INVALID_INPUT", "bad effects");
+    let applied = 0;
+    for (const e of effects.slice(0, 200) as Array<Record<string, unknown>>) {
+      const at = typeof e.at === "number" ? new Date(e.at) : now();
+      if ((e.kind === "cozy_start" || e.kind === "cozy_end") && typeof e.userId === "string" && UUID.test(e.userId)) {
+        if (e.kind === "cozy_start") await grantMood(db, e.userId, "cozy", { now: at, source: { place } });
+        else await endCozy(db, e.userId, { now: at });
+        applied++;
+      }
+      const line = e.line as { id?: unknown; userId?: unknown; text?: unknown } | undefined;
+      if (e.kind === "moderate" && line && typeof line.id === "string" && typeof line.text === "string" && typeof line.userId === "string" && UUID.test(line.userId)) {
+        await enqueueModeration(db, { kind: "room", ref: `${place}#${copy}#${line.id}`, authorId: line.userId, text: line.text });
+        applied++;
+      }
+    }
+    return c.json({ applied });
   });
   app.get("/internal/economy", internal, async (c) => {
     const from = new Date(c.req.query("from") ?? "");

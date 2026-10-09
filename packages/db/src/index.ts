@@ -1,6 +1,7 @@
 export * from "./accounts";
 export * from "./bell";
 export * from "./chain";
+export * from "./chat";
 export * from "./client";
 export * from "./crews";
 export * from "./daily";

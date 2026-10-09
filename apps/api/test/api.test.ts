@@ -382,3 +382,130 @@ describe("safety over HTTP", () => {
     expect(ran.body.checked).toBeGreaterThan(0);
   });
 });
+
+describe("live rooms over HTTP", () => {
+  const ticketFor = async (token: string, place: string) => call("POST", "/v1/rooms/ticket", { token, body: { place } });
+
+  it("public places for anyone moved in; a guest gets nothing", async () => {
+    const { verifyRoomTicket } = await import("@bp/core");
+    const { TICKET_SECRET } = await import("./harness");
+    const u = await resident();
+    const r = await ticketFor(u.token, "diner");
+    expect(r.status).toBe(200);
+    expect(r.body.url).toMatch(/^https:\/\/rooms\.test\/connect\?ticket=/);
+    const t = await verifyRoomTicket(r.body.ticket, TICKET_SECRET);
+    expect(t).toMatchObject({ u: u.userId, h: u.handle, place: "diner", chat: true });
+    const g = await call("POST", "/v1/auth/guest", { body: { ageAck: true } });
+    expect((await ticketFor(g.body.sessionToken, "diner")).status).toBe(404);
+    for (const bad of ["narnia:x", "../etc", "", "HOME:x"]) expect([400, 404]).toContain((await ticketFor(u.token, bad)).status);
+  });
+
+  it("homes: yours always; others' only with the door open and no block", async () => {
+    const [a, b] = [await resident(), await resident()];
+    expect((await ticketFor(a.token, `home:${a.userId}`)).status).toBe(200);
+    expect((await ticketFor(b.token, `home:${a.userId}`)).body.error.code).toBe("DOOR_CLOSED");
+    await call("PATCH", "/v1/home", { token: a.token, body: { doorOpen: true } });
+    expect((await ticketFor(b.token, `home:${a.userId}`)).status).toBe(200);
+    await call("POST", `/v1/blocks/${b.userId}`, { token: a.token });
+    expect((await ticketFor(b.token, `home:${a.userId}`)).body.error.code).toBe("DOOR_CLOSED");
+  });
+
+  it("the Crew House is for members only", async () => {
+    const [lead, outsider] = [await resident(), await resident()];
+    const crew = await call("POST", "/v1/crews", { token: lead.token, body: { name: `Room ${crypto.randomUUID().slice(0, 6)}` } });
+    expect((await ticketFor(lead.token, `crew_house:${crew.body.id}`)).status).toBe(200);
+    expect((await ticketFor(outsider.token, `crew_house:${crew.body.id}`)).status).toBe(403);
+  });
+
+  it("the ticket carries blocks both ways, mutes, frens and the chat restriction", async () => {
+    const { verifyRoomTicket } = await import("@bp/core");
+    const { TICKET_SECRET, client } = await import("./harness");
+    const [me, blockedByMe, blockedMe, muted, mod] = [await resident(), await resident(), await resident(), await resident(), await resident()];
+    await call("POST", `/v1/blocks/${blockedByMe.userId}`, { token: me.token });
+    await call("POST", `/v1/blocks/${me.userId}`, { token: blockedMe.token });
+    await call("POST", `/v1/mutes/${muted.userId}`, { token: me.token, body: {} });
+    await client`INSERT INTO staff (user_id, role) VALUES (${mod.userId}, 'moderator')`;
+    await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: me.userId, kind: "chat_mute", hours: 2, reason: "Flooding the Diner with copy-pasta all morning." } });
+    const t = await verifyRoomTicket((await ticketFor(me.token, "roof")).body.ticket, TICKET_SECRET);
+    expect(new Set(t.hidden)).toEqual(new Set([blockedByMe.userId, blockedMe.userId, muted.userId]));
+    expect(t.chat).toBe(false);
+  });
+
+  it("room effects become moods and moderation items; only with the secret", async () => {
+    const { client } = await import("./harness");
+    const u = await resident();
+    const effects = [
+      { kind: "cozy_start", userId: u.userId, at: Date.now() },
+      { kind: "moderate", line: { id: "l1", userId: u.userId, handle: u.handle, text: "a room line", at: Date.now() } },
+      { kind: "cozy_start", userId: "not-a-uuid" },
+      { kind: "launch" },
+    ];
+    expect((await call("POST", "/internal/rooms/effects", { body: { place: "diner", copy: 0, effects } })).status).toBe(404);
+    const r = await call("POST", "/internal/rooms/effects", { body: { place: "diner", copy: 0, effects }, headers: { "x-internal-secret": SECRET } });
+    expect(r.body).toEqual({ applied: 2 });
+    expect((await call("GET", "/v1/moods", { token: u.token })).body.active.map((m: { mood: string }) => m.mood)).toContain("cozy");
+    const [q] = await client`SELECT ref FROM moderation_items WHERE kind = 'room' AND author_id = ${u.userId}`;
+    expect(q!.ref).toBe("diner#0#l1");
+    expect((await call("POST", "/internal/rooms/effects", { body: { place: "../x", copy: 0, effects: [] }, headers: { "x-internal-secret": SECRET } })).status).toBe(400);
+  });
+
+  it("flagged content comes down where it lives: hidden on a Board, taken down in a room", async () => {
+    const { roomsState, client } = await import("./harness");
+    const u = await resident();
+    const place = `fl${crypto.randomUUID().slice(0, 6)}`;
+    const post = await call("POST", `/v1/boards/${place}`, { token: u.token, body: { text: "flag me please" } });
+    await call("POST", "/internal/rooms/effects", { body: { place: "roof", copy: 2, effects: [{ kind: "moderate", line: { id: "zz", userId: u.userId, handle: "x", text: "flag me in the room", at: 1 } }] }, headers: { "x-internal-secret": SECRET } });
+    await client`UPDATE moderation_items SET status = 'clean' WHERE status = 'pending' AND author_id <> ${u.userId}`;
+    const ai = makeApp({ moderation: { classify: async (ts) => ts.map((t) => ({ flagged: t.includes("flag me"), categories: ["harassment"] })) } });
+    await call("POST", "/internal/moderation/run", { headers: { "x-internal-secret": SECRET }, via: ai });
+    expect((await call("GET", `/v1/boards/${place}`, { token: u.token })).body.map((m: { id: string }) => m.id)).not.toContain(post.body.id);
+    expect(roomsState.takedowns).toContain("roof#2#zz");
+  });
+
+  it("voting in person works once the rooms Worker says you're at City Hall", async () => {
+    const { roomsState, client } = await import("./harness");
+    const now = new Date();
+    const daysToMonday = ((8 - now.getUTCDay()) % 7) || 7;
+    const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysToMonday, 12));
+    let clock = monday;
+    const city = makeApp({ now: () => clock });
+    const [cand, voter] = [await resident(), await resident()];
+    await client`UPDATE users SET proof_of_neighbour_at = now() WHERE id IN (${cand.userId}, ${voter.userId})`;
+    await call("POST", "/v1/election/candidacy", { token: cand.token, body: { pitch: "Rooms for everyone" }, via: city });
+    clock = new Date(monday.getTime() + 4 * 86_400_000);
+    expect((await call("POST", "/v1/election/vote", { token: voter.token, body: { candidateId: cand.userId }, via: city })).body.error.code).toBe("NOT_AT_CITY_HALL");
+    roomsState.where.set(`${voter.userId}|city_hall`, 0);
+    expect((await call("POST", "/v1/election/vote", { token: voter.token, body: { candidateId: cand.userId }, via: city })).body).toEqual({ voted: true });
+  });
+
+  it("frens from a shared room, then DMs, then a report with the DM as evidence", async () => {
+    const { roomsState, client } = await import("./harness");
+    const [a, b] = [await resident(), await resident()];
+    expect((await call("POST", `/v1/frens/${b.userId}`, { token: a.token, body: { place: "diner" } })).body.error.code).toBe("NOT_TOGETHER");
+    roomsState.where.set(`${a.userId}|diner`, 0);
+    roomsState.where.set(`${b.userId}|diner`, 0);
+    expect((await call("POST", `/v1/frens/${b.userId}`, { token: a.token, body: { place: "diner" } })).body).toEqual({ frens: false });
+    expect((await call("POST", `/v1/frens/${a.userId}`, { token: b.token, body: { place: "diner" } })).body).toEqual({ frens: true });
+    const dm = await call("POST", `/v1/dms/to/${b.userId}`, { token: a.token, body: { text: "send me 50 USDC, I'll double it" } });
+    expect(dm.status).toBe(201);
+    expect(dm.body.notice).toMatch(/will ever ask for your seed phrase/);
+    const rep = await call("POST", "/v1/reports", { token: b.token, body: { targetUserId: a.userId, reason: "scam", context: { kind: "dm", id: dm.body.threadId } } });
+    expect(rep.status).toBe(201);
+    const [row] = await client`SELECT evidence FROM reports WHERE id = ${rep.body.id}`;
+    expect(row!.evidence.map((e: { text: string }) => e.text)).toEqual(["send me 50 USDC, I'll double it"]);
+  });
+
+  it("a report from a room snapshots the room, only if you're in that copy", async () => {
+    const { roomsState, client } = await import("./harness");
+    const [a, b] = [await resident(), await resident()];
+    roomsState.evidence.set("roof#3", [{ id: "r1", userId: a.userId, handle: "a", text: "roof spam", at: Date.now() }]);
+    roomsState.where.set(`${b.userId}|roof`, 3);
+    const rep = await call("POST", "/v1/reports", { token: b.token, body: { targetUserId: a.userId, reason: "spam", context: { kind: "room", id: "roof", copy: 3 } } });
+    const [row] = await client`SELECT evidence FROM reports WHERE id = ${rep.body.id}`;
+    expect(row!.evidence.map((e: { text: string }) => e.text)).toEqual(["roof spam"]);
+    roomsState.evidence.set("roof#9", [{ id: "r9", userId: a.userId, handle: "a", text: "a private roof chat in another copy", at: Date.now() }]);
+    const elsewhere = await call("POST", "/v1/reports", { token: b.token, body: { targetUserId: a.userId, reason: "harassment", context: { kind: "room", id: "roof", copy: 9 } } });
+    const [row2] = await client`SELECT evidence FROM reports WHERE id = ${elsewhere.body.id}`;
+    expect(row2!.evidence).toEqual([]); // not in that copy: no peeking at its chat
+  });
+});

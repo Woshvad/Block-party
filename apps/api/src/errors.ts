@@ -14,6 +14,8 @@ import {
   type PoliticsErrorCode,
   SafetyError,
   type SafetyErrorCode,
+  ChatError,
+  type ChatErrorCode,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -127,7 +129,21 @@ const SAFETY: Record<SafetyErrorCode, number> = {
   DM_LIMIT: 429,
 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY };
+const CHAT: Record<ChatErrorCode, number> = {
+  INVALID_INPUT: 400,
+  NOT_ALLOWED: 403,
+  NOT_FRENS: 403,
+  BLOCKED: 403,
+  CHAT_RESTRICTED: 403,
+  MODERATED: 422,
+  SLOW_MODE: 429,
+  TOO_FAST: 429,
+  FOLLOW_LIMIT: 409,
+  NOT_TOGETHER: 409,
+  NO_SUCH_THREAD: 404,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -151,6 +167,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof MoodError) return out(MOODS[e.code], e.code, e.message);
   if (e instanceof PoliticsError) return out(POLITICS[e.code], e.code, e.message);
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
+  if (e instanceof ChatError) return { ...out(CHAT[e.code], e.code, e.message), body: { error: { code: e.code, message: e.message, ...(e.reason ? { field: e.reason } : {}) } } };
   // Postgres "data exception" errors are bad input that slipped past a
   // validator (a null byte, a malformed value, a number out of range): a 400,
   // never a 500. Each one still deserves a validator; this is the backstop.

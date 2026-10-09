@@ -9,6 +9,21 @@ export const ORIGIN = "https://city.blockparty.test";
 export const { db, client, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 30 });
 export const logs: Array<{ msg: string; extra: Record<string, unknown> }> = [];
 
+// A stand-in rooms Worker: presence and evidence from in-memory maps.
+export const roomsState = {
+  where: new Map<string, number>(), // `${userId}|${place}` -> copy
+  evidence: new Map<string, Array<{ id: string; userId: string; handle: string; text: string; at: number }>>(), // `${place}#${copy}`
+  takedowns: [] as string[],
+};
+export const fakeRooms = {
+  where: async (u: string, place: string) => roomsState.where.get(`${u}|${place}`) ?? null,
+  evidence: async (place: string, copy: number) => roomsState.evidence.get(`${place}#${copy}`) ?? [],
+  takedown: async (place: string, copy: number, lineId: string) => {
+    roomsState.takedowns.push(`${place}#${copy}#${lineId}`);
+  },
+};
+export const TICKET_SECRET = "k".repeat(40);
+
 export function makeApp(over: Partial<AppConfig> = {}) {
   return createApp({
     db,
@@ -19,6 +34,9 @@ export function makeApp(over: Partial<AppConfig> = {}) {
     // Generous limits by default so flow tests don't trip them.
     limits: { authPerIpPerMinute: 10_000, guestsPerIpPerHour: 10_000, writesPerUserPerMinute: 10_000, readsPerUserPerMinute: 10_000 },
     log: (msg, extra) => logs.push({ msg, extra }),
+    rooms: fakeRooms,
+    roomsUrl: "https://rooms.test",
+    ticketSecret: TICKET_SECRET,
     ...over,
   });
 }
