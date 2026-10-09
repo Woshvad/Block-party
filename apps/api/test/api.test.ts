@@ -774,3 +774,17 @@ describe("the Daily Close over HTTP", () => {
     expect((await call("GET", "/v1/daily-close/1999-01-01")).status).toBe(401);
   });
 });
+
+describe("Fade Duels over HTTP", () => {
+  it("prefs, and the refusals a newcomer meets", async () => {
+    const me = await resident();
+    expect((await call("PUT", "/v1/duels/prefs", { token: me.token, body: { duelsOn: true } })).body).toEqual({ duelsOn: true, allowNaming: false });
+    expect((await call("PUT", "/v1/duels/prefs", { token: me.token, body: { duelsOn: "on" } })).status).toBe(400);
+    // Off until the alt checks are live; on, junk is a 400.
+    const off = makeApp({ features: {} });
+    expect((await call("POST", "/v1/duels", { token: me.token, via: off, body: { marketId: "nope", opponentId: "nope" } })).status).toBe(503);
+    expect((await call("POST", "/v1/duels", { token: me.token, body: { marketId: "nope", opponentId: "nope" } })).status).toBe(400);
+    expect((await call("POST", `/v1/duels/${crypto.randomUUID()}/snap`, { token: me.token })).status).toBe(404);
+    expect((await call("GET", "/v1/duels", { token: me.token })).body).toEqual([]);
+  });
+});

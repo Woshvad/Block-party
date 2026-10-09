@@ -1,11 +1,12 @@
 import { type CityDay, NPC_IDS, addDays, bellScoreMilli, bellStampFor, cityDay, median, userAccountId } from "@bp/core";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { chainStatus } from "./chain";
+import { duelLines, settleDuels } from "./duels";
 import type { Db } from "./client";
 import { economyReport } from "./economy";
 import { mint } from "./ledger";
 import { grantMood, maybeTilt } from "./moods";
-import { bellStamps, calls, crewBellScores, crewMembers, crews, markets, residents, slateCards } from "./schema";
+import { bellStamps, calls, crewBellScores, crewMembers, crews, duels, markets, residents, slateCards } from "./schema";
 import { myGrid } from "./slate";
 import { settleCalls } from "./tower";
 
@@ -29,6 +30,8 @@ export class BellShowError extends Error {
 // gets its Bell Score.
 export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   await settleCalls(db, { now });
+  // Duels settle at the bell too: the bell is the reveal.
+  const duelsSettled = (await settleDuels(db, { now })).settled;
   const from = dayStart(bellDay);
   const to = dayStart(addDays(bellDay, 1));
   const receipts = await db
@@ -87,11 +90,27 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
         .where(and(inArray(crewMembers.userId, [...new Set([...winners, ...golds])]), isNull(crewMembers.leftAt)))
     : [];
   const crewOf = new Map(members.map((m) => [m.userId, m.crewId]));
-  const tally = new Map<string, { chips: number; longShots: number }>();
+  // ×2 for each crewmate who held a Snap and won a duel on today's markets.
+  const snapWins = (
+    await db
+      .select({ winner: duels.winnerId, sc: duels.snapChallenger, so: duels.snapOpponent, c: duels.challengerId })
+      .from(duels)
+      .innerJoin(markets, eq(markets.id, duels.marketId))
+      .where(and(eq(duels.status, "settled"), gte(markets.resolvedAt, from), lt(markets.resolvedAt, to)))
+  )
+    .filter((d) => (d.winner === d.c ? d.sc : d.so))
+    .map((d) => d.winner!);
+  const snapCrews = snapWins.length
+    ? await db
+        .select({ userId: crewMembers.userId, crewId: crewMembers.crewId })
+        .from(crewMembers)
+        .where(and(inArray(crewMembers.userId, snapWins), isNull(crewMembers.leftAt)))
+    : [];
+  const tally = new Map<string, { chips: number; longShots: number; snapsWon: number }>();
   for (const u of winners) {
     const c = crewOf.get(u);
     if (!c) continue;
-    const t = tally.get(c) ?? { chips: 0, longShots: 0 };
+    const t = tally.get(c) ?? { chips: 0, longShots: 0, snapsWon: 0 };
     t.chips++;
     tally.set(c, t);
   }
@@ -99,14 +118,15 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
     const c = crewOf.get(u);
     if (c && tally.has(c)) tally.get(c)!.longShots++;
   }
+  for (const s of snapCrews) if (tally.has(s.crewId)) tally.get(s.crewId)!.snapsWon++;
   for (const [crewId, t] of tally) {
     const chainDays = (await chainStatus(db, crewId, { now })).length;
     await db
       .insert(crewBellScores)
-      .values({ bellDay, crewId, chips: t.chips, longShots: t.longShots, chainDays, scoreMilli: bellScoreMilli({ ...t, snapsWon: 0, chainDays }) })
+      .values({ bellDay, crewId, chips: t.chips, longShots: t.longShots, chainDays, scoreMilli: bellScoreMilli({ ...t, chainDays }) })
       .onConflictDoNothing();
   }
-  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size };
+  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled };
 }
 
 // --- Bell Stamps ------------------------------------------------------------------------
@@ -188,6 +208,8 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
       return { slot: c.slot, tier: c.tier, question: c.question, result: c.status === "void" ? "void" : c.outcome === null ? "pending" : c.outcome ? "yes" : "no", world: c.world, city: cs.length >= 10 ? median(cs) : null };
     }),
     bellScores: { top: top.map((t) => ({ ...t, score: t.scoreMilli / 1000 })), mine: myCrew && { score: myCrew.scoreMilli / 1000, rank: myCrew.rank } },
+    // Duels settle at the bell after the day: "@a ate @b's Snap".
+    duels: await duelLines(db, dayStart(addDays(bellDay, 1)), dayStart(addDays(bellDay, 2))),
     burned: burn.totalDestroyed,
     grid: await myGrid(db, userId, bellDay, { now }),
     tomorrowsLongShot: tomorrow ?? null,

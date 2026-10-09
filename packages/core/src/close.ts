@@ -14,6 +14,8 @@ export const CLOSE_TEMPLATES = {
   "cityhall.no_law": "No Law of the Week. City Hall is open; the ballot box is waiting.",
   "crews.top": "#{rank} on the Bell Score: {crew} with {score}.",
   "crews.none": "No crew scored tonight. The Roof is wide open.",
+  "crews.duel_snap": "{winner} ate {loser}'s Snap.",
+  "crews.duel": "{winner} beat {loser} in a Fade Duel.",
   "cast.line": "{npc}: “{text}”",
   "cast.feud": "NOTHING-9000: “Nothing happened.” Something happened.",
   "weather.today": "Weather: {green}% green candles · {copium} Copium · {rekt} REKT.",

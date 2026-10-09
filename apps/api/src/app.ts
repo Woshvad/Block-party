@@ -156,6 +156,14 @@ import {
   claimBellStamp,
   npcCalls,
   dailyClose,
+  setDuelPrefs,
+  challenge,
+  respond,
+  cancelOffer,
+  snap,
+  retreat,
+  myDuels,
+  runLastCall,
   reel,
   setCrewBotMutes,
   startNap,
@@ -221,6 +229,9 @@ export type AppConfig = {
   odds?: OddsProvider;
   // Signs public receipt links (32+ characters).
   receiptSecret?: string;
+  // Switches for features the plan turns on mid-beta (Fade Duels wait for
+  // the alt checks). Off unless set.
+  features?: { duels?: boolean };
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -838,6 +849,18 @@ export function createApp(cfg: AppConfig) {
     if (!p) throw new ApiError(404, "NOT_FOUND", "no paper for that day");
     return c.json(p);
   });
+  // Fade Duels: opt-in GM side pots between residents across a market.
+  app.put("/v1/duels/prefs", auth, async (c) => c.json(await setDuelPrefs(db, c.get("userId"), await body(c))));
+  app.get("/v1/duels", auth, async (c) => c.json(await myDuels(db, c.get("userId"))));
+  app.post("/v1/duels", auth, async (c) => {
+    if (!cfg.features?.duels) throw new ApiError(503, "DUELS_NOT_YET", "Fade Duels switch on once the alt checks are live");
+    const b = await body(c);
+    return c.json(await challenge(db, c.get("userId"), { marketId: b.marketId, opponentId: b.opponentId }, opts()), 201);
+  });
+  app.post("/v1/duels/:id/respond", auth, async (c) => c.json(await respond(db, c.get("userId"), uuid(c, "id"), (await body(c)).accept, opts())));
+  app.post("/v1/duels/:id/cancel", auth, async (c) => c.json(await cancelOffer(db, c.get("userId"), uuid(c, "id"), opts())));
+  app.post("/v1/duels/:id/snap", auth, async (c) => c.json(await snap(db, c.get("userId"), uuid(c, "id"), opts())));
+  app.post("/v1/duels/:id/retreat", auth, async (c) => c.json(await retreat(db, c.get("userId"), uuid(c, "id"), opts())));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
@@ -878,6 +901,7 @@ export function createApp(cfg: AppConfig) {
     }
     await next();
   };
+  app.post("/internal/duels/last-call", internal, async (c) => c.json(await runLastCall(db, opts())));
   app.post("/internal/cast/calls", internal, async (c) => c.json(await npcCalls(db, opts())));
   app.post("/internal/slate/publish", internal, async (c) => c.json(await publishSlate(db, opts())));
   app.post("/internal/tower/poll", internal, async (c) => {

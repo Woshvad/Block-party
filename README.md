@@ -85,6 +85,12 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Pages:** a front page (the Long Shot, hit or missed, and the biggest Vibe Gap among cards with 10+ callers and how it settled), City Hall (the Law of the Week, naming the Mayor), Crews (top 3 Bell Scores), the cast (each NPC's line plus the feud of the day) and the weather (green candles, Copium, REKT).
    - **Your page:** a headline from your own real Slate day ("Local Roof Rat Fades City, Lives." only when going against the city actually won).
    - **Who's named:** only the Mayor and crews, never a resident's id or handle. The cast's calls never move the city's numbers.
+29. **Fade Duels** (done; creating one is behind `FEATURE_DUELS`, off until the alt checks are live, as the plan says).
+   - **Stakes:** a GM side pot between two residents on opposite sides of a market that settles by the next bell. 10 GM each, a Snap each doubles it, and Last Call at 23:00 doubles it once more (80 each at most). Each duel has its own escrow, and every move goes through the ledger under a lock on the duel row.
+   - **Outcomes:** the winner takes the pot (no GM created); Retreat before the lock gives the opponent your ante and burns the rest; a voided market or an unanswered offer gives the stakes back. A lost Snap tilts you.
+   - **Guards:** opt-in both ways, Proof of Neighbour, 300 GM, 3 open at a time (checked under locks), one per pair a week (declines count), never the cast, never across a block, no Snap while tilted, and a Snap the other side can't cover is refused with nothing moved.
+   - **At the bell:** duels settle at the bell; a won Snap doubles the crew's Bell Score, and the reel and the Daily Close print "@a ate @b's Snap", naming only residents who allow it.
+   - **Tests:** every scenario checks that no GM is created or lost.
 
 ## Deploying
 

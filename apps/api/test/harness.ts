@@ -51,6 +51,7 @@ export function makeApp(over: Partial<AppConfig> = {}) {
     ticketSecret: TICKET_SECRET,
     notifier: fakeNotifier,
     receiptSecret: "p".repeat(40),
+    features: { duels: true },
     ...over,
   });
 }

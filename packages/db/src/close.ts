@@ -1,6 +1,7 @@
 import { CAST, type CityDay, type CloseItem, NPC_IDS, VERDICTS, addDays, getLaw, median, weekStart, yourHeadline } from "@bp/core";
 import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
+import { duelLines } from "./duels";
 import { calls, crewBellScores, crews, dailyCloses, markets, mayorTerms, messages, moods, residents, slateCards } from "./schema";
 
 const dayStart = (d: CityDay) => new Date(`${d}T00:00:00Z`);
@@ -60,6 +61,10 @@ export async function stepClose(db: Db, bellDay: CityDay, now: Date) {
     .orderBy(desc(crewBellScores.scoreMilli), asc(crewBellScores.crewId))
     .limit(3);
   const crewPage: CloseItem[] = top.length ? top.map((t, i) => ({ key: "crews.top", values: { rank: i + 1, crew: t.name, score: t.scoreMilli / 1000 } })) : [{ key: "crews.none", values: {} }];
+  // Duels settled at this bell, naming only residents who allow it.
+  for (const d of (await duelLines(db, dayStart(addDays(bellDay, 1)), dayStart(addDays(bellDay, 2)))).slice(0, 5)) {
+    crewPage.push({ key: d.snap ? "crews.duel_snap" : "crews.duel", values: { winner: d.winner, loser: d.loser } });
+  }
 
   // The cast: tonight's lines, and the feud of the day.
   const lines = await db

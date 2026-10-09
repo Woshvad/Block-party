@@ -28,3 +28,4 @@ export * from "./slate";
 export * from "./bell-show";
 export * from "./cast";
 export * from "./close";
+export * from "./duels";

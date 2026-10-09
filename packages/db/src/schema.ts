@@ -1368,3 +1368,53 @@ export const dailyCloses = pgTable("daily_closes", {
   pages: jsonb("pages").$type<Record<string, Array<{ key: string; values: Record<string, string | number> }>>>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
 });
+
+// Fade Duels: opt-in, with a decline-all switch (off by default).
+export const duelPrefs = pgTable("duel_prefs", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  duelsOn: boolean("duels_on").notNull().default(false),
+  // Duel cards and the reel name you only if you allow it.
+  allowNaming: boolean("allow_naming").notNull().default(false),
+});
+
+export const duelStatus = pgEnum("duel_status", ["offered", "active", "declined", "cancelled", "expired", "retreated", "settled", "void"]);
+
+export const duels = pgTable(
+  "duels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    marketId: uuid("market_id")
+      .notNull()
+      .references(() => markets.id),
+    challengerId: uuid("challenger_id")
+      .notNull()
+      .references(() => users.id),
+    opponentId: uuid("opponent_id")
+      .notNull()
+      .references(() => users.id),
+    challengerSide: callSide("challenger_side").notNull(),
+    status: duelStatus("status").notNull().default("offered"),
+    stakeChallenger: integer("stake_challenger").notNull(),
+    stakeOpponent: integer("stake_opponent").notNull().default(0),
+    snapChallenger: boolean("snap_challenger").notNull().default(false),
+    snapOpponent: boolean("snap_opponent").notNull().default(false),
+    lastCall: boolean("last_call").notNull().default(false),
+    retreatedBy: uuid("retreated_by"),
+    winnerId: uuid("winner_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("duels_challenger").on(t.challengerId, t.status),
+    index("duels_opponent").on(t.opponentId, t.status),
+    index("duels_market").on(t.marketId, t.status),
+    check("duels_two_people", sql`${t.challengerId} <> ${t.opponentId}`),
+    check("duels_stakes", sql`${t.stakeChallenger} BETWEEN 0 AND 80 AND ${t.stakeOpponent} BETWEEN 0 AND 80`),
+    check("duels_winner", sql`${t.winnerId} IS NULL OR ${t.winnerId} IN (${t.challengerId}, ${t.opponentId})`),
+    check("duels_retreat", sql`${t.retreatedBy} IS NULL OR ${t.retreatedBy} IN (${t.challengerId}, ${t.opponentId})`),
+    check("duels_settled", sql`(${t.status} = 'settled') = (${t.winnerId} IS NOT NULL)`),
+  ],
+);

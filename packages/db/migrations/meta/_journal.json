@@ -225,6 +225,13 @@
       "when": 1791554068508,
       "tag": "0031_daily_close",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791555470681,
+      "tag": "0032_duels",
+      "breakpoints": true
     }
   ]
 }

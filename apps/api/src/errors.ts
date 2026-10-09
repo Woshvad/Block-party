@@ -23,6 +23,7 @@ import {
   RelationshipError,
   TowerError,
   BellShowError,
+  DuelError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -190,7 +191,26 @@ const TOWER: Record<TowerError["code"], number> = {
 
 const BELL_SHOW: Record<BellShowError["code"], number> = { NO_CALL_TODAY: 409, NO_RESIDENT: 404 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW };
+const DUEL: Record<DuelError["code"], number> = {
+  INVALID_INPUT: 400,
+  NO_SUCH_DUEL: 404,
+  NOT_YOURS: 403,
+  DUELS_OFF: 409,
+  NOT_ACROSS: 409,
+  MARKET_CLOSED: 409,
+  NEEDS_PON: 403,
+  NOT_ENOUGH_GM: 409,
+  TOO_MANY_OPEN: 409,
+  PAIR_THIS_WEEK: 409,
+  BLOCKED: 403,
+  WRONG_STATE: 409,
+  SNAP_USED: 409,
+  TILTED: 409,
+  AT_THE_CAP: 409,
+  CANT_COVER: 409,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -216,6 +236,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
+  if (e instanceof DuelError) return out(DUEL[e.code], e.code, e.message);
   if (e instanceof BellShowError) return out(BELL_SHOW[e.code], e.code, e.message);
   if (e instanceof TowerError) return out(TOWER[e.code], e.code, e.message);
   if (e instanceof RelationshipError) return out(RELATIONSHIP[e.code], e.code, e.message);

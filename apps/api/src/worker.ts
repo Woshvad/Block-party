@@ -19,6 +19,8 @@ type Env = {
   // "mock" for staging; the Polymarket feed plugs in here.
   ODDS_SOURCE?: string;
   RECEIPT_SECRET?: string;
+  // "on" once the alt checks are live.
+  FEATURE_DUELS?: string;
 };
 
 const oddsFor = (env: Env) => (env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
@@ -44,6 +46,7 @@ export default {
       notifier: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }),
       ...(oddsFor(env) ? { odds: oddsFor(env) } : {}),
       ...(env.RECEIPT_SECRET ? { receiptSecret: env.RECEIPT_SECRET } : {}),
+      features: { duels: env.FEATURE_DUELS === "on" },
     });
     const res = await app.fetch(req);
     ctx.waitUntil(close());
@@ -55,9 +58,9 @@ export default {
   // half-hour and 45-minute time zones get their hour too).
   async scheduled(event: { scheduledTime?: number }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
     const { db, close } = createDb(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false });
-    const { runBell, runNotificationBatch, finishDueActions, queueDailyPings, pollOdds, publishSlate, npcCalls } = await import("@bp/db");
+    const { runBell, runNotificationBatch, finishDueActions, queueDailyPings, pollOdds, publishSlate, npcCalls, runLastCall } = await import("@bp/db");
     const at = new Date(event.scheduledTime ?? Date.now());
-    const jobs: Array<Promise<unknown>> = [runBell(db), finishDueActions(db), runNotificationBatch(db, telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), { batch: 200 })];
+    const jobs: Array<Promise<unknown>> = [runBell(db), finishDueActions(db), runLastCall(db, { now: at }), runNotificationBatch(db, telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), { batch: 200 })];
     if (at.getUTCMinutes() % 15 === 0) jobs.push(queueDailyPings(db, { now: at }));
     const odds = oddsFor(env);
     if (odds) jobs.push(pollOdds(db, odds, { now: at }).then(() => publishSlate(db, { now: at })).then(() => npcCalls(db, { now: at })));
