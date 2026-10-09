@@ -896,3 +896,14 @@ describe("real money over HTTP", () => {
     expect((await call("GET", "/v1/real/fees?amountCents=20000", { token: me.token })).status).toBe(400);
   });
 });
+
+describe("the real-money record over HTTP", () => {
+  it("a trade intent needs the gate open; the activity page and reality check answer", async () => {
+    const me = await resident();
+    const r = await call("POST", "/v1/real/trades", { token: me.token, body: { marketId: crypto.randomUUID(), side: "yes", amountCents: 1000, polymarketFeeCents: 0 } });
+    expect(r.body.error).toMatchObject({ code: "GATE_CLOSED", message: "switch_off" });
+    expect((await call("GET", "/v1/real/activity", { token: me.token })).body).toMatchObject({ intoTradesCents: 0, trades: [] });
+    expect((await call("GET", "/v1/real/reality-check", { token: me.token })).body).toMatchObject({ due: false });
+    expect((await call("POST", `/v1/real/trades/${crypto.randomUUID()}/fill`, { token: me.token, body: { filled: false } })).status).toBe(404);
+  });
+});

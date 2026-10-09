@@ -117,7 +117,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Breaks:** time-outs (24h, 1w, 1m or up to 42 days) and self-exclusion (6m, 1y, 5y, for good) can't end early, and the database refuses to shorten or delete them. After a fixed break ends, real money stays off until you ask, then waits one more day.
    - **The gate:** "Back it for real" shows only when the switch, the country, location agreement (the device's own check and the edge's country must match), not-a-first-session, not-the-Mini-App, setup, no break, no tilt pause, a real Mirror market (never politics), a live feed, the per-trade cap and every limit all pass, and it says why when not.
    - **Fees:** the quote shows Polymarket's fee and our 0.5% builder fee in cents, never more than the 1% cap.
-   - **Still to come (39b):** the trade record, the activity page and statement, and the hourly reality check.
+   - **The record (39b):** an intent is recorded only through an open gate for that market and amount, with both fees; the player's device signs and sends the order (we never relay it or hold funds) and reports a full fill or a failure, once, as the owner. Filled trades get their result when the market resolves (a void costs only the fees). The activity page and monthly statement show money into trades (filled only), wins, losses, fees and time played. A reality check comes due each new hour of play with time played and today's real-money result, until acknowledged.
 
 ## Deploying
 

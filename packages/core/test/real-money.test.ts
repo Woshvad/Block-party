@@ -89,3 +89,21 @@ describe("real money: caps and fees", () => {
     expect(() => feeQuote(0, 0)).toThrow();
   });
 });
+
+describe("real money: results and reality checks", () => {
+  it("a $10 YES at 50¢ that wins pays $20; a loss loses the stake; fees either way; a void loses only fees", async () => {
+    const { realPnl } = await import("../src");
+    const t = { amountCents: 1000, fillPricePct: 50, feesCents: 40, side: "yes" as const };
+    expect(realPnl(t, true)).toBe(2000 - 1000 - 40);
+    expect(realPnl(t, false)).toBe(-1040);
+    expect(realPnl(t, null)).toBe(-40);
+    expect(realPnl({ ...t, side: "no", fillPricePct: 30 }, false)).toBe(Math.floor(100_000 / 30) - 1040);
+  });
+  it("a reality check each new hour of play", async () => {
+    const { realityCheckDue } = await import("../src");
+    expect(realityCheckDue(59, 0)).toBe(false);
+    expect(realityCheckDue(60, 0)).toBe(true);
+    expect(realityCheckDue(119, 1)).toBe(false);
+    expect(realityCheckDue(125, 1)).toBe(true);
+  });
+});

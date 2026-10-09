@@ -1,14 +1,14 @@
-import { EXCLUSIONS, type GateReason, REAL, TIMEOUTS, cityDay, isAdult, monthlyCityCap, realGate } from "@bp/core";
+import { EXCLUSIONS, type GateReason, MOOD, REAL, TIMEOUTS, cityDay, feeQuote, isAdult, monthlyCityCap, realGate, realPnl, realityCheckDue } from "@bp/core";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { moodState } from "./moods";
 import { isStaff } from "./safety";
-import { countrySwitches, markets, playSessions, realBreaks, realLimitRaises, realProfiles, realTrades } from "./schema";
+import { countrySwitches, markets, playSessions, realBreaks, realLimitRaises, realProfiles, realTrades, realityChecks } from "./schema";
 import { feedStatus } from "./tower";
 
 export class RealMoneyError extends Error {
   constructor(
-    readonly code: "INVALID_INPUT" | "UNDER_18" | "NOT_SET_UP" | "NOT_YET" | "NO_SUCH_RAISE" | "ON_A_BREAK" | "NOT_STAFF",
+    readonly code: "INVALID_INPUT" | "UNDER_18" | "NOT_SET_UP" | "NOT_YET" | "NO_SUCH_RAISE" | "ON_A_BREAK" | "NOT_STAFF" | "GATE_CLOSED" | "NO_SUCH_TRADE",
     message: string,
   ) {
     super(message);
@@ -209,4 +209,115 @@ export async function realTradeGate(
 export async function inFirstSession(db: Db, userId: string): Promise<boolean> {
   const [n] = await db.select({ n: sql<number>`count(*)::int` }).from(playSessions).where(eq(playSessions.userId, userId));
   return n!.n <= 1;
+}
+
+// --- The trade record ---------------------------------------------------------------
+
+type GateContext = { switchOn: boolean; country: string | null; locationOk: boolean; firstSession: boolean; inMiniApp: boolean };
+
+// Before the device signs: the gate again, for this market and amount, then a
+// record with both fees. We never relay the order or hold the money.
+export async function recordIntent(
+  db: Db,
+  userId: string,
+  input: { marketId?: unknown; side?: unknown; amountCents?: unknown; polymarketFeeCents?: unknown },
+  ctx: GateContext,
+  opts: { now?: Date } = {},
+) {
+  const now = opts.now ?? new Date();
+  if (typeof input.marketId !== "string" || !UUID.test(input.marketId)) throw new RealMoneyError("INVALID_INPUT", "which market?");
+  if (input.side !== "yes" && input.side !== "no") throw new RealMoneyError("INVALID_INPUT", "side is yes or no");
+  if (!Number.isSafeInteger(input.amountCents) || (input.amountCents as number) <= 0) throw new RealMoneyError("INVALID_INPUT", "an amount in cents");
+  if (!Number.isSafeInteger(input.polymarketFeeCents) || (input.polymarketFeeCents as number) < 0 || (input.polymarketFeeCents as number) > (input.amountCents as number)) throw new RealMoneyError("INVALID_INPUT", "Polymarket's fee in cents");
+  const g = await realTradeGate(db, userId, { ...ctx, marketId: input.marketId.toLowerCase(), amountCents: input.amountCents as number }, { now });
+  if (!g.ok) throw new RealMoneyError("GATE_CLOSED", g.reason);
+  const q = feeQuote(input.amountCents as number, input.polymarketFeeCents as number);
+  const [t] = await db
+    .insert(realTrades)
+    .values({ userId, marketId: input.marketId.toLowerCase(), side: input.side, amountCents: q.amountCents, polymarketFeeCents: q.polymarketFeeCents, builderFeeCents: q.builderFeeCents, createdAt: now })
+    .returning();
+  return { id: t!.id, ...q };
+}
+
+// The device reports the order: filled in full (at its price) or not at all.
+export async function reportFill(db: Db, userId: string, tradeId: unknown, input: { filled?: unknown; fillPricePct?: unknown }, opts: { now?: Date } = {}) {
+  if (typeof tradeId !== "string" || !UUID.test(tradeId)) throw new RealMoneyError("NO_SUCH_TRADE", "no such trade");
+  if (typeof input.filled !== "boolean") throw new RealMoneyError("INVALID_INPUT", "filled is true or false");
+  if (input.filled && (!Number.isInteger(input.fillPricePct) || (input.fillPricePct as number) < 1 || (input.fillPricePct as number) > 99)) throw new RealMoneyError("INVALID_INPUT", "the fill price, 1 to 99");
+  const [t] = await db
+    .update(realTrades)
+    .set(input.filled ? { status: "filled", fillPricePct: input.fillPricePct as number, filledAt: opts.now ?? new Date() } : { status: "failed" })
+    .where(and(eq(realTrades.id, tradeId.toLowerCase()), eq(realTrades.userId, userId), eq(realTrades.status, "intent")))
+    .returning({ id: realTrades.id, status: realTrades.status });
+  if (!t) throw new RealMoneyError("NO_SUCH_TRADE", "no such open trade");
+  return t;
+}
+
+// When a market resolves (or voids), each filled trade on it gets its result.
+export async function settleRealTrades(db: Db, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const due = await db
+    .select({ id: realTrades.id, amountCents: realTrades.amountCents, fill: realTrades.fillPricePct, pm: realTrades.polymarketFeeCents, b: realTrades.builderFeeCents, side: realTrades.side, status: markets.status, outcome: markets.outcome })
+    .from(realTrades)
+    .innerJoin(markets, eq(markets.id, realTrades.marketId))
+    .where(and(eq(realTrades.status, "filled"), inArray(markets.status, ["resolved", "void"])));
+  for (const t of due) {
+    const pnl = realPnl({ amountCents: t.amountCents, fillPricePct: t.fill!, feesCents: t.pm + t.b, side: t.side }, t.status === "void" ? null : t.outcome);
+    await db.update(realTrades).set({ status: "settled", pnlCents: pnl, settledAt: now }).where(and(eq(realTrades.id, t.id), eq(realTrades.status, "filled")));
+  }
+  return { settled: due.length };
+}
+
+// Your own record: money into trades, wins, losses, fees and time spent, by month.
+export async function realActivity(db: Db, userId: string, month: unknown, opts: { now?: Date } = {}) {
+  const m = typeof month === "string" && /^\d{4}-\d{2}$/.test(month) ? month : cityDay(opts.now ?? new Date()).slice(0, 7);
+  const from = new Date(`${m}-01T00:00:00Z`);
+  const to = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 1));
+  const trades = await db
+    .select()
+    .from(realTrades)
+    .where(and(eq(realTrades.userId, userId), gte(realTrades.createdAt, from), sql`${realTrades.createdAt} < ${to.toISOString()}::timestamptz`))
+    .orderBy(desc(realTrades.createdAt));
+  const counted = trades.filter((t) => t.status === "filled" || t.status === "settled");
+  const [mins] = await db
+    .select({ m: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${playSessions.lastSeenAt} - ${playSessions.startedAt})) / 60), 0)::int` })
+    .from(playSessions)
+    .where(and(eq(playSessions.userId, userId), gte(playSessions.startedAt, from), sql`${playSessions.startedAt} < ${to.toISOString()}::timestamptz`));
+  return {
+    month: m,
+    intoTradesCents: counted.reduce((a, t) => a + t.amountCents, 0),
+    winsCents: counted.reduce((a, t) => a + Math.max(0, t.pnlCents ?? 0), 0),
+    lossesCents: counted.reduce((a, t) => a + Math.max(0, -(t.pnlCents ?? 0)), 0),
+    feesCents: counted.reduce((a, t) => a + t.polymarketFeeCents + t.builderFeeCents, 0),
+    minutesPlayed: mins!.m,
+    trades: trades.map((t) => ({ id: t.id, marketId: t.marketId, side: t.side, amountCents: t.amountCents, status: t.status, pnlCents: t.pnlCents, createdAt: t.createdAt })),
+  };
+}
+
+// Every 60 minutes of play: time played and today's real-money result.
+export async function realityCheck(db: Db, userId: string, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const [s] = await db.select().from(playSessions).where(eq(playSessions.userId, userId)).orderBy(desc(playSessions.lastSeenAt)).limit(1);
+  if (!s || now.getTime() - s.lastSeenAt.getTime() > MOOD.sessionGapMinutes * 60_000) return { due: false, minutesPlayed: 0, todayResultCents: 0 };
+  const minutes = Math.floor((now.getTime() - s.startedAt.getTime()) / 60_000);
+  const [last] = await db
+    .select({ hour: sql<number>`COALESCE(MAX(${realityChecks.hour}), 0)::int` })
+    .from(realityChecks)
+    .where(and(eq(realityChecks.userId, userId), eq(realityChecks.sessionStartedAt, s.startedAt)));
+  const [today] = await db
+    .select({ r: sql<number>`COALESCE(SUM(${realTrades.pnlCents}), 0)::int` })
+    .from(realTrades)
+    .where(and(eq(realTrades.userId, userId), eq(realTrades.status, "settled"), gte(realTrades.settledAt, new Date(`${cityDay(now)}T00:00:00Z`))));
+  return { due: realityCheckDue(minutes, last!.hour), minutesPlayed: minutes, todayResultCents: today!.r, sessionStartedAt: s.startedAt };
+}
+
+export async function ackRealityCheck(db: Db, userId: string, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const r = await realityCheck(db, userId, { now });
+  if (!r.due || !("sessionStartedAt" in r)) return { acknowledged: false };
+  await db
+    .insert(realityChecks)
+    .values({ userId, sessionStartedAt: r.sessionStartedAt!, hour: Math.floor(r.minutesPlayed / REAL.realityCheckMinutes), at: now })
+    .onConflictDoNothing();
+  return { acknowledged: true };
 }

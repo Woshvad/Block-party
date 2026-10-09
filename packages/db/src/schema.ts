@@ -1753,3 +1753,17 @@ export const realTrades = pgTable(
   },
   (t) => [index("real_trades_user").on(t.userId, t.createdAt), check("real_trades_amount", sql`${t.amountCents} BETWEEN 1 AND 10000`)],
 );
+
+// Reality checks shown, per play session and hour.
+export const realityChecks = pgTable(
+  "reality_checks",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    sessionStartedAt: timestamp("session_started_at", { withTimezone: true }).notNull(),
+    hour: integer("hour").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.sessionStartedAt, t.hour] })],
+);

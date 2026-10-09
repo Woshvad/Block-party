@@ -14,6 +14,12 @@ import {
   setCountrySwitch,
   setupReal,
   takeBreak,
+  recordIntent,
+  reportFill,
+  settleRealTrades,
+  realActivity,
+  realityCheck,
+  ackRealityCheck,
 } from "../src";
 import { makeResident } from "./helpers";
 
@@ -150,5 +156,56 @@ describe("the gate", () => {
     for (let i = 0; i < 2; i++) await client`INSERT INTO real_trades (user_id, market_id, side, amount_cents, polymarket_fee_cents, builder_fee_cents, status, created_at) VALUES (${u}, ${mk!.id}, 'yes', 10000, 0, 50, 'filled', ${now.toISOString()})`;
     expect(await gate(u, { marketId: mk!.id, amountCents: 50_00 })).toEqual({ ok: true }); // 250 exactly
     expect(await gate(u, { marketId: mk!.id, amountCents: 50_01 })).toEqual({ ok: false, reason: "over_limit" });
+  });
+});
+
+describe("the trade record", () => {
+  it("intent only through an open gate; fill reported once, by the owner; results on resolution; the month adds up", async () => {
+    const u = await makeResident(db);
+    await setup(u);
+    const ms = new Map<string, FeedMarket>();
+    const mkA: FeedMarket = { externalId: `rec-${randomUUID()}`, question: "Record A?", category: "sports", ladder: null, freezesAt: later(D), settlesBy: later(2 * D), price: 50, resolved: null, voided: false };
+    const mkB: FeedMarket = { ...mkA, externalId: `rec-${randomUUID()}`, question: "Record B?" };
+    ms.set(mkA.externalId, mkA);
+    ms.set(mkB.externalId, mkB);
+    const provider: OddsProvider = { source: "real-rec", fetch: async () => [...ms.values()].map((m) => ({ ...m })) };
+    await pollOdds(db, provider, { now: later(H) });
+    const id = async (m: FeedMarket) => (await client`SELECT id FROM markets WHERE external_id = ${m.externalId}`)[0]!.id as string;
+    const [a, b] = [await id(mkA), await id(mkB)];
+    const ctx = { switchOn: true, country: "ZZ", locationOk: true, firstSession: false, inMiniApp: false };
+    expect(await code(recordIntent(db, u, { marketId: a, side: "yes", amountCents: 10_00, polymarketFeeCents: 35 }, { ...ctx, switchOn: false }, { now: later(H) }))).toBe("GATE_CLOSED");
+    const t1 = await recordIntent(db, u, { marketId: a, side: "yes", amountCents: 10_00, polymarketFeeCents: 35 }, ctx, { now: later(H) });
+    expect(t1).toMatchObject({ builderFeeCents: 5, totalCents: 1040 });
+    const t2 = await recordIntent(db, u, { marketId: b, side: "no", amountCents: 20_00, polymarketFeeCents: 0 }, ctx, { now: later(H) });
+    expect(await code(reportFill(db, await makeResident(db), t1.id, { filled: true, fillPricePct: 50 }))).toBe("NO_SUCH_TRADE");
+    await reportFill(db, u, t1.id, { filled: true, fillPricePct: 50 });
+    expect(await code(reportFill(db, u, t1.id, { filled: true, fillPricePct: 50 }))).toBe("NO_SUCH_TRADE");
+    expect(await code(reportFill(db, u, t2.id, { filled: true, fillPricePct: 100 }))).toBe("INVALID_INPUT");
+    await reportFill(db, u, t2.id, { filled: true, fillPricePct: 40 });
+    // An order that never filled doesn't count as money into trades.
+    const t3 = await recordIntent(db, u, { marketId: a, side: "no", amountCents: 5_00, polymarketFeeCents: 0 }, ctx, { now: later(H) });
+    await reportFill(db, u, t3.id, { filled: false });
+    mkA.resolved = true; // the YES wins: $20 back on $10
+    mkB.voided = true; // void: only fees lost
+    await pollOdds(db, provider, { now: later(3 * D) });
+    await settleRealTrades(db, { now: later(3 * D) });
+    const rows = await client`SELECT id, status, pnl_cents FROM real_trades WHERE user_id = ${u} AND status <> 'failed' ORDER BY amount_cents`;
+    expect(rows.map((r) => [r.status, r.pnl_cents])).toEqual([["settled", 2000 - 1000 - 40], ["settled", -10]]);
+    const act = await realActivity(db, u, "2044-05", { now });
+    expect(act).toMatchObject({ intoTradesCents: 3000, winsCents: 960, lossesCents: 10, feesCents: 50 });
+  });
+
+  it("a reality check each hour of play, until it's acknowledged", async () => {
+    const u = await makeResident(db);
+    const start = later(-61 * 60_000);
+    await client`INSERT INTO play_sessions (user_id, started_at, last_seen_at) VALUES (${u}, ${start.toISOString()}, ${now.toISOString()})`;
+    expect(await realityCheck(db, u, { now: later(-2 * 60_000) })).toMatchObject({ due: false, minutesPlayed: 59 });
+    expect(await realityCheck(db, u, { now })).toMatchObject({ due: true, minutesPlayed: 61, todayResultCents: 0 });
+    expect(await ackRealityCheck(db, u, { now })).toEqual({ acknowledged: true });
+    expect((await realityCheck(db, u, { now })).due).toBe(false);
+    await client`UPDATE play_sessions SET last_seen_at = ${later(60 * 60_000).toISOString()} WHERE user_id = ${u}`;
+    expect((await realityCheck(db, u, { now: later(60 * 60_000) })).due).toBe(true);
+    // Gone for over an hour: that session's over, nothing is due.
+    expect(await realityCheck(db, u, { now: later(3 * 60 * 60_000) })).toMatchObject({ due: false, minutesPlayed: 0 });
   });
 });

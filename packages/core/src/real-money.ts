@@ -97,3 +97,15 @@ export function realGate(i: GateInput): { ok: true } | { ok: false; reason: Gate
   }
   return { ok: true };
 }
+
+// A filled trade's result once its market resolves: shares bought at the fill
+// price pay $1 each if the side wins. Fees are paid either way; a void refunds the stake.
+export function realPnl(t: { amountCents: number; fillPricePct: number; feesCents: number; side: "yes" | "no" }, outcome: boolean | null): number {
+  if (outcome === null) return -t.feesCents;
+  const won = (t.side === "yes") === outcome;
+  const payout = won ? Math.floor((t.amountCents * 100) / t.fillPricePct) : 0;
+  return payout - t.amountCents - t.feesCents;
+}
+
+// Every 60 minutes of play: due when a new hour has passed since the last one shown.
+export const realityCheckDue = (sessionMinutes: number, lastShownHour: number) => Math.floor(sessionMinutes / REAL.realityCheckMinutes) > lastShownHour;

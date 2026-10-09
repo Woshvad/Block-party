@@ -189,6 +189,11 @@ import {
   setCountrySwitch,
   realTradeGate,
   inFirstSession,
+  recordIntent,
+  reportFill,
+  realActivity,
+  realityCheck,
+  ackRealityCheck,
   createCityMarket,
   resolveCityMarket,
   stakeCity,
@@ -976,30 +981,35 @@ export function createApp(cfg: AppConfig) {
   });
   // Whether "Back it for real" may show. The device reports its own location
   // check; the edge reports the country; both must agree.
+  const gateContext = async (c: C, b: Record<string, unknown>) => {
+    const country = (cfg.countryHeader && c.req.header(cfg.countryHeader)) || null;
+    return {
+      switchOn: !!cfg.features?.realMoney,
+      country,
+      locationOk: b.deviceLocationOk === true && typeof b.deviceCountry === "string" && country !== null && b.deviceCountry === country,
+      firstSession: await inFirstSession(db, c.get("userId")),
+      inMiniApp: c.req.header("x-client") === "telegram-mini-app",
+    };
+  };
   app.post("/v1/real/gate", auth, async (c) => {
     const b = await body(c);
-    const country = (cfg.countryHeader && c.req.header(cfg.countryHeader)) || null;
     const amountCents = b.amountCents === undefined ? null : b.amountCents;
     if (amountCents !== null && (!Number.isSafeInteger(amountCents) || (amountCents as number) <= 0)) throw new ApiError(400, "INVALID_INPUT", "amountCents");
     if (b.marketId !== undefined && (typeof b.marketId !== "string" || !UUID.test(b.marketId))) throw new ApiError(400, "INVALID_INPUT", "marketId");
-    const locationOk = b.deviceLocationOk === true && typeof b.deviceCountry === "string" && country !== null && b.deviceCountry === country;
-    return c.json(
-      await realTradeGate(
-        db,
-        c.get("userId"),
-        {
-          switchOn: !!cfg.features?.realMoney,
-          country,
-          locationOk,
-          firstSession: await inFirstSession(db, c.get("userId")),
-          inMiniApp: c.req.header("x-client") === "telegram-mini-app",
-          marketId: b.marketId as string | undefined,
-          amountCents: amountCents as number | null,
-        },
-        opts(),
-      ),
-    );
+    return c.json(await realTradeGate(db, c.get("userId"), { ...(await gateContext(c, b)), marketId: b.marketId as string | undefined, amountCents: amountCents as number | null }, opts()));
   });
+  // The trade record: an intent before the device signs, then its fill.
+  app.post("/v1/real/trades", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await recordIntent(db, c.get("userId"), { marketId: b.marketId, side: b.side, amountCents: b.amountCents, polymarketFeeCents: b.polymarketFeeCents }, await gateContext(c, b), opts()), 201);
+  });
+  app.post("/v1/real/trades/:id/fill", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await reportFill(db, c.get("userId"), uuid(c, "id"), { filled: b.filled, fillPricePct: b.fillPricePct }, opts()));
+  });
+  app.get("/v1/real/activity", auth, async (c) => c.json(await realActivity(db, c.get("userId"), c.req.query("month"), opts())));
+  app.get("/v1/real/reality-check", auth, async (c) => c.json(await realityCheck(db, c.get("userId"), opts())));
+  app.post("/v1/real/reality-check/ack", auth, async (c) => c.json(await ackRealityCheck(db, c.get("userId"), opts())));
   app.put("/v1/staff/countries/:code", auth, async (c) => c.json(await setCountrySwitch(db, c.get("userId"), c.req.param("code"), (await body(c)).on, opts())));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
