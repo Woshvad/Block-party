@@ -221,6 +221,8 @@ export const residents = pgTable(
     backstory: backstory("backstory").notNull(),
     starterItem: text("starter_item").notNull(),
     kitStyle: kitStyle("kit_style").notNull(),
+    // The candle's colour can be hidden; the mood always shows.
+    hideCandleColor: boolean("hide_candle_color").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -574,3 +576,73 @@ export const rateLimits = pgTable(
   },
   (t) => [primaryKey({ columns: [t.bucket, t.windowStart] }), check("rate_limits_count", sql`${t.count} > 0`)],
 );
+
+// --- Moods ----------------------------------------------------------------
+
+// Continuous play, split by an hour away. Drives Rested and Chart-brain.
+export const playSessions = pgTable(
+  "play_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("play_sessions_latest").on(t.userId, t.lastSeenAt),
+    check("play_sessions_order", sql`${t.lastSeenAt} >= ${t.startedAt}`),
+  ],
+);
+
+export const moodKind = pgEnum("mood_kind", ["called_it", "rekt", "tilted", "cozy", "rested", "chart_brain"]);
+
+// Event moods (Called It, REKT, Tilted, Cozy, a nap's Rested). Rested and
+// Chart-brain from the play clock are worked out, not stored.
+export const moods = pgTable(
+  "moods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    mood: moodKind("mood").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }), // null: until something clears it
+    clearedAt: timestamp("cleared_at", { withTimezone: true }),
+    clearedBy: text("cleared_by"),
+    source: jsonb("source").$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => [
+    index("moods_user").on(t.userId, t.startedAt),
+    // At most one open row per mood per resident; granting again refreshes it.
+    uniqueIndex("moods_one_open").on(t.userId, t.mood).where(sql`${t.clearedAt} IS NULL`),
+    check("moods_cleared_consistent", sql`(${t.clearedAt} IS NULL) = (${t.clearedBy} IS NULL)`),
+    check("moods_ends_after_start", sql`${t.endsAt} IS NULL OR ${t.endsAt} > ${t.startedAt}`),
+  ],
+);
+
+// Free Copium earned from REKTs. Never bought, never transferred.
+export const copiumCredits = pgTable(
+  "copium_credits",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id),
+    free: integer("free").notNull().default(0),
+  },
+  (t) => [check("copium_credits_free", sql`${t.free} >= 0`)],
+);
+
+// Each Copium use, keyed by the caller's idempotency key, so a retry returns
+// the first result instead of spending a second Copium.
+export const copiumUses = pgTable("copium_uses", {
+  key: text("key").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
+  paid: boolean("paid").notNull(),
+  cleared: text("cleared").array().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

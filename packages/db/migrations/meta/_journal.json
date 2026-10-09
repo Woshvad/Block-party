@@ -106,6 +106,20 @@
       "when": 1791501749671,
       "tag": "0014_rate_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791504344624,
+      "tag": "0015_moods",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791505774309,
+      "tag": "0016_copium_uses",
+      "breakpoints": true
     }
   ]
 }

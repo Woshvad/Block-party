@@ -5,7 +5,7 @@ import { app, call, client, close, db, logs, ready, resident } from "./harness";
 
 const PUBLIC = new Set(["GET /health", "GET /v1/catalogue", "POST /v1/auth/guest", "POST /v1/auth/telegram", "POST /v1/auth/privy"]);
 // Server-only actions that must never get a route.
-const FORBIDDEN = /streak|mint|grant|burn|halving|set-?up-?home|collect-?rent|record/i;
+const FORBIDDEN = /streak|mint|grant|burn|halving|set-?up-?home|collect-?rent|record|tilt|cozy/i;
 
 const routes = [
   ...new Map(

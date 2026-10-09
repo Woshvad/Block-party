@@ -7,6 +7,7 @@ export * from "./daily";
 export * from "./economy";
 export * from "./home";
 export * from "./ledger";
+export * from "./moods";
 export * from "./ratelimit";
 export * from "./residents";
 export * from "./schema-status";

@@ -267,3 +267,27 @@ describe("the bad-input backstop", () => {
     expect(logs.slice(before).map((l) => l.msg)).toEqual(["unhandled error"]);
   });
 });
+
+describe("moods over HTTP", () => {
+  it("the candle, Copium and the hide-colour setting", async () => {
+    const { grantMood } = await import("@bp/db");
+    const { db } = await import("./harness");
+    const u = await resident();
+    expect((await call("GET", "/v1/moods", { token: u.token })).body).toMatchObject({ active: [], candle: { mood: null, color: "doji" }, copium: { free: 0, price: 30 } });
+    expect((await call("POST", "/v1/copium", { token: u.token })).body.error.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+    expect((await call("POST", "/v1/copium", { token: u.token, headers: idem() })).body.error.code).toBe("NOTHING_TO_CLEAR");
+    await grantMood(db, u.userId, "rekt"); // the bell would do this
+    expect((await call("GET", "/v1/moods", { token: u.token })).body.candle.mood).toBe("rekt");
+    expect((await call("POST", "/v1/copium", { token: u.token, headers: idem() })).body).toMatchObject({ paid: false, cleared: ["rekt"] });
+    expect((await call("PATCH", "/v1/resident", { token: u.token, body: { hideCandleColor: true } })).body.hideCandleColor).toBe(true);
+    expect((await call("PATCH", "/v1/resident", { token: u.token, body: { hideCandleColor: "no" } })).status).toBe(400);
+  });
+
+  it("signed-in requests run the play clock", async () => {
+    const { client } = await import("./harness");
+    const u = await resident();
+    await call("POST", "/v1/heartbeat", { token: u.token });
+    const [r] = await client`SELECT count(*)::int AS n FROM play_sessions WHERE user_id = ${u.userId}`;
+    expect(r!.n).toBe(1);
+  });
+});

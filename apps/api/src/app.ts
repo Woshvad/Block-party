@@ -33,6 +33,10 @@ import {
   getHome,
   getResident,
   isHandleAvailable,
+  moodState,
+  setHideCandleColor,
+  touchActivity,
+  useCopium,
   joinOpenCrew,
   leaveCrew,
   myCrew,
@@ -214,6 +218,8 @@ export function createApp(cfg: AppConfig) {
     c.set("sessionToken", token);
     const write = c.req.method !== "GET";
     await limit(c, `user:${s.userId}:${write ? "w" : "r"}`, write ? limits.writesPerUserPerMinute : limits.readsPerUserPerMinute, 60);
+    // The play clock behind Rested and Chart-brain (throttled to once a minute).
+    await touchActivity(db, s.userId, { now: now() });
     await next();
   };
 
@@ -313,6 +319,7 @@ export function createApp(cfg: AppConfig) {
     if (b.name !== undefined) r = await updateName(db, userId, b.name);
     if (b.look !== undefined) r = await updateLook(db, userId, b.look);
     if (b.goal !== undefined) r = await updateGoal(db, userId, b.goal);
+    if (b.hideCandleColor !== undefined) r = await setHideCandleColor(db, userId, b.hideCandleColor);
     if (!r) throw new ApiError(404, "NO_RESIDENT", "move in first");
     return c.json(r);
   });
@@ -424,6 +431,13 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ok: true });
   });
   app.patch("/v1/crews/mine/house", auth, async (c) => c.json(await setCrewFinishes(db, c.get("userId"), await body(c))));
+
+  // --- Moods ---------------------------------------------------------------
+
+  app.get("/v1/moods", auth, async (c) => c.json(await moodState(db, c.get("userId"), opts())));
+  app.post("/v1/copium", auth, async (c) => c.json(await useCopium(db, c.get("userId"), idem(c, "copium"), opts())));
+  // The client pings while the app is open, so play time counts without other requests.
+  app.post("/v1/heartbeat", auth, (c) => c.json({ ok: true }));
 
   // --- Jobs ----------------------------------------------------------------
 
