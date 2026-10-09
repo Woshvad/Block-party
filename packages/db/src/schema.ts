@@ -1587,3 +1587,54 @@ export const leagueWeeks = pgTable(
   },
   (t) => [primaryKey({ columns: [t.week, t.crewId] })],
 );
+
+// The Ratio of the Day: one prompt a day, one headline per resident, pair votes.
+export const ratioPrompts = pgTable("ratio_prompts", {
+  cityDay: date("city_day", { mode: "string" }).primaryKey(),
+  marketId: uuid("market_id")
+    .notNull()
+    .references(() => markets.id),
+  world: integer("world").notNull(),
+  city: integer("city").notNull(),
+  winnerEntryId: uuid("winner_entry_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+});
+
+export const ratioEntries = pgTable(
+  "ratio_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cityDay: date("city_day", { mode: "string" })
+      .notNull()
+      .references(() => ratioPrompts.cityDay),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    text: text("text").notNull(),
+    hidden: boolean("hidden").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("ratio_entries_one").on(t.cityDay, t.userId), check("ratio_entries_text", sql`char_length(${t.text}) BETWEEN 1 AND 80`)],
+);
+
+export const ratioVotes = pgTable(
+  "ratio_votes",
+  {
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    voterId: uuid("voter_id")
+      .notNull()
+      .references(() => users.id),
+    low: uuid("low")
+      .notNull()
+      .references(() => ratioEntries.id),
+    high: uuid("high")
+      .notNull()
+      .references(() => ratioEntries.id),
+    winner: uuid("winner").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.cityDay, t.voterId, t.low, t.high] }),
+    check("ratio_votes_pair", sql`${t.low} < ${t.high} AND ${t.winner} IN (${t.low}, ${t.high})`),
+  ],
+);

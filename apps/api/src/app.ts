@@ -170,6 +170,13 @@ import {
   cancelGrudge,
   myGrudges,
   lockedSide,
+  todaysRatio,
+  submitRatio,
+  ratioPair,
+  voteRatio,
+  hideRatioEntry,
+  pickRatioPrompt,
+  takeDownRatioEntry,
   createCityMarket,
   resolveCityMarket,
   stakeCity,
@@ -907,6 +914,22 @@ export function createApp(cfg: AppConfig) {
     return c.json(await leagueCard(db, m.crew.id));
   });
   app.get("/v1/league/champions", auth, async (c) => c.json(await leagueChampions(db)));
+  // The Ratio of the Day: write a headline; from 23:00 the Roof votes pairs.
+  app.get("/v1/ratio", auth, async (c) => {
+    const r = await todaysRatio(db, opts());
+    if (!r) throw new ApiError(404, "NOT_FOUND", "no Ratio of the Day yet (18:00 UTC)");
+    return c.json(r);
+  });
+  app.post("/v1/ratio", auth, async (c) => c.json(await submitRatio(db, c.get("userId"), (await body(c)).text, opts()), 201));
+  app.get("/v1/ratio/pair", auth, async (c) => c.json(await ratioPair(db, c.get("userId"), { ...opts(), where })));
+  app.post("/v1/ratio/vote", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await voteRatio(db, c.get("userId"), { a: b.a, b: b.b, winner: b.winner }, { ...opts(), where }));
+  });
+  app.post("/v1/staff/ratio/:id/hide", auth, async (c) => {
+    await hideRatioEntry(db, c.get("userId"), uuid(c, "id"));
+    return c.json({ hidden: true });
+  });
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
@@ -968,7 +991,9 @@ export function createApp(cfg: AppConfig) {
         ...opts(),
         // Take flagged content down where it lives.
         onFlagged: async (f) => {
-          if (f.kind === "board" || f.kind === "crew" || f.kind === "dm") await hideMessage(db, f.ref);
+          // A flagged Ratio headline comes down too.
+          if (f.kind === "board" && f.ref.startsWith("ratio:")) await takeDownRatioEntry(db, f.ref.slice(6));
+          else if (f.kind === "board" || f.kind === "crew" || f.kind === "dm") await hideMessage(db, f.ref);
           if (f.kind === "room" && cfg.rooms) {
             const [place, copy, lineId] = f.ref.split("#");
             if (place && copy && lineId) await cfg.rooms.takedown(place, Number(copy), lineId).catch(() => undefined);

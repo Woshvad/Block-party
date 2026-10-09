@@ -103,6 +103,12 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 34. **The Crew League** (done). Every crew with 5+ callers that week is ranked by the average Aura of its top 5 callers (current members only, markets resolved that week) plus a point per member who locked a full Slate (up to 10 a night). Size groups (3 to 10, 11 to 25, 26 to 50) each run a ladder of 10-crew divisions; at Sunday's close (the Monday bell) crews sort within their division (a crew that didn't play sinks and never goes up), then the top 3 of each division swap with the bottom 3 above. New crews start at the bottom. Each week's table is recorded once with rank, movement and the champion (only a crew that played), which wins the banner, never tokens or cash. The ladder is property-tested to always hold every crew exactly once.
 35. **The Bunkers** (done). A YES room and a NO room per market (`bunker:<market id>:<side>`, on the Tower's floor): the room ticket is only issued to residents who've arrived at the Tower and hold a locked call on that side. The reel marks the losing Bunker whose lights go out.
    - The 15-minute warm-up stays parked with the Polymarket items: the plan says to get Polymarket's written OK first.
+36. **The Ratio of the Day** (done).
+   - **The prompt:** from 18:00 UTC, the day's biggest Vibe Gap (10+ neighbours called it, still to settle before the bell) becomes "World 8% · City 61%. Write the headline for when it settles."
+   - **Entries:** each resident writes one headline of up to 80 characters until 23:00, through the chat filter (links stripped, keys and seed phrases refused) and the AI queue. A flagged headline comes down, and staff can pull any.
+   - **Voting:** from 23:00 the Roof votes head-to-head pairs: Proof of Neighbour, in person on the Roof, never your own, once per pair, least-shown entries first.
+   - **The winner:** most wins, then win rate, then the earliest entry. It plays on the reel and prints on that market's receipts, and pays no GM.
+   - **Fixed here:** the prompt could have picked a stale market from an earlier day.
 
 ## Deploying
 

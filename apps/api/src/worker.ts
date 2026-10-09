@@ -58,9 +58,9 @@ export default {
   // half-hour and 45-minute time zones get their hour too).
   async scheduled(event: { scheduledTime?: number }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
     const { db, close } = createDb(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false });
-    const { runBell, runNotificationBatch, finishDueActions, queueDailyPings, pollOdds, publishSlate, npcCalls, runLastCall } = await import("@bp/db");
+    const { runBell, runNotificationBatch, finishDueActions, queueDailyPings, pollOdds, publishSlate, npcCalls, runLastCall, pickRatioPrompt } = await import("@bp/db");
     const at = new Date(event.scheduledTime ?? Date.now());
-    const jobs: Array<Promise<unknown>> = [runBell(db), finishDueActions(db), runLastCall(db, { now: at }), runNotificationBatch(db, telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), { batch: 200 })];
+    const jobs: Array<Promise<unknown>> = [runBell(db), finishDueActions(db), runLastCall(db, { now: at }), pickRatioPrompt(db, { now: at }), runNotificationBatch(db, telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), { batch: 200 })];
     if (at.getUTCMinutes() % 15 === 0) jobs.push(queueDailyPings(db, { now: at }));
     const odds = oddsFor(env);
     if (odds) jobs.push(pollOdds(db, odds, { now: at }).then(() => publishSlate(db, { now: at })).then(() => npcCalls(db, { now: at })));

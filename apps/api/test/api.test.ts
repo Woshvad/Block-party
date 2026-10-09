@@ -852,3 +852,13 @@ describe("the Bunkers over HTTP", () => {
     expect((await call("POST", "/v1/rooms/ticket", { token: me.token, body: { place: "bunker:nope:yes" } })).status).toBe(404);
   });
 });
+
+describe("the Ratio of the Day over HTTP", () => {
+  it("before 18:00 there's nothing; refusals are clear", async () => {
+    const me = await resident();
+    const r = await call("GET", "/v1/ratio", { token: me.token });
+    expect([200, 404]).toContain(r.status);
+    expect((await call("POST", "/v1/ratio/vote", { token: me.token, body: { a: "x", b: "y", winner: "x" } })).status).toBeGreaterThanOrEqual(400);
+    expect((await call("POST", `/v1/staff/ratio/${crypto.randomUUID()}/hide`, { token: me.token })).status).toBe(403);
+  });
+});

@@ -30,6 +30,7 @@ import { recordStreakDay } from "./daily";
 import { moodState } from "./moods";
 import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
+import { ratioHeadline } from "./ratio";
 import { isOnSlate, slateModifier } from "./slate";
 import { calls, crewMembers, feedPolls, marketTicks, markets, residents, tickets, users } from "./schema";
 
@@ -320,6 +321,8 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
     // Sealed until the bell, even when the world settled hours earlier.
     stamp: !revealed ? (r.status === "void" ? "VOID" : "IN THE MEMPOOL") : (r.side === "yes") === r.outcome ? "CALLED IT" : "REKT",
     aura: revealed && r.via !== "tail" && r.aura !== null ? r.aura / 100 : null,
+    // The Ratio of the Day's winning headline, printed on this market's share card.
+    ratio: (await ratioHeadline(db, { marketId: r.marketId }))?.headline ?? null,
   };
 }
 

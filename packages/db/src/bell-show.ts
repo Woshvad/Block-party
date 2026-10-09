@@ -4,6 +4,7 @@ import { chainStatus } from "./chain";
 import { settleCityMarkets } from "./city-markets";
 import { duelLines, settleDuels } from "./duels";
 import { settleGrudges } from "./grudge";
+import { ratioHeadline, settleRatio } from "./ratio";
 import type { Db } from "./client";
 import { economyReport } from "./economy";
 import { mint } from "./ledger";
@@ -36,6 +37,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   const duelsSettled = (await settleDuels(db, { now })).settled;
   const grudgesSettled = (await settleGrudges(db, bellDay, now)).settled;
   const cityMarketsSettled = (await settleCityMarkets(db, bellDay, now)).settled;
+  await settleRatio(db, bellDay);
   const from = dayStart(bellDay);
   const to = dayStart(addDays(bellDay, 1));
   const receipts = await db
@@ -215,6 +217,8 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
       return { slot: c.slot, tier: c.tier, question: c.question, result, world: c.world, city: cs.length >= 10 ? median(cs) : null, darkBunker: dark };
     }),
     bellScores: { top: top.map((t) => ({ ...t, score: t.scoreMilli / 1000 })), mine: myCrew && { score: myCrew.scoreMilli / 1000, rank: myCrew.rank } },
+    // The Ratio of the Day: the Roof's winning headline.
+    ratio: await ratioHeadline(db, { day: bellDay }),
     // Duels settle at the bell after the day: "@a ate @b's Snap".
     duels: await duelLines(db, dayStart(addDays(bellDay, 1)), dayStart(addDays(bellDay, 2))),
     burned: burn.totalDestroyed,
