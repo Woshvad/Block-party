@@ -1,4 +1,5 @@
 import {
+  faucetFrenAnswer,
   bigNights,
   areaOf,
   PLACE_RE,
@@ -136,6 +137,7 @@ import {
   setPrefs,
   markOpened,
   runNotificationBatch,
+  queueDailyPings,
   setCrewBotMutes,
   startNap,
   cancelLongAction,
@@ -765,6 +767,8 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/naps", auth, async (c) => c.json(await startNap(db, c.get("userId"), (await body(c)).itemId, where, opts()), 201));
   app.get("/v1/actions/current", auth, async (c) => c.json({ action: await myLongAction(db, c.get("userId"), opts()) }));
   app.delete("/v1/actions/current", auth, async (c) => c.json(await cancelLongAction(db, c.get("userId"), opts())));
+  // Faucet Fren answers from its script.
+  app.get("/v1/faucet-fren", auth, async (c) => c.json(faucetFrenAnswer(c.req.query("q") ?? "")));
   app.get("/v1/city/timetable", auth, async (c) => c.json({ bigNights: bigNights(now()) }));
 
   // --- Notifications --------------------------------------------------------
@@ -788,6 +792,7 @@ export function createApp(cfg: AppConfig) {
     await next();
   };
   app.post("/internal/actions/run", internal, async (c) => c.json(await finishDueActions(db, opts())));
+  app.post("/internal/notifications/daily", internal, async (c) => c.json(await queueDailyPings(db, opts())));
   app.post("/internal/notifications/run", internal, async (c) => {
     if (!cfg.notifier) throw new ApiError(503, "NOTIFICATIONS_DISABLED", "no push sender configured");
     return c.json(await runNotificationBatch(db, cfg.notifier, opts()));

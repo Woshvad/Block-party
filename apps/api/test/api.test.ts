@@ -665,3 +665,13 @@ describe("relationships over HTTP", () => {
     expect((await call("GET", "/v1/relationships", { token: a.token })).body.frens).toEqual([]);
   });
 });
+
+describe("Faucet Fren over HTTP", () => {
+  it("answers from the script, and shrugs at anything else", async () => {
+    const me = await resident();
+    expect((await call("GET", `/v1/faucet-fren?q=${encodeURIComponent("gm fren, will anyone ask for my seed phrase?")}`, { token: me.token })).body.id).toBe("safety");
+    expect((await call("GET", "/v1/faucet-fren?q=wen%20lambo", { token: me.token })).body.id).toBeNull();
+    expect((await call("GET", "/v1/faucet-fren", { token: me.token })).body.id).toBeNull();
+    expect((await call("GET", "/v1/faucet-fren?q=rent")).status).toBe(401);
+  });
+});

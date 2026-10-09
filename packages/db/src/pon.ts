@@ -7,16 +7,8 @@ import { phoneChecks, roomVisits, users, verifiedIdentities } from "./schema";
 // account per number, no VoIP) or a crypto-native proof, that has shared
 // rooms in person with 5+ neighbours. One neighbour, one vote.
 
-export const PON = {
-  minAccountDays: 3,
-  neighboursNeeded: 5,
-  overlapSeconds: 60, // sharing a room means being there together for a minute
-  openVisitCapHours: 6, // a visit whose end was never reported counts for at most this long
-  codeTtlMinutes: 10,
-  codeAttempts: 5,
-  startsPerHour: 3,
-  startsPerNumberPerDay: 5,
-} as const;
+export { PON } from "@bp/core";
+import { PON } from "@bp/core";
 
 export class PonError extends Error {
   constructor(

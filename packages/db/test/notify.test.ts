@@ -13,6 +13,7 @@ import {
   markOpened,
   maybeQueueDaily,
   notify,
+  queueDailyPings,
   redeemInvite,
   runNotificationBatch,
   setCrewBotMutes,
@@ -358,6 +359,48 @@ describe("the daily ping", () => {
     const { sender, to } = recorder();
     await run(sender, new Date(t));
     expect(to(u)).toHaveLength(1);
+  });
+});
+
+describe("the daily ping scheduler", () => {
+  // A resident with a live streak (last played the day before `t`) who played recently.
+  async function streaker(t: number, opts: { lastDayOffset?: number; current?: number; sessionAgoDays?: number } = {}) {
+    const u = await makeResident(db);
+    const current = opts.current ?? 5;
+    const lastDay = current === 0 ? null : new Date(t + (opts.lastDayOffset ?? -1) * D).toISOString().slice(0, 10);
+    await client`INSERT INTO streaks (user_id, current, longest, last_day, hodl_days) VALUES (${u}, ${current}, 5, ${lastDay}, 0)
+      ON CONFLICT (user_id) DO UPDATE SET current = EXCLUDED.current, longest = EXCLUDED.longest, last_day = EXCLUDED.last_day, hodl_days = 0`;
+    const s = new Date(t - (opts.sessionAgoDays ?? 1) * D).toISOString();
+    await client`INSERT INTO play_sessions (user_id, started_at, last_seen_at) VALUES (${u}, ${s}, ${s})`;
+    return u;
+  }
+  const pinged = async (u: string) => (await client`SELECT 1 FROM notifications WHERE user_id = ${u} AND kind = 'daily'`).length;
+
+  it("pings a live, unplayed streak at the usual hour; not the played, the broken or the gone", async () => {
+    const t = fresh() + 6 * H; // 18:00 UTC, the default usual hour
+    const due = await streaker(t);
+    const played = await streaker(t, { lastDayOffset: 0 });
+    const broken = await streaker(t, { lastDayOffset: -3 }); // two days missed, no Hodl Days
+    const zero = await streaker(t, { current: 0 });
+    const gone = await streaker(t, { sessionAgoDays: 20 });
+    await queueDailyPings(db, { now: new Date(t - H) }); // not their hour yet
+    expect(await pinged(due)).toBe(0);
+    await queueDailyPings(db, { now: new Date(t) });
+    await queueDailyPings(db, { now: new Date(t + 15 * 60_000) }); // the next tick doesn't double it
+    expect(await pinged(due)).toBe(1);
+    for (const u of [played, broken, zero, gone]) expect(await pinged(u)).toBe(0);
+    const [n] = await client`SELECT values FROM notifications WHERE user_id = ${due} AND kind = 'daily'`;
+    expect(n!.values).toEqual({ streak: 5 });
+  });
+
+  it("pages through everyone, however small the page", async () => {
+    const t = fresh() + 6 * H;
+    const us = await Promise.all(Array.from({ length: 5 }, () => streaker(t)));
+    for (const pageSize of [1, 2, 3]) {
+      // Each resident is looked at exactly once per run, whatever the page size.
+      expect((await queueDailyPings(db, { now: new Date(t), pageSize })).checked).toBe(5);
+    }
+    for (const u of us) expect(await pinged(u)).toBe(1);
   });
 });
 

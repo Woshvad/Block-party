@@ -71,5 +71,8 @@ describe("the API on the Workers runtime", () => {
     const worker = await mf.getWorker();
     const r = await worker.scheduled({ cron: "* * * * *" });
     expect(r.outcome).toBe("ok");
+    // On a quarter hour it also runs the daily ping scheduler.
+    const q = await worker.scheduled({ cron: "* * * * *", scheduledTime: new Date("2026-10-09T18:15:00Z") });
+    expect(q.outcome).toBe("ok");
   });
 });

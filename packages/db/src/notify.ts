@@ -1,5 +1,7 @@
 import {
   ALERT_KINDS,
+  cityDay,
+  streakView,
   type AlertKind,
   CREW_POST_KINDS,
   type CrewPostKind,
@@ -16,7 +18,7 @@ import {
 } from "@bp/core";
 import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { crewBotMutes, crewBotPosts, crewMembers, identities, notificationPrefs, notifications, playSessions } from "./schema";
+import { crewBotMutes, crewBotPosts, crewMembers, identities, notificationPrefs, notifications, playSessions, streaks } from "./schema";
 
 export class NotifyError extends Error {
   constructor(
@@ -217,6 +219,42 @@ export async function maybeQueueDaily(db: Db, userId: string, reason: { streakUn
     if (already) return null;
     return notify(tx, userId, "daily", { streak: reason.streak ?? 0 }, { now });
   });
+}
+
+// The scheduler (a cron every 15 minutes, so half-hour time zones get their
+// hour too): every resident who played in the last 14 days with a live streak
+// not yet played today, at their usual hour. Paged by id, so it never holds
+// the whole city in memory.
+export async function queueDailyPings(db: Db, opts: { now?: Date; pageSize?: number } = {}) {
+  const now = opts.now ?? new Date();
+  const day = cityDay(now);
+  const pageSize = opts.pageSize ?? 500;
+  let after = "00000000-0000-0000-0000-000000000000";
+  let queued = 0;
+  let checked = 0;
+  // loop-bound: each page moves strictly past the last id seen; an empty or short page ends it.
+  for (;;) {
+    const page = await db
+      .select({ userId: streaks.userId, current: streaks.current, longest: streaks.longest, lastDay: streaks.lastDay, hodlDays: streaks.hodlDays })
+      .from(streaks)
+      .where(
+        and(
+          sql`${streaks.userId} > ${after}::uuid`,
+          sql`EXISTS (SELECT 1 FROM play_sessions s WHERE s.user_id = ${streaks.userId} AND s.last_seen_at >= ${new Date(now.getTime() - 14 * 86_400_000).toISOString()}::timestamptz)`,
+        ),
+      )
+      .orderBy(asc(streaks.userId))
+      .limit(pageSize);
+    for (const s of page) {
+      checked++;
+      const v = streakView(s, day);
+      if (v.streak === 0 || v.playedToday) continue; // a broken streak already reads 0
+      if (await maybeQueueDaily(db, s.userId, { streakUnprotected: true, riding: false, streak: v.streak }, { now })) queued++;
+    }
+    if (page.length < pageSize) break;
+    after = page[page.length - 1]!.userId;
+  }
+  return { checked, queued };
 }
 
 // --- The crew group bot ------------------------------------------------------------
