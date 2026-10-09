@@ -12,6 +12,7 @@ export * from "./moods";
 export * from "./politics";
 export * from "./ratelimit";
 export * from "./residents";
+export * from "./rides";
 export * from "./safety";
 export * from "./schema-status";
 export * as schema from "./schema";

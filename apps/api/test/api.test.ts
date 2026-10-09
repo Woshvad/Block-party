@@ -1,7 +1,7 @@
 import { shiftPuzzle } from "@bp/core";
 import { createDb } from "@bp/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ORIGIN, SECRET, app, call, close, idem, logs, makeApp, ready, resident, telegramInit } from "./harness";
+import { ORIGIN, SECRET, app, arrive, call, close, idem, logs, makeApp, ready, resident, telegramInit } from "./harness";
 
 beforeAll(ready);
 afterAll(close);
@@ -390,6 +390,8 @@ describe("live rooms over HTTP", () => {
     const { verifyRoomTicket } = await import("@bp/core");
     const { TICKET_SECRET } = await import("./harness");
     const u = await resident();
+    expect((await ticketFor(u.token, "diner")).body.error.code).toBe("RIDE_FIRST"); // no teleporting
+    await arrive(u.userId, "diner");
     const r = await ticketFor(u.token, "diner");
     expect(r.status).toBe(200);
     expect(r.body.url).toMatch(/^https:\/\/rooms\.test\/connect\?ticket=/);
@@ -426,6 +428,7 @@ describe("live rooms over HTTP", () => {
     await call("POST", `/v1/mutes/${muted.userId}`, { token: me.token, body: {} });
     await client`INSERT INTO staff (user_id, role) VALUES (${mod.userId}, 'moderator')`;
     await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: me.userId, kind: "chat_mute", hours: 2, reason: "Flooding the Diner with copy-pasta all morning." } });
+    await arrive(me.userId, "roof");
     const t = await verifyRoomTicket((await ticketFor(me.token, "roof")).body.ticket, TICKET_SECRET);
     expect(new Set(t.hidden)).toEqual(new Set([blockedByMe.userId, blockedMe.userId, muted.userId]));
     expect(t.chat).toBe(false);
@@ -507,5 +510,22 @@ describe("live rooms over HTTP", () => {
     const elsewhere = await call("POST", "/v1/reports", { token: b.token, body: { targetUserId: a.userId, reason: "harassment", context: { kind: "room", id: "roof", copy: 9 } } });
     const [row2] = await client`SELECT evidence FROM reports WHERE id = ${elsewhere.body.id}`;
     expect(row2!.evidence).toEqual([]); // not in that copy: no peeking at its chat
+  });
+});
+
+describe("getting around over HTTP", () => {
+  it("ride somewhere, wait to arrive, then get in", async () => {
+    let clock = new Date();
+    const city = makeApp({ now: () => clock });
+    const u = await resident();
+    expect((await call("GET", "/v1/whereabouts", { token: u.token, via: city })).body).toMatchObject({ area: "street", arrived: true });
+    expect((await call("POST", "/v1/rides", { token: u.token, body: { to: "diner", mode: "walk" }, via: city })).body.error.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+    const r = await call("POST", "/v1/rides", { token: u.token, body: { to: "diner", mode: "walk" }, headers: idem(), via: city });
+    expect(r.status).toBe(201);
+    expect((await call("POST", "/v1/rooms/ticket", { token: u.token, body: { place: "diner" }, via: city })).body.error.code).toBe("IN_TRANSIT");
+    clock = new Date(clock.getTime() + 41_000);
+    expect((await call("POST", "/v1/rooms/ticket", { token: u.token, body: { place: "diner" }, via: city })).status).toBe(200);
+    // Home is back on the street: another ride.
+    expect((await call("POST", "/v1/rooms/ticket", { token: u.token, body: { place: `home:${u.userId}` }, via: city })).body.error.code).toBe("RIDE_FIRST");
   });
 });

@@ -1,4 +1,5 @@
 import {
+  areaOf,
   PLACE_RE,
   signRoomTicket,
   type ModerationProvider,
@@ -39,6 +40,8 @@ import {
   getResident,
   isHandleAvailable,
   accountAgeDays,
+  takeRide,
+  whereabouts,
   endCozy,
   evidenceFor,
   followBoard,
@@ -609,6 +612,12 @@ export function createApp(cfg: AppConfig) {
     const resident = await getResident(db, userId);
     if (!resident) throw new ApiError(404, "NO_RESIDENT", "move in first");
     const [kind, owner] = place.split(":");
+    // No teleporting: you have to have arrived in that part of the city.
+    const area = areaOf(place);
+    if (!area) throw new ApiError(404, "NOT_FOUND", "no such place");
+    const here = await whereabouts(db, userId, { now: now() });
+    if (!here.arrived) throw new ApiError(409, "IN_TRANSIT", "you're still on your way");
+    if (here.area !== area) throw new ApiError(409, "RIDE_FIRST", `you're not there yet: take a ride to ${area}`);
     const crew = await myCrew(db, userId);
     if (kind === "home") {
       if (!owner || !UUID.test(owner)) throw new ApiError(404, "NOT_FOUND", "no such home");
@@ -639,6 +648,14 @@ export function createApp(cfg: AppConfig) {
       t,
     );
     return c.json({ ticket, url: `${cfg.roomsUrl}/connect?ticket=${encodeURIComponent(ticket)}` });
+  });
+
+  // --- Getting around --------------------------------------------------------
+
+  app.get("/v1/whereabouts", auth, async (c) => c.json(await whereabouts(db, c.get("userId"), opts())));
+  app.post("/v1/rides", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await takeRide(db, c.get("userId"), { to: b.to, mode: b.mode, idempotencyKey: idem(c, "ride") }, opts()), 201);
   });
 
   // --- Frens and chat --------------------------------------------------------

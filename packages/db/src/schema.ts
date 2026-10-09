@@ -939,3 +939,47 @@ export const dmThreads = pgTable(
   },
   (t) => [uniqueIndex("dm_threads_pair").on(t.a, t.b), check("dm_threads_ordered", sql`${t.a} < ${t.b}`)],
 );
+
+// --- Getting around ---------------------------------------------------------
+
+export const rideMode = pgEnum("ride_mode", ["walk", "rollup", "priority"]);
+
+// A Rollup bus run: fills up to 8 riders, leaves when full or 10 seconds after
+// the first boards.
+export const buses = pgTable(
+  "buses",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    toArea: text("to_area").notNull(),
+    departsAt: timestamp("departs_at", { withTimezone: true }).notNull(),
+    riders: integer("riders").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("buses_boarding").on(t.toArea, t.departsAt), check("buses_seats", sql`${t.riders} BETWEEN 0 AND 8`)],
+);
+
+export const rides = pgTable(
+  "rides",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fromArea: text("from_area").notNull(),
+    toArea: text("to_area").notNull(),
+    mode: rideMode("mode").notNull(),
+    fare: integer("fare").notNull(),
+    txId: uuid("tx_id").references(() => gmTransactions.id),
+    busId: uuid("bus_id").references(() => buses.id),
+    departedAt: timestamp("departed_at", { withTimezone: true }).notNull(),
+    arriveAt: timestamp("arrive_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("rides_latest").on(t.userId, t.departedAt),
+    uniqueIndex("rides_idempotency").on(t.userId, t.idempotencyKey),
+    check("rides_paid", sql`(${t.fare} = 0) = (${t.txId} IS NULL)`),
+    check("rides_bus", sql`(${t.mode} = 'rollup') = (${t.busId} IS NOT NULL)`),
+    check("rides_order", sql`${t.arriveAt} >= ${t.departedAt}`),
+  ],
+);

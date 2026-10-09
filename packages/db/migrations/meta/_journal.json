@@ -148,6 +148,13 @@
       "when": 1791529568585,
       "tag": "0020_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791530857726,
+      "tag": "0021_rides",
+      "breakpoints": true
     }
   ]
 }

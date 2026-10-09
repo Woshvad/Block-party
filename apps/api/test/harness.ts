@@ -87,3 +87,9 @@ export async function resident(): Promise<{ token: string; userId: string; handl
 
 export const idem = () => ({ "idempotency-key": crypto.randomUUID() });
 export const ready = () => ensureSystemAccounts(db);
+
+// Puts a resident in an area as if their ride arrived a minute ago.
+export async function arrive(userId: string, area: string) {
+  await client`INSERT INTO rides (user_id, idempotency_key, from_area, to_area, mode, fare, departed_at, arrive_at)
+    VALUES (${userId}, ${crypto.randomUUID()}, 'street', ${area}, 'walk', 0, now() - interval '2 minutes', now() - interval '1 minute')`;
+}
