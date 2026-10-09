@@ -68,5 +68,29 @@ export async function postingHash(kind: string, legs: readonly Leg[]): Promise<s
 // Account ids. System accounts are fixed; user and escrow ids are derived.
 export const SYS_MINT = "sys:mint"; // every GM ever created leaves here; runs negative
 export const SYS_BURN = "sys:burn"; // every GM ever destroyed lands here
+
+// Every mint and burn in the city used to lock one of those two rows, so all
+// GM flows queued behind each other. Each is now 16 shards; the shard is
+// picked from the other account, so one resident always uses the same shard
+// and different residents mostly don't collide. Shard 0 keeps the old id, so
+// history before sharding stays where it was. Reports sum all shards.
+export const SYS_SHARDS = 16;
+const shardIds = (base: string) => Array.from({ length: SYS_SHARDS }, (_, i) => (i === 0 ? base : `${base}:${i}`));
+export const MINT_SHARDS: readonly string[] = shardIds(SYS_MINT);
+export const BURN_SHARDS: readonly string[] = shardIds(SYS_BURN);
+
+// FNV-1a: stable across runtimes, no crypto needed.
+function fnv1a(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+export const mintAccountFor = (to: string) => MINT_SHARDS[fnv1a(to) % SYS_SHARDS]!;
+export const burnAccountFor = (from: string) => BURN_SHARDS[fnv1a(from) % SYS_SHARDS]!;
+export const isMintAccount = (id: string) => MINT_SHARDS.includes(id);
+export const isBurnAccount = (id: string) => BURN_SHARDS.includes(id);
 export const userAccountId = (userId: string) => `user:${userId}`;
 export const escrowAccountId = (scope: string, id: string) => `escrow:${scope}:${id}`;

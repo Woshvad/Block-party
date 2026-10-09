@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BACKSTORIES, SYS_BURN, crewPotAccountId, kitFor, userAccountId } from "@bp/core";
+import { BACKSTORIES, crewPotAccountId, kitFor, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   HomeError,
@@ -31,6 +31,7 @@ import {
   setFinishes,
   storeItem,
   storeCrewItem,
+  supplyStats,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -78,11 +79,11 @@ describe("moving in furnished", () => {
 describe("buying", () => {
   it("burns the price and stores the piece", async () => {
     const u = await makeResident(db);
-    const burnBefore = await getBalance(db, SYS_BURN);
+    const burnBefore = (await supplyStats(db)).destroyed;
     const it = await buyPiece(db, u, "sofa", randomUUID());
     expect(it).toMatchObject({ pieceId: "sofa", source: "purchase", pricePaid: 300 });
     expect(await bal(u)).toBe(700);
-    expect((await getBalance(db, SYS_BURN)) - burnBefore).toBe(300);
+    expect((await supplyStats(db)).destroyed - burnBefore).toBe(300);
     expect((await getHome(db, u))!.storage.map((s) => s.pieceId)).toContain("sofa");
   });
 
@@ -348,9 +349,9 @@ describe("the Crew House", () => {
   it("a dissolved crew's house is closed", async () => {
     const c = await crew(3);
     const p = await proposeCrewPiece(db, c.members[0]!, "stool");
-    const burnBefore = await getBalance(db, SYS_BURN);
+    const burnBefore = (await supplyStats(db)).destroyed;
     await dissolveCrew(db, c.lead);
-    expect((await getBalance(db, SYS_BURN)) - burnBefore).toBe(600); // the pot burned
+    expect((await supplyStats(db)).destroyed - burnBefore).toBe(600); // the pot burned
     expect(await code(approveCrewPiece(db, c.lead, p.id))).toBe("NOT_IN_CREW");
   });
 });

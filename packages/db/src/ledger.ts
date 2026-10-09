@@ -1,9 +1,12 @@
 import {
+  BURN_SHARDS,
   type Leg,
   LedgerError,
-  SYS_BURN,
-  SYS_MINT,
+  MINT_SHARDS,
   SYS_PURSE,
+  burnAccountFor,
+  isMintAccount,
+  mintAccountFor,
   postingHash,
   userAccountId,
   validateLegs,
@@ -148,8 +151,8 @@ export async function ensureSystemAccounts(db: Db) {
   await db
     .insert(gmAccounts)
     .values([
-      { id: SYS_MINT, kind: "system", allowNegative: true },
-      { id: SYS_BURN, kind: "system" },
+      ...MINT_SHARDS.map((id) => ({ id, kind: "system" as const, allowNegative: true })),
+      ...BURN_SHARDS.map((id) => ({ id, kind: "system" as const })),
       { id: SYS_PURSE, kind: "system" },
     ])
     .onConflictDoNothing();
@@ -203,13 +206,13 @@ const positive = (amount: number) => {
 // Creates GM (drip, shift pay, streak bonus...).
 export async function mint(db: Db, f: Flow) {
   positive(f.amount);
-  return post(db, { ...f, legs: [{ accountId: SYS_MINT, amount: -f.amount }, { accountId: f.accountId, amount: f.amount }] });
+  return post(db, { ...f, legs: [{ accountId: mintAccountFor(f.accountId), amount: -f.amount }, { accountId: f.accountId, amount: f.amount }] });
 }
 
 // Destroys GM (furniture, rides, retreat burns, the Halving...).
 export async function burn(db: Db, f: Flow) {
   positive(f.amount);
-  return post(db, { ...f, legs: [{ accountId: f.accountId, amount: -f.amount }, { accountId: SYS_BURN, amount: f.amount }] });
+  return post(db, { ...f, legs: [{ accountId: f.accountId, amount: -f.amount }, { accountId: burnAccountFor(f.accountId), amount: f.amount }] });
 }
 
 export async function transfer(db: Db, f: Omit<Flow, "accountId"> & { from: string; to: string }) {
@@ -223,10 +226,9 @@ export async function supplyStats(db: Db) {
   const rows = await db
     .select({ id: gmAccounts.id, balance: gmAccounts.balance })
     .from(gmAccounts)
-    .where(inArray(gmAccounts.id, [SYS_MINT, SYS_BURN]));
-  const bal = (id: string) => rows.find((r) => r.id === id)?.balance ?? 0;
-  const created = -bal(SYS_MINT);
-  const destroyed = bal(SYS_BURN);
+    .where(inArray(gmAccounts.id, [...MINT_SHARDS, ...BURN_SHARDS]));
+  const created = -rows.filter((r) => isMintAccount(r.id)).reduce((a, r) => a + r.balance, 0);
+  const destroyed = rows.filter((r) => !isMintAccount(r.id)).reduce((a, r) => a + r.balance, 0);
   return { created, destroyed, circulating: created - destroyed };
 }
 

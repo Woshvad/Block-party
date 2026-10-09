@@ -3,9 +3,11 @@ import {
   MAX_RENT_WEEKS,
   RENT,
   SHIFT,
-  SYS_BURN,
-  SYS_MINT,
+  BURN_SHARDS,
+  MINT_SHARDS,
   SYS_PURSE,
+  burnAccountFor,
+  isMintAccount,
   addDays,
   cityDay,
   cryptoRandomInt,
@@ -90,7 +92,7 @@ export async function collectRent(db: Db, userId: string, opts: { now?: Date } =
       }
       // Read under the ledger's locks, in its order, so a purchase can't land
       // between "can they pay?" and the charge.
-      const balance = (await lockAccounts(tx, [userAccountId(userId), SYS_BURN, SYS_PURSE])).get(userAccountId(userId)) ?? 0;
+      const balance = (await lockAccounts(tx, [userAccountId(userId), burnAccountFor(userAccountId(userId)), SYS_PURSE])).get(userAccountId(userId)) ?? 0;
       if (balance < RENT.tenement) {
         // Can't pay: a week on the crew's couch (or the bench). Never debt.
         await tx.insert(rentCharges).values({ userId, saturday, status: "couch" });
@@ -103,7 +105,7 @@ export async function collectRent(db: Db, userId: string, opts: { now?: Date } =
         kind: "rent",
         legs: [
           { accountId: userAccountId(userId), amount: -RENT.tenement },
-          { accountId: SYS_BURN, amount: burn },
+          { accountId: burnAccountFor(userAccountId(userId)), amount: burn },
           { accountId: SYS_PURSE, amount: purse },
         ],
         meta: { saturday },
@@ -264,14 +266,14 @@ export async function economyReport(db: Db, opts: { from: Date; to: Date }) {
   const rows = await db.execute<{ account_id: string; kind: string; total: string }>(sql`
     SELECT e.account_id, t.kind, SUM(e.amount)::text AS total
     FROM gm_entries e JOIN gm_transactions t ON t.id = e.tx_id
-    WHERE e.account_id IN (${SYS_MINT}, ${SYS_BURN}, ${SYS_PURSE})
+    WHERE e.account_id IN (${sql.join([...MINT_SHARDS, ...BURN_SHARDS, SYS_PURSE].map((id) => sql`${id}`), sql`, `)})
       AND e.created_at >= ${opts.from.toISOString()}::timestamptz AND e.created_at < ${opts.to.toISOString()}::timestamptz
     GROUP BY e.account_id, t.kind`);
   const created: Record<string, number> = {};
   const destroyed: Record<string, number> = {};
   for (const r of rows) {
     const n = Number(r.total);
-    if (r.account_id === SYS_MINT) created[r.kind] = (created[r.kind] ?? 0) - n;
+    if (isMintAccount(r.account_id)) created[r.kind] = (created[r.kind] ?? 0) - n;
     else destroyed[r.kind] = (destroyed[r.kind] ?? 0) + n;
   }
   const sum = (o: Record<string, number>) => Object.values(o).reduce((a, b) => a + b, 0);

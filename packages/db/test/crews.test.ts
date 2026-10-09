@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SYS_BURN, crewPotAccountId, userAccountId } from "@bp/core";
+import { crewPotAccountId, isBurnAccount, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CrewError,
@@ -26,6 +26,7 @@ import {
   revokeInvite,
   setDeputy,
   transferLead,
+  supplyStats,
 } from "../src";
 import { makeResident, raceAt, releaseTogether } from "./helpers";
 
@@ -342,9 +343,9 @@ describe("the crew pot", () => {
   it("dissolving burns the pot; nobody gets it back", async () => {
     const { lead, members, crewId } = await crewOf(2);
     for (const u of [lead, ...members]) await depositToPot(db, u, 100, randomUUID());
-    const burnBefore = await getBalance(db, SYS_BURN);
+    const burnBefore = (await supplyStats(db)).destroyed;
     expect(await dissolveCrew(db, lead)).toEqual({ burned: 300 });
-    expect(await getBalance(db, SYS_BURN)).toBe(burnBefore + 300);
+    expect((await supplyStats(db)).destroyed).toBe(burnBefore + 300);
     for (const u of [lead, ...members]) {
       expect(await getBalance(db, userAccountId(u))).toBe(900);
       expect(await myCrew(db, u)).toBeNull();
@@ -370,7 +371,7 @@ describe("the crew pot", () => {
       JOIN gm_entries other ON other.tx_id = pot.tx_id AND other.account_id <> pot.account_id
       WHERE pot.account_id = ${crewPotAccountId(crewId)} AND pot.amount < 0`;
     expect(outflows.length).toBeGreaterThan(0);
-    expect(new Set(outflows.map((o) => o.account_id))).toEqual(new Set([SYS_BURN]));
+    expect(outflows.every((o) => isBurnAccount(o.account_id))).toBe(true);
   });
 });
 
@@ -424,14 +425,14 @@ describe("races", () => {
     const { lead, members } = await crewOf(4);
     const people = [lead, ...members];
     const before = await Promise.all(people.map((u) => getBalance(db, userAccountId(u))));
-    const burnBefore = await getBalance(db, SYS_BURN);
+    const burnBefore = (await supplyStats(db)).destroyed;
     await Promise.all([
       ...members.map((u) => depositToPot(db, u, 100, randomUUID()).catch(() => null)),
       dissolveCrew(db, lead),
       ...members.map((u) => depositToPot(db, u, 100, randomUUID()).catch(() => null)),
     ]);
     const after = await Promise.all(people.map((u) => getBalance(db, userAccountId(u))));
-    const burned = (await getBalance(db, SYS_BURN)) - burnBefore;
+    const burned = (await supplyStats(db)).destroyed - burnBefore;
     expect(before.reduce((a, b) => a + b, 0)).toBe(after.reduce((a, b) => a + b, 0) + burned);
   });
 });

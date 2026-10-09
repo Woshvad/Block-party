@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SHIFT, SYS_BURN, SYS_PURSE, addDays, cityDay, cityWeekday, shiftPuzzle, userAccountId } from "@bp/core";
+import { SHIFT, SYS_PURSE, addDays, cityDay, cityWeekday, shiftPuzzle, userAccountId } from "@bp/core";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -20,6 +20,7 @@ import {
   startShift,
   submitShift,
   tenancy,
+  supplyStats,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -59,12 +60,12 @@ describe("rent", () => {
   it("250 at the Saturday bell: 225 burns, 25 to the City Purse", async () => {
     const u = await makeResident(db);
     await sayGm(db, u, { now: at(0) });
-    const burn0 = await getBalance(db, SYS_BURN);
+    const burn0 = (await supplyStats(db)).destroyed;
     const purse0 = await getBalance(db, SYS_PURSE);
     const out = await collectRent(db, u, { now: at(toSat, 0, 1) });
     expect(out).toEqual([{ saturday: addDays(today, toSat), status: "paid", amount: 250 }]);
     expect(await bal(u)).toBe(1000 + 50 - 250);
-    expect((await getBalance(db, SYS_BURN)) - burn0).toBe(225);
+    expect((await supplyStats(db)).destroyed - burn0).toBe(225);
     expect((await getBalance(db, SYS_PURSE)) - purse0).toBe(25);
   });
 

@@ -1,4 +1,4 @@
-import { HALVING_LINE, SYS_BURN, addDays, cityDay, cityWeekday, halvingBurn, halvingDue, isSaturday, seasonLastDay } from "@bp/core";
+import { HALVING_LINE, burnAccountFor, addDays, cityDay, cityWeekday, halvingBurn, halvingDue, isSaturday, seasonLastDay } from "@bp/core";
 import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { settleCrewChain } from "./chain";
 import type { Db } from "./client";
@@ -109,9 +109,9 @@ async function stepHalving(db: Db, season: number, pageSize: number, hook?: Bell
       const r = await db.transaction(async (tx) => {
         const [done] = await tx.select().from(halvings).where(and(eq(halvings.season, season), eq(halvings.accountId, id)));
         if (done) return 0;
-        // Lock in the ledger's order (sys:burn sorts first). Locking the
+        // Lock in the ledger's order (sorted ids, as post() does). Locking the
         // account alone, then posting, deadlocked against any purchase.
-        const balance = (await lockAccounts(tx, [id, SYS_BURN])).get(id)!;
+        const balance = (await lockAccounts(tx, [id, burnAccountFor(id)])).get(id)!;
         await hook?.(id, index++, balance);
         const burn = halvingBurn(balance);
         if (burn === 0) return 0;
@@ -120,7 +120,7 @@ async function stepHalving(db: Db, season: number, pageSize: number, hook?: Bell
           kind: "halving",
           legs: [
             { accountId: id, amount: -burn },
-            { accountId: SYS_BURN, amount: burn },
+            { accountId: burnAccountFor(id), amount: burn },
           ],
           meta: { season, balanceBefore: balance },
         });

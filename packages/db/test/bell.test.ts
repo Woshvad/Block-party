@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SYS_BURN, SYS_PURSE, crewPotAccountId, escrowAccountId, seasonLastDay, userAccountId } from "@bp/core";
+import { SYS_PURSE, crewPotAccountId, escrowAccountId, seasonLastDay, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   bellStatus,
@@ -14,6 +14,7 @@ import {
   reconcile,
   runBell,
   sayGm,
+  supplyStats,
 } from "../src";
 import { makeResident } from "./helpers";
 
@@ -53,7 +54,7 @@ describe("the Halving", () => {
     const duel = await openEscrowAccount(db, escrowAccountId("duel", randomUUID()));
     await mint(db, { accountId: duel, amount: 9000, kind: "test_seed", idempotencyKey: randomUUID() });
     const purseBefore = await getBalance(db, SYS_PURSE);
-    const burnBefore = await getBalance(db, SYS_BURN);
+    const burnBefore = (await supplyStats(db)).destroyed;
 
     const out = await runBell(db, { now: bellOf(1) });
     expect(Object.keys(out.ran).sort()).toEqual(["chains", "election", "halving"]); // 2026-11-02 is a Monday
@@ -67,7 +68,7 @@ describe("the Halving", () => {
     expect(await getBalance(db, crewPotAccountId(c.id))).toBe(3000);
     expect(await getBalance(db, duel)).toBe(9000); // only resident balances and crew pots
     expect(await getBalance(db, SYS_PURSE)).toBe(purseBefore);
-    expect((await getBalance(db, SYS_BURN)) - burnBefore).toBeGreaterThanOrEqual(1500 + 1500 + 1000);
+    expect((await supplyStats(db)).destroyed - burnBefore).toBeGreaterThanOrEqual(1500 + 1500 + 1000);
     const rows = await halvedRows(userAccountId(big)); // bigint columns arrive as strings
     expect(rows.map((r) => [r.season, Number(r.balance_before), Number(r.burned)])).toEqual([[1, 5000, 1500]]);
   }, 180_000);
