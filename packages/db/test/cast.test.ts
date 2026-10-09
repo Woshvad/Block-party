@@ -144,7 +144,7 @@ describe("the cast's Board lines", () => {
     await npcBoardLines(db, dayOf(s.d0), at);
     await npcBoardLines(db, dayOf(s.d0), at);
     expect((await npcBoardLines(db, dayOf(s.d0), at)).posted).toBe(0);
-    const [n] = await client`SELECT count(*)::int AS n FROM messages WHERE channel = 'roof' AND author_id = ${CAST.nothing_9000.id} AND created_at >= ${new Date(s.d0 + D).toISOString()}`;
+    const [n] = await client`SELECT count(*)::int AS n FROM messages WHERE channel = 'roof' AND author_id = ${CAST.nothing_9000.id} AND created_at >= ${new Date(s.d0 + D).toISOString()} AND created_at < ${new Date(s.d0 + 2 * D).toISOString()}`;
     expect(n!.n).toBe(3);
   });
 });

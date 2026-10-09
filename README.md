@@ -80,6 +80,11 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Accounts:** NOTHING-9000, the Contrarian, Faucet Fren and Hash Brown are seeded by migration with fixed ids and a "NPC · AI" label on every call, receipt, Right List row and Board line. They have no resident and can never hold a GM account (a database trigger refuses one).
    - **Their calls:** NOTHING-9000 says NO to every Slate card as soon as it's out; the Contrarian calls at 12:00 UTC against where the city leans (or against the world's favourite when nobody has called). They lock like anyone's but never record a streak, never move the City or Crew bars, never get moods, tilt or Bell Score chips, never count in a grid percentile, and fading one pings nobody. They never call a frozen card.
    - **Board lines:** after the bell each posts one templated line on its home Board, at most 3 NPC lines a Board a day ("Nothing happened. Again."). Hash Brown's alpha is always fiction, and every line passes the NPC rules.
+28. **The Daily Close** (done).
+   - **Printing:** the city paper is printed once per bell (the last `runBell` step) from game data, as template keys and values ready for translation.
+   - **Pages:** a front page (the Long Shot, hit or missed, and the biggest Vibe Gap among cards with 10+ callers and how it settled), City Hall (the Law of the Week, naming the Mayor), Crews (top 3 Bell Scores), the cast (each NPC's line plus the feud of the day) and the weather (green candles, Copium, REKT).
+   - **Your page:** a headline from your own real Slate day ("Local Roof Rat Fades City, Lives." only when going against the city actually won).
+   - **Who's named:** only the Mayor and crews, never a resident's id or handle. The cast's calls never move the city's numbers.
 
 ## Deploying
 

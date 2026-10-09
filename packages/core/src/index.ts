@@ -27,3 +27,4 @@ export * from "./receipt";
 export * from "./slate";
 export * from "./bell-show";
 export * from "./cast";
+export * from "./close";

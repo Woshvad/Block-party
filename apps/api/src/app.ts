@@ -155,6 +155,7 @@ import {
   publishSlate,
   claimBellStamp,
   npcCalls,
+  dailyClose,
   reel,
   setCrewBotMutes,
   startNap,
@@ -830,6 +831,12 @@ export function createApp(cfg: AppConfig) {
     const r = await reel(db, c.get("userId"), { ...opts(), bellDay: c.req.query("day") });
     if (!r) throw new ApiError(404, "NOT_FOUND", "the bell hasn't rung for that day yet");
     return c.json(r);
+  });
+  // The Daily Close: the city paper, plus your own page.
+  app.get("/v1/daily-close/:day", auth, async (c) => {
+    const p = await dailyClose(db, c.get("userId"), c.req.param("day"));
+    if (!p) throw new ApiError(404, "NOT_FOUND", "no paper for that day");
+    return c.json(p);
   });
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));

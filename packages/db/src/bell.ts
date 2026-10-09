@@ -6,6 +6,7 @@ import { collectRent } from "./economy";
 import { lockAccounts, post } from "./ledger";
 import { stepTower } from "./bell-show";
 import { npcBoardLines } from "./cast";
+import { stepClose } from "./close";
 import { finalizeElection } from "./politics";
 import { bellSteps, crews, gmAccounts, halvings, residents } from "./schema";
 
@@ -19,7 +20,7 @@ export type BellOptions = {
   // another writer try to race in.
   onHalvingAccount?: (accountId: string, index: number, balanceRead: number) => void | Promise<void>;
   // Run only these steps (ops tooling and tests). The default runs every due step.
-  only?: Array<"chains" | "rent" | "halving" | "election" | "tower" | "npc_lines">;
+  only?: Array<"chains" | "rent" | "halving" | "election" | "tower" | "npc_lines" | "close">;
 };
 
 // Keyset pagination over a sorted id column. Each page starts strictly after
@@ -157,6 +158,8 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     // After the chains, so Bell Scores see tonight's chain lengths.
     { day: bellDay, step: "tower", run: () => stepTower(db, bellDay, now) },
     { day: bellDay, step: "npc_lines", run: () => npcBoardLines(db, bellDay, now) },
+    // Last: the paper reads the scores, moods and lines above.
+    { day: bellDay, step: "close", run: () => stepClose(db, bellDay, now) },
   ];
   if (isSaturday(today)) due.push({ day: bellDay, step: "rent", run: () => stepRent(db, now, pageSize) });
   // Monday 00:00: last week's count closes and the new Mayor is sworn in.
@@ -168,7 +171,7 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     due.push({ day: seasonLastDay(season), step: "halving", run: () => stepHalving(db, season, pageSize, opts.onHalvingAccount) });
   }
 
-  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "halving" | "election" | "tower" | "npc_lines")) : due;
+  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "halving" | "election" | "tower" | "npc_lines" | "close")) : due;
 
   // One runner at a time: a transaction-scoped advisory lock held for the
   // whole run. Steps do their own work in their own transactions; the done

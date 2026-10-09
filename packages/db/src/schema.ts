@@ -1361,3 +1361,10 @@ export const npcs = pgTable("npcs", {
   name: text("name").notNull(),
   home: text("home").notNull(),
 });
+
+// The Daily Close: the city paper, printed once per bell.
+export const dailyCloses = pgTable("daily_closes", {
+  bellDay: date("bell_day", { mode: "string" }).primaryKey(),
+  pages: jsonb("pages").$type<Record<string, Array<{ key: string; values: Record<string, string | number> }>>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+});

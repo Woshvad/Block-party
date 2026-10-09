@@ -218,6 +218,13 @@
       "when": 1791553347881,
       "tag": "0030_cast",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791554068508,
+      "tag": "0031_daily_close",
+      "breakpoints": true
     }
   ]
 }

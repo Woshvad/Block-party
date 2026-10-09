@@ -765,3 +765,12 @@ describe("the bell over HTTP", () => {
     expect((await call("GET", "/v1/reel", { token: me.token })).status).toBe(200); // last night's, even if empty
   });
 });
+
+describe("the Daily Close over HTTP", () => {
+  it("a day with no paper is a 404; junk days too; it needs a session", async () => {
+    const me = await resident();
+    expect((await call("GET", "/v1/daily-close/1999-01-01", { token: me.token })).status).toBe(404);
+    expect((await call("GET", "/v1/daily-close/nope", { token: me.token })).status).toBe(404);
+    expect((await call("GET", "/v1/daily-close/1999-01-01")).status).toBe(401);
+  });
+});
