@@ -3,7 +3,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { type Screen, boot, screenFor } from "./boot";
-import type { PageId } from "./pages/More";
+import type { PageId } from "./screens/More";
 import { initTelegram, launchData } from "./telegram";
 
 const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
@@ -13,11 +13,11 @@ const Tower = dynamic(() => import("./Tower"), { ssr: false });
 const Travel = dynamic(() => import("./Travel"), { ssr: false });
 const LiveRoom = dynamic(() => import("./LiveRoom"), { ssr: false });
 const HomeEditor = dynamic(() => import("./HomeEditor"), { ssr: false });
-const More = dynamic(() => import("./pages/More"), { ssr: false });
-const MePage = dynamic(() => import("./pages/MePage"), { ssr: false });
-const CityHall = dynamic(() => import("./pages/CityHall"), { ssr: false });
-const Results = dynamic(() => import("./pages/Results"), { ssr: false });
-const FaucetFren = dynamic(() => import("./pages/FaucetFren"), { ssr: false });
+const More = dynamic(() => import("./screens/More"), { ssr: false });
+const MePage = dynamic(() => import("./screens/MePage"), { ssr: false });
+const CityHall = dynamic(() => import("./screens/CityHall"), { ssr: false });
+const Results = dynamic(() => import("./screens/Results"), { ssr: false });
+const FaucetFren = dynamic(() => import("./screens/FaucetFren"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
