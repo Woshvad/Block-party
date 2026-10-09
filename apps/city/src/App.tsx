@@ -158,6 +158,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       <LiveRoom
         api={api}
         me={me.userId}
+        crewId={me.crew?.id ?? null}
         place={room}
         onLeave={() => {
           setRoom(null);
@@ -214,8 +215,8 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
         />
       )}
       {!pageView && tab === "home" && <HomeEditor api={api} gm={me.gm} onGm={refreshGm} onGoInside={() => setTrip({ place: `home:${me.userId}`, ridesFree: false })} />}
-      {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} />}
-      {!pageView && tab === "tower" && <Tower api={api} />}
+      {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
+      {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
       <nav className="tabs">
         <button className={tab === "city" ? "on" : ""} onClick={() => go("city")}>
           City

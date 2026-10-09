@@ -22,6 +22,8 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState<string>("spam");
   const [note, setNote] = useState("");
+  const [dueling, setDueling] = useState(false);
+  const markets = useLoad(() => (dueling ? api.markets() : Promise.resolve([])), [api, dueling]);
   const r = rel.data;
   const fren = r?.frens.find((f) => f.userId === userId);
   const best = r?.bestFrens.includes(userId);
@@ -85,6 +87,23 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
             </button>
           )}
         </div>
+
+        <div className="btnrow">
+          <button className="btn light" onClick={() => setDueling((v) => !v)}>
+            ⚔️ Fade Duel
+          </button>
+        </div>
+        {dueling && (
+          <div className="card">
+            <p className="muted">Pick a market you've both called on opposite sides. 10 GM each to start.</p>
+            {(markets.data ?? []).map((mk) => (
+              <div className="listrow" key={mk.id}>
+                <span>{mk.question}</span>
+                <button onClick={() => act.run(() => api.challenge(mk.id, userId), "Challenge sent").then((x) => x && setDueling(false))}>Challenge</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         <h3 className="band">Safety</h3>
         <div className="btnrow">

@@ -13,7 +13,7 @@ import { haptic } from "./telegram";
 const POLL_MS = 4000;
 const POLL_FOR_MS = 6 * 60_000; // the API drops a pending call after 5 minutes
 
-export default function CallSheet({ api, marketId, onClose, onCalled }: { api: Api; marketId: string; onClose: () => void; onCalled: () => void }) {
+export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }: { api: Api; marketId: string; onClose: () => void; onCalled: () => void; onBunker?: (place: string) => void }) {
   const [m, setM] = useState<MarketView | null>(null);
   const [side, setSide] = useState<Side>("yes");
   const [chance, setChance] = useState<number | null>(null);
@@ -134,6 +134,11 @@ export default function CallSheet({ api, marketId, onClose, onCalled }: { api: A
                 <span>
                   {side.toUpperCase()} · you said {chance}%
                 </span>
+                {state.status === "locked" && onBunker && (
+                  <button className="btn light" onClick={() => onBunker(`bunker:${marketId}:${side}`)}>
+                    Go to the {side.toUpperCase()} Bunker
+                  </button>
+                )}
                 {(state.status === "price_moved" || state.status === "expired") && (
                   <button className="cta" onClick={() => setState(null)}>
                     Call again

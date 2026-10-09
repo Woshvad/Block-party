@@ -207,14 +207,21 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
   );
 }
 
-export default function LiveRoom({ api, place, onLeave, me }: { api: Api; place: string; onLeave: () => void; me?: string }) {
-  // Your own home: draw your furniture (the API only shares a layout with its owner).
+export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
+  // Your own home or your crew's house: draw the furniture (the API shares a
+  // layout only with its owner, or the crew's members).
   const mine = !!me && place === `home:${me}`;
+  const ourHouse = !!crewId && place === `crew_house:${crewId}`;
   const [home, setHome] = useState<Home | null>(null);
   const [napMsg, setNapMsg] = useToast<string>();
   useEffect(() => {
     if (mine) void api.home().then(setHome).catch(() => {});
-  }, [api, mine]);
+    if (ourHouse)
+      void api
+        .crewHouse()
+        .then((h) => setHome({ userId: "", tier: "lounge", wallFinish: h.wallFinish, floorFinish: h.floorFinish, doorOpen: true, placed: h.placed.filter((p) => p.room === "lounge"), storage: [] }))
+        .catch(() => {});
+  }, [api, mine, ourHouse]);
   const size = roomSize(place) ?? { w: 10, h: 10 };
   const [room, dispatch] = useReducer((s: RoomState, a: { ev: unknown; now: number }) => applyEvent(s, a.ev, a.now), undefined, emptyRoom);
   const [status, setStatus] = useState<SocketStatus>({ kind: "connecting" });
@@ -360,7 +367,7 @@ export default function LiveRoom({ api, place, onLeave, me }: { api: Api; place:
       {err && <div className="toast bad">{err.message}</div>}
       {person && <Person api={api} userId={person} place={place} onClose={() => setPerson(null)} />}
       {napMsg && <div className="toast">{napMsg}</div>}
-      {home && status.kind === "live" && home.placed.some((p) => pieceOf(p.pieceId)?.mood === "rested") && (
+      {mine && home && status.kind === "live" && home.placed.some((p) => pieceOf(p.pieceId)?.mood === "rested") && (
         <button
           className="pill napbtn"
           onClick={async () => {

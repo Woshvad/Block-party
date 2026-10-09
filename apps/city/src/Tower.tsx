@@ -11,7 +11,7 @@ const CallSheet = dynamic(() => import("./CallSheet"), { ssr: false });
 // The Tower: every open market. Off-Slate calls take a ticket (3 a day,
 // stacking to 9); the odds come from the feed, and pause if it goes quiet.
 
-export default function Tower({ api }: { api: Api }) {
+export default function Tower({ api, onBunker }: { api: Api; onBunker?: (place: string) => void }) {
   const markets = useLoad(() => api.markets(), [api]);
   const tickets = useLoad(() => api.tickets(), [api]);
   const feed = useLoad(() => api.feed(), [api]);
@@ -49,6 +49,7 @@ export default function Tower({ api }: { api: Api }) {
           api={api}
           marketId={calling}
           onClose={() => setCalling(null)}
+          onBunker={onBunker}
           onCalled={() => {
             void tickets.reload();
             void markets.reload();

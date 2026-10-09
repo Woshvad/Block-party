@@ -19,7 +19,7 @@ const MODIFIER_TEXT: Record<string, [string, string]> = {
 // Today: say gm, keep the streak, and make the day's free Slate calls before
 // each card freezes. The grid stays sealed until the bell.
 
-export default function Today({ api, onGm }: { api: Api; onGm: (balance: number) => void }) {
+export default function Today({ api, onGm, onBunker }: { api: Api; onGm: (balance: number) => void; onBunker?: (place: string) => void }) {
   const today = useLoad(() => api.today(), [api]);
   const slate = useLoad(() => api.slate(), [api]);
   const [calling, setCalling] = useState<string | null>(null);
@@ -114,6 +114,7 @@ export default function Today({ api, onGm }: { api: Api; onGm: (balance: number)
           api={api}
           marketId={calling}
           onClose={() => setCalling(null)}
+          onBunker={onBunker}
           onCalled={() => {
             void slate.reload();
             void today.reload();
