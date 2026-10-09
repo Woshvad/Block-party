@@ -267,6 +267,13 @@
       "when": 1791562732040,
       "tag": "0037_ratio",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791563777063,
+      "tag": "0038_tower_lights",
+      "breakpoints": true
     }
   ]
 }

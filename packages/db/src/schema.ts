@@ -1638,3 +1638,22 @@ export const ratioVotes = pgTable(
     check("ratio_votes_pair", sql`${t.low} < ${t.high} AND ${t.winner} IN (${t.low}, ${t.high})`),
   ],
 );
+
+// Tower Lights: one bid per crew per night, raised but never lowered.
+export const lightBidStatus = pgEnum("light_bid_status", ["open", "won", "refunded"]);
+export const lightBids = pgTable(
+  "light_bids",
+  {
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    crewId: uuid("crew_id")
+      .notNull()
+      .references(() => crews.id),
+    amount: integer("amount").notNull(),
+    placedBy: uuid("placed_by")
+      .notNull()
+      .references(() => users.id),
+    status: lightBidStatus("status").notNull().default("open"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.cityDay, t.crewId] }), check("light_bids_amount", sql`${t.amount} > 0`), index("light_bids_day").on(t.cityDay, t.status)],
+);

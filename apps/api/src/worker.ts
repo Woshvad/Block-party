@@ -21,6 +21,7 @@ type Env = {
   RECEIPT_SECRET?: string;
   // "on" once the alt checks are live.
   FEATURE_DUELS?: string;
+  FEATURE_TOWER_LIGHTS?: string;
 };
 
 const oddsFor = (env: Env) => (env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
@@ -46,7 +47,7 @@ export default {
       notifier: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }),
       ...(oddsFor(env) ? { odds: oddsFor(env) } : {}),
       ...(env.RECEIPT_SECRET ? { receiptSecret: env.RECEIPT_SECRET } : {}),
-      features: { duels: env.FEATURE_DUELS === "on" },
+      features: { duels: env.FEATURE_DUELS === "on", towerLights: env.FEATURE_TOWER_LIGHTS === "on" },
     });
     const res = await app.fetch(req);
     ctx.waitUntil(close());

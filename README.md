@@ -109,6 +109,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Voting:** from 23:00 the Roof votes head-to-head pairs: Proof of Neighbour, in person on the Roof, never your own, once per pair, least-shown entries first.
    - **The winner:** most wins, then win rate, then the earliest entry. It plays on the reel and prints on that market's receipts, and pays no GM.
    - **Fixed here:** the prompt could have picked a stale market from an earlier day.
+37. **Tower Lights** (done; bidding is behind `FEATURE_TOWER_LIGHTS`, off until mid-beta as the plan says). The lead or a deputy bids from the crew pot to light the Tower at tonight's bell: at least the reserve (1,000 GM, or half last week's median winning bid once there's a week of winners), raised but never lowered (a raise moves only the difference). Bids sit in one escrow per night, one bidder at a time. The Tower shows the top bid all day and tells crews they've been outbid. At the bell the top bid burns and lights the Tower (on the reel), and every other bid goes back to its pot.
 
 ## Deploying
 

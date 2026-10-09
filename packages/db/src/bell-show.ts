@@ -4,6 +4,7 @@ import { chainStatus } from "./chain";
 import { settleCityMarkets } from "./city-markets";
 import { duelLines, settleDuels } from "./duels";
 import { settleGrudges } from "./grudge";
+import { lightsWinner, settleLights } from "./lights";
 import { ratioHeadline, settleRatio } from "./ratio";
 import type { Db } from "./client";
 import { economyReport } from "./economy";
@@ -38,6 +39,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   const grudgesSettled = (await settleGrudges(db, bellDay, now)).settled;
   const cityMarketsSettled = (await settleCityMarkets(db, bellDay, now)).settled;
   await settleRatio(db, bellDay);
+  const lights = await settleLights(db, bellDay);
   const from = dayStart(bellDay);
   const to = dayStart(addDays(bellDay, 1));
   const receipts = await db
@@ -132,7 +134,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
       .values({ bellDay, crewId, chips: t.chips, longShots: t.longShots, chainDays, scoreMilli: bellScoreMilli({ ...t, chainDays }) })
       .onConflictDoNothing();
   }
-  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled, cityMarketsSettled };
+  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled, cityMarketsSettled, lightsBurned: lights?.amount ?? 0 };
 }
 
 // --- Bell Stamps ------------------------------------------------------------------------
@@ -217,6 +219,8 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
       return { slot: c.slot, tier: c.tier, question: c.question, result, world: c.world, city: cs.length >= 10 ? median(cs) : null, darkBunker: dark };
     }),
     bellScores: { top: top.map((t) => ({ ...t, score: t.scoreMilli / 1000 })), mine: myCrew && { score: myCrew.scoreMilli / 1000, rank: myCrew.rank } },
+    // Tower Lights: whose colours lit the Tower tonight.
+    towerLights: await lightsWinner(db, bellDay),
     // The Ratio of the Day: the Roof's winning headline.
     ratio: await ratioHeadline(db, { day: bellDay }),
     // Duels settle at the bell after the day: "@a ate @b's Snap".

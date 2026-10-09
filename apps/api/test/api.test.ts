@@ -862,3 +862,12 @@ describe("the Ratio of the Day over HTTP", () => {
     expect((await call("POST", `/v1/staff/ratio/${crypto.randomUUID()}/hide`, { token: me.token })).status).toBe(403);
   });
 });
+
+describe("Tower Lights over HTTP", () => {
+  it("off until mid-beta; on, a crewless resident can't bid", async () => {
+    const me = await resident();
+    expect((await call("POST", "/v1/tower-lights/bid", { token: me.token, via: makeApp({ features: {} }), body: { amount: 1000 } })).status).toBe(503);
+    expect((await call("POST", "/v1/tower-lights/bid", { token: me.token, body: { amount: 1000 } })).body.error.code).toBe("NOT_ALLOWED");
+    expect((await call("GET", "/v1/tower-lights", { token: me.token })).body).toMatchObject({ reserve: expect.any(Number), mine: null });
+  });
+});

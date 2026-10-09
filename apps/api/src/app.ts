@@ -177,6 +177,8 @@ import {
   hideRatioEntry,
   pickRatioPrompt,
   takeDownRatioEntry,
+  bidLights,
+  lightsBoard,
   createCityMarket,
   resolveCityMarket,
   stakeCity,
@@ -254,7 +256,7 @@ export type AppConfig = {
   receiptSecret?: string;
   // Switches for features the plan turns on mid-beta (Fade Duels wait for
   // the alt checks). Off unless set.
-  features?: { duels?: boolean };
+  features?: { duels?: boolean; towerLights?: boolean };
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -929,6 +931,12 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/staff/ratio/:id/hide", auth, async (c) => {
     await hideRatioEntry(db, c.get("userId"), uuid(c, "id"));
     return c.json({ hidden: true });
+  });
+  // Tower Lights (switched on mid-beta): crews bid from the pot to light the Tower.
+  app.get("/v1/tower-lights", auth, async (c) => c.json(await lightsBoard(db, (await myCrew(db, c.get("userId")))?.crew.id ?? null, opts())));
+  app.post("/v1/tower-lights/bid", auth, async (c) => {
+    if (!cfg.features?.towerLights) throw new ApiError(503, "LIGHTS_NOT_YET", "Tower Lights switch on mid-beta");
+    return c.json(await bidLights(db, c.get("userId"), (await body(c)).amount, opts()), 201);
   });
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
