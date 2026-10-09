@@ -1,0 +1,366 @@
+import {
+  type FeedMarket,
+  type OddsProvider,
+  type Side,
+  TOWER,
+  chanceOnSide,
+  cityDay,
+  daysBetween,
+  median,
+  sideOpen,
+  ticketsAfter,
+  vibeGap,
+} from "@bp/core";
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import type { Db } from "./client";
+import { areFrens } from "./chat";
+import { moodState } from "./moods";
+import { notify } from "./notify";
+import { isBlockedEitherWay } from "./safety";
+import { calls, crewMembers, feedPolls, marketTicks, markets, residents, tickets } from "./schema";
+
+export class TowerError extends Error {
+  constructor(
+    readonly code:
+      | "INVALID_INPUT"
+      | "NO_SUCH_MARKET"
+      | "MARKET_CLOSED"
+      | "INFO_ONLY"
+      | "NO_RESIDENT"
+      | "ALREADY_CALLED"
+      | "PRICE_MOVED"
+      | "NO_TICKETS"
+      | "NOT_FRENS"
+      | "NOTHING_TO_TAIL"
+      | "TOO_MANY_TAILS"
+      | "BLOCKED"
+      | "FEED_PAUSED",
+    message: string,
+  ) {
+    super(message);
+    this.name = "TowerError";
+  }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUnique = (e: unknown) => ((e as { cause?: { code?: string } })?.cause?.code ?? (e as { code?: string })?.code) === "23505";
+const POLL_LOCK = 0x70_11_0d_d5; // advisory lock: one poller at a time
+
+// --- Tickets --------------------------------------------------------------------
+
+async function lockTickets(tx: Db, userId: string, now: Date) {
+  const today = cityDay(now);
+  await tx.insert(tickets).values({ userId, balance: TOWER.ticketsPerDay, asOf: today }).onConflictDoNothing();
+  const [t] = await tx.select().from(tickets).where(eq(tickets.userId, userId)).for("no key update");
+  const balance = ticketsAfter(t!.balance, daysBetween(t!.asOf, today));
+  return { balance, today };
+}
+
+export async function myTickets(db: Db, userId: string, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const [t] = await db.select().from(tickets).where(eq(tickets.userId, userId));
+  return { tickets: t ? ticketsAfter(t.balance, daysBetween(t.asOf, cityDay(now))) : TOWER.ticketsPerDay, max: TOWER.ticketsMax };
+}
+
+async function refundTicket(tx: Db, userId: string, now: Date) {
+  const { balance, today } = await lockTickets(tx, userId, now);
+  await tx.update(tickets).set({ balance: Math.min(TOWER.ticketsMax, balance + 1), asOf: today }).where(eq(tickets.userId, userId));
+}
+
+// --- The odds feed -----------------------------------------------------------------
+
+function statusFor(m: FeedMarket, now: Date): "open" | "frozen" | "resolved" | "void" {
+  if (m.voided) return "void";
+  if (m.resolved !== null) return "resolved";
+  return now >= m.freezesAt ? "frozen" : "open";
+}
+
+const validFeed = (m: FeedMarket) =>
+  typeof m.externalId === "string" &&
+  m.externalId.length > 0 &&
+  m.externalId.length <= 200 &&
+  typeof m.question === "string" &&
+  m.question.length > 0 &&
+  Number.isInteger(m.price) &&
+  m.price >= 1 &&
+  m.price <= 99 &&
+  m.freezesAt instanceof Date &&
+  m.settlesBy instanceof Date &&
+  !Number.isNaN(m.freezesAt.getTime()) &&
+  m.settlesBy >= m.freezesAt;
+
+// One poll: store every open market's tick, then settle the calls waiting on
+// it. One poller at a time (an advisory lock); a second one just skips.
+export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  let feed: FeedMarket[];
+  try {
+    feed = await provider.fetch(now);
+    if (!Array.isArray(feed)) throw new Error("feed did not return a list");
+  } catch (e) {
+    await db.insert(feedPolls).values({ source: provider.source, ok: false, error: String((e as Error)?.message ?? e).slice(0, 500), at: now });
+    return { ok: false as const, skipped: false };
+  }
+  return db.transaction(async (tx) => {
+    const [got] = await tx.execute<{ ok: boolean }>(sql`SELECT pg_try_advisory_xact_lock(${POLL_LOCK}) AS ok`);
+    if (!got?.ok) return { ok: true as const, skipped: true };
+    let ticked = 0;
+    let locked = 0;
+    let moved = 0;
+    let bad = 0;
+    for (const m of feed) {
+      if (!validFeed(m)) {
+        bad++;
+        continue;
+      }
+      const status = statusFor(m, now);
+      const [row] = await tx
+        .insert(markets)
+        .values({
+          source: provider.source,
+          externalId: m.externalId,
+          question: m.question.slice(0, 300),
+          category: m.category,
+          ladder: m.ladder,
+          infoOnly: m.category === "politics",
+          freezesAt: m.freezesAt,
+          settlesBy: m.settlesBy,
+          status,
+          outcome: status === "resolved" ? m.resolved : null,
+          resolvedAt: status === "resolved" || status === "void" ? now : null,
+          price: m.price,
+        })
+        .onConflictDoNothing()
+        .returning();
+      let market = row;
+      if (!market) {
+        const [existing] = await tx
+          .select()
+          .from(markets)
+          .where(and(eq(markets.source, provider.source), eq(markets.externalId, m.externalId)))
+          .for("no key update");
+        market = existing!;
+        if (market.status === "resolved" || market.status === "void") continue; // final
+        const [updated] = await tx
+          .update(markets)
+          .set({
+            question: m.question.slice(0, 300),
+            freezesAt: m.freezesAt,
+            settlesBy: m.settlesBy,
+            status,
+            outcome: status === "resolved" ? m.resolved : null,
+            resolvedAt: status === "resolved" || status === "void" ? now : null,
+            ...(status === "open" ? { price: m.price } : {}),
+          })
+          .where(eq(markets.id, market.id))
+          .returning();
+        market = updated!;
+      }
+      if (market.status !== "open") continue;
+      // A repeat poll for the same moment (two crons racing) adds nothing.
+      const [last] = await tx.select({ at: marketTicks.at }).from(marketTicks).where(eq(marketTicks.marketId, market.id)).orderBy(desc(marketTicks.id)).limit(1);
+      if (last && last.at >= now) continue;
+      const [tick] = await tx.insert(marketTicks).values({ marketId: market.id, price: m.price, at: now }).returning();
+      ticked++;
+      // Everyone who confirmed before this tick locks on it, or hears the price moved.
+      const waiting = await tx
+        .select()
+        .from(calls)
+        .where(and(eq(calls.marketId, market.id), eq(calls.status, "pending"), lt(calls.createdAt, now)))
+        .for("no key update");
+      for (const c of waiting) {
+        if (Math.abs(tick!.price - c.seenPrice) <= TOWER.maxSlip) {
+          const half = !c.onSlate && market.freezesAt.getTime() - now.getTime() < TOWER.halfAuraLastMinutes * 60_000;
+          await tx.update(calls).set({ status: "locked", tickId: tick!.id, lockedPrice: tick!.price, lockedAt: now, half }).where(eq(calls.id, c.id));
+          locked++;
+        } else {
+          await tx.update(calls).set({ status: "price_moved" }).where(eq(calls.id, c.id));
+          if (c.ticket) await refundTicket(tx, c.userId, now);
+          moved++;
+        }
+      }
+    }
+    // Calls that can never lock: their market froze or ended first, or the feed
+    // went quiet for too long. Tickets come back.
+    const stale = await tx
+      .select({ id: calls.id, userId: calls.userId, ticket: calls.ticket })
+      .from(calls)
+      .innerJoin(markets, eq(markets.id, calls.marketId))
+      .where(
+        and(
+          eq(calls.status, "pending"),
+          sql`(${markets.status} <> 'open' OR ${calls.createdAt} < ${new Date(now.getTime() - TOWER.pendingExpiresSeconds * 1000).toISOString()}::timestamptz)`,
+        ),
+      )
+      .for("no key update", { of: calls });
+    for (const c of stale) {
+      await tx.update(calls).set({ status: "expired" }).where(eq(calls.id, c.id));
+      if (c.ticket) await refundTicket(tx, c.userId, now);
+    }
+    await tx.insert(feedPolls).values({ source: provider.source, ok: true, markets: feed.length, at: now, ...(bad ? { error: `${bad} malformed market(s) skipped` } : {}) });
+    return { ok: true as const, skipped: false, ticked, locked, moved, expired: stale.length, bad };
+  });
+}
+
+// "Network congested: odds paused at 20:41" once polls stop succeeding.
+export async function feedStatus(db: Db, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const [last] = await db.select({ at: feedPolls.at }).from(feedPolls).where(eq(feedPolls.ok, true)).orderBy(desc(feedPolls.at)).limit(1);
+  const paused = !last || now.getTime() - last.at.getTime() > TOWER.feedPausedAfterSeconds * 1000;
+  return { paused, lastTickAt: last?.at ?? null };
+}
+
+// --- Making a call ------------------------------------------------------------------
+
+export type CallInput = { marketId: unknown; side?: unknown; chance: unknown; seenPrice: unknown; via?: unknown; viaUserId?: unknown };
+
+// Confirms a call: it waits "in the mempool" and locks at the next tick (see
+// pollOdds). Off-slate calls take a ticket; a dropped call gives it back.
+export async function makeCall(db: Db, userId: string, input: CallInput, opts: { now?: Date; onSlate?: (marketId: string) => Promise<boolean> } = {}) {
+  const now = opts.now ?? new Date();
+  if (typeof input.marketId !== "string" || !UUID.test(input.marketId)) throw new TowerError("NO_SUCH_MARKET", "no such market");
+  if (input.via !== undefined && input.via !== null && input.via !== "tail" && input.via !== "fade") throw new TowerError("INVALID_INPUT", "via is tail or fade");
+  const via = (input.via ?? null) as "tail" | "fade" | null;
+  if (via === null && input.side !== "yes" && input.side !== "no") throw new TowerError("INVALID_INPUT", "side is yes or no");
+  if (!Number.isInteger(input.seenPrice) || (input.seenPrice as number) < 1 || (input.seenPrice as number) > 99) throw new TowerError("INVALID_INPUT", "seenPrice is a whole percent");
+  const seen = input.seenPrice as number;
+
+  const [me] = await db.select({ id: residents.userId }).from(residents).where(eq(residents.userId, userId));
+  if (!me) throw new TowerError("NO_RESIDENT", "move in first");
+  const [market] = await db.select().from(markets).where(eq(markets.id, input.marketId.toLowerCase()));
+  if (!market) throw new TowerError("NO_SUCH_MARKET", "no such market");
+  if (market.infoOnly) throw new TowerError("INFO_ONLY", "this one's on the Odds Wall: read it, don't call it");
+  if (market.status !== "open" || now >= market.freezesAt) throw new TowerError("MARKET_CLOSED", "calls are closed on this market");
+  if ((await feedStatus(db, { now })).paused) throw new TowerError("FEED_PAUSED", "odds are paused; try again when they're back");
+  if (Math.abs(market.price - seen) > TOWER.maxSlip) throw new TowerError("PRICE_MOVED", "price moved; call again?");
+  const onSlate = (await opts.onSlate?.(market.id)) ?? false;
+
+  // Tail copies a fren's side; Fade takes the other one.
+  let side = input.side as Side;
+  let viaUserId: string | null = null;
+  if (via) {
+    if (onSlate) throw new TowerError("INVALID_INPUT", "no tailing or fading on the Slate: lock your own call");
+    if (typeof input.viaUserId !== "string" || !UUID.test(input.viaUserId)) throw new TowerError("INVALID_INPUT", "whose call?");
+    viaUserId = input.viaUserId.toLowerCase();
+    if (viaUserId === userId) throw new TowerError("INVALID_INPUT", "that's your own call");
+    if (await isBlockedEitherWay(db, userId, viaUserId)) throw new TowerError("BLOCKED", "you can't");
+    if (via === "tail" && !(await areFrens(db, userId, viaUserId))) throw new TowerError("NOT_FRENS", "you tail frens");
+    const [theirs] = await db
+      .select({ side: calls.side })
+      .from(calls)
+      .where(and(eq(calls.userId, viaUserId), eq(calls.marketId, market.id), eq(calls.status, "locked")));
+    if (!theirs) throw new TowerError("NOTHING_TO_TAIL", "they haven't called this one");
+    side = via === "tail" ? theirs.side : theirs.side === "yes" ? "no" : "yes";
+  }
+  if (!sideOpen(side, seen) || !chanceOnSide(side, seen, input.chance)) throw new TowerError("INVALID_INPUT", `chance must be on the ${side.toUpperCase()} side of ${seen}%`);
+
+  const row = await db.transaction(async (tx) => {
+    if (via === "tail") {
+      const since = new Date(`${cityDay(now)}T00:00:00Z`);
+      const [n] = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(calls)
+        .where(and(eq(calls.userId, userId), eq(calls.via, "tail"), gte(calls.createdAt, since), inArray(calls.status, ["pending", "locked"])));
+      if (n!.n >= TOWER.tailsPerDay) throw new TowerError("TOO_MANY_TAILS", `${TOWER.tailsPerDay} tails a day`);
+    }
+    let ticket = false;
+    if (!onSlate) {
+      const { balance, today } = await lockTickets(tx, userId, now);
+      if (balance < 1) throw new TowerError("NO_TICKETS", "no tickets left; 3 more at the bell");
+      await tx.update(tickets).set({ balance: balance - 1, asOf: today }).where(eq(tickets.userId, userId));
+      ticket = true;
+    }
+    try {
+      const [c] = await tx
+        .insert(calls)
+        .values({ userId, marketId: market.id, side, chance: input.chance as number, seenPrice: seen, onSlate, ticket, via, viaUserId, createdAt: now })
+        .returning();
+      return c!;
+    } catch (e) {
+      if (isUnique(e)) throw new TowerError("ALREADY_CALLED", "one call per market, no edits");
+      throw e;
+    }
+  });
+  // They get pinged (opt-in) when someone fades them.
+  if (via === "fade" && viaUserId) {
+    const [r] = await db.select({ handle: residents.handle }).from(residents).where(eq(residents.userId, userId));
+    await notify(db, viaUserId, "faded", { handle: r!.handle }, { now });
+  }
+  return { id: row.id, status: row.status, side: row.side, chance: row.chance, onSlate: row.onSlate, ticket: row.ticket };
+}
+
+export async function myCall(db: Db, userId: string, callId: unknown) {
+  if (typeof callId !== "string" || !UUID.test(callId)) throw new TowerError("INVALID_INPUT", "which call?");
+  const [c] = await db.select().from(calls).where(and(eq(calls.id, callId.toLowerCase()), eq(calls.userId, userId)));
+  if (!c) throw new TowerError("INVALID_INPUT", "no such call");
+  return c;
+}
+
+// --- The Floor --------------------------------------------------------------------------
+
+// A market as one resident sees it: the world's price, the city's and the
+// crew's medians (once enough have called), and their own call. On the Slate
+// the crowd stays blurred until you lock (Lock to see); Chart-brain hides it.
+export async function marketView(db: Db, userId: string, marketId: unknown, opts: { now?: Date; onSlate?: (marketId: string) => Promise<boolean> } = {}) {
+  const now = opts.now ?? new Date();
+  if (typeof marketId !== "string" || !UUID.test(marketId)) throw new TowerError("NO_SUCH_MARKET", "no such market");
+  const [m] = await db.select().from(markets).where(eq(markets.id, marketId.toLowerCase()));
+  if (!m) throw new TowerError("NO_SUCH_MARKET", "no such market");
+  const [mine] = await db
+    .select()
+    .from(calls)
+    .where(and(eq(calls.userId, userId), eq(calls.marketId, m.id), inArray(calls.status, ["pending", "locked"])));
+  const onSlate = (await opts.onSlate?.(m.id)) ?? false;
+  const mood = await moodState(db, userId, { now });
+  const blurred = (onSlate && mine?.status !== "locked") || mood.chartBrain.hideCrowdBars;
+
+  let city: number | null = null;
+  let crew: number | null = null;
+  let cityCount = 0;
+  let crewCount = 0;
+  if (!blurred && !m.infoOnly) {
+    const locked = await db
+      .select({ userId: calls.userId, chance: calls.chance })
+      .from(calls)
+      .where(and(eq(calls.marketId, m.id), eq(calls.status, "locked")));
+    cityCount = locked.length;
+    if (cityCount >= TOWER.cityBarMin) city = median(locked.map((c) => c.chance));
+    const [myCrew] = await db.select({ crewId: crewMembers.crewId }).from(crewMembers).where(and(eq(crewMembers.userId, userId), isNull(crewMembers.leftAt)));
+    if (myCrew) {
+      const mates = new Set(
+        (await db.select({ id: crewMembers.userId }).from(crewMembers).where(and(eq(crewMembers.crewId, myCrew.crewId), isNull(crewMembers.leftAt)))).map((x) => x.id),
+      );
+      const crewChances = locked.filter((c) => mates.has(c.userId)).map((c) => c.chance);
+      crewCount = crewChances.length;
+      if (crewCount >= TOWER.crewBarMin) crew = median(crewChances);
+    }
+  }
+  return {
+    id: m.id,
+    question: m.question,
+    category: m.category,
+    status: m.status,
+    infoOnly: m.infoOnly,
+    freezesAt: m.freezesAt,
+    settlesBy: m.settlesBy,
+    world: m.price,
+    city: blurred ? null : city,
+    crew: blurred ? null : crew,
+    vibeGap: blurred ? null : vibeGap(m.price, city),
+    blurred,
+    counts: blurred ? null : { city: cityCount, crew: crewCount },
+    onSlate,
+    mine: mine ? { id: mine.id, side: mine.side, chance: mine.chance, status: mine.status, lockedPrice: mine.lockedPrice } : null,
+    source: "Odds via Polymarket",
+  };
+}
+
+// The Floor: every callable open market; the Odds Wall: everything open, read-only.
+export async function openMarkets(db: Db, opts: { infoOnly?: boolean; limit?: number } = {}) {
+  return db
+    .select({ id: markets.id, question: markets.question, category: markets.category, price: markets.price, freezesAt: markets.freezesAt, infoOnly: markets.infoOnly })
+    .from(markets)
+    .where(and(eq(markets.status, "open"), opts.infoOnly === undefined ? undefined : eq(markets.infoOnly, opts.infoOnly)))
+    .orderBy(markets.freezesAt)
+    .limit(Math.min(Math.max(opts.limit ?? 100, 1), 200));
+}

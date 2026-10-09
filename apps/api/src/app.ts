@@ -1,4 +1,5 @@
 import {
+  type OddsProvider,
   faucetFrenAnswer,
   bigNights,
   areaOf,
@@ -138,6 +139,13 @@ import {
   markOpened,
   runNotificationBatch,
   queueDailyPings,
+  feedStatus,
+  makeCall,
+  marketView,
+  myCall,
+  myTickets,
+  openMarkets,
+  pollOdds,
   setCrewBotMutes,
   startNap,
   cancelLongAction,
@@ -198,6 +206,8 @@ export type AppConfig = {
   ponPepper?: string;
   // Push delivery (Telegram bot messages).
   notifier?: NotificationSender;
+  // The odds feed (Polymarket in production; a mock in development).
+  odds?: OddsProvider;
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -762,6 +772,22 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/shifts/:id/answers", auth, async (c) => c.json(await submitShift(db, c.get("userId"), uuid(c, "id"), (await body(c)).answers, opts())));
   app.post("/v1/shifts/:id/collect", auth, async (c) => c.json(await collectShift(db, c.get("userId"), uuid(c, "id"), opts())));
 
+  // --- The Prediction Tower --------------------------------------------------
+
+  app.get("/v1/tower/markets", auth, async (c) => c.json(await openMarkets(db, { infoOnly: false })));
+  app.get("/v1/tower/odds-wall", auth, async (c) => c.json(await openMarkets(db)));
+  app.get("/v1/tower/feed", auth, async (c) => c.json(await feedStatus(db, opts())));
+  app.get("/v1/tower/tickets", auth, async (c) => c.json(await myTickets(db, c.get("userId"), opts())));
+  app.get("/v1/tower/markets/:id", auth, async (c) => c.json(await marketView(db, c.get("userId"), uuid(c, "id"), opts())));
+  app.post("/v1/tower/calls", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await makeCall(db, c.get("userId"), { marketId: b.marketId, side: b.side, chance: b.chance, seenPrice: b.seenPrice, via: b.via, viaUserId: b.viaUserId }, opts()), 201);
+  });
+  app.get("/v1/tower/calls/:id", auth, async (c) => {
+    const k = await myCall(db, c.get("userId"), uuid(c, "id"));
+    return c.json({ id: k.id, marketId: k.marketId, side: k.side, chance: k.chance, status: k.status, lockedPrice: k.lockedPrice, lockedAt: k.lockedAt, half: k.half, via: k.via, aura: k.auraCenti === null ? null : k.auraCenti / 100 });
+  });
+
   // --- Long actions and the city clock ---------------------------------------
 
   app.post("/v1/naps", auth, async (c) => c.json(await startNap(db, c.get("userId"), (await body(c)).itemId, where, opts()), 201));
@@ -791,6 +817,10 @@ export function createApp(cfg: AppConfig) {
     }
     await next();
   };
+  app.post("/internal/tower/poll", internal, async (c) => {
+    if (!cfg.odds) throw new ApiError(503, "ODDS_DISABLED", "no odds feed configured");
+    return c.json(await pollOdds(db, cfg.odds, opts()));
+  });
   app.post("/internal/actions/run", internal, async (c) => c.json(await finishDueActions(db, opts())));
   app.post("/internal/notifications/daily", internal, async (c) => c.json(await queueDailyPings(db, opts())));
   app.post("/internal/notifications/run", internal, async (c) => {

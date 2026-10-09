@@ -675,3 +675,39 @@ describe("Faucet Fren over HTTP", () => {
     expect((await call("GET", "/v1/faucet-fren?q=rent")).status).toBe(401);
   });
 });
+
+describe("the Tower over HTTP", () => {
+  it("poll, the Floor and the Odds Wall, a call that locks at the next tick, tickets", async () => {
+    const { mockProvider } = await import("@bp/core");
+    const t0 = Date.now();
+    const id = crypto.randomUUID();
+    const specs = [
+      { externalId: `api-${id}`, question: "Will the test pass?", category: "crypto" as const, openAt: new Date(t0 - 3_600_000), freezesAt: new Date(t0 + 6 * 3_600_000), settlesBy: new Date(t0 + 7 * 3_600_000), start: 40 },
+      { externalId: `api-pol-${id}`, question: "Will a senator...?", category: "politics" as const, openAt: new Date(t0 - 3_600_000), freezesAt: new Date(t0 + 6 * 3_600_000), settlesBy: new Date(t0 + 7 * 3_600_000), start: 40 },
+    ];
+    const tower = makeApp({ odds: mockProvider(() => specs) });
+    const internal = { "x-internal-secret": SECRET };
+    expect((await call("POST", "/internal/tower/poll", { headers: internal, via: tower })).body).toMatchObject({ ok: true });
+    const me = await resident();
+    const floor = (await call("GET", "/v1/tower/markets", { token: me.token, via: tower })).body as Array<{ id: string; question: string; price: number }>;
+    const mine = floor.find((m) => m.question === "Will the test pass?" && m.price)!;
+    expect(floor.some((m) => m.question === "Will a senator...?")).toBe(false);
+    expect(((await call("GET", "/v1/tower/odds-wall", { token: me.token, via: tower })).body as Array<{ question: string }>).some((m) => m.question === "Will a senator...?")).toBe(true);
+    const made = await call("POST", "/v1/tower/calls", { token: me.token, via: tower, body: { marketId: mine.id, side: "yes", chance: Math.min(99, mine.price + 10), seenPrice: mine.price } });
+    expect(made.status).toBe(201);
+    expect(made.body).toMatchObject({ status: "pending", ticket: true });
+    expect((await call("POST", "/v1/tower/calls", { token: me.token, via: tower, body: { marketId: mine.id, side: "yes", chance: Math.min(99, mine.price + 10), seenPrice: mine.price } })).status).toBe(409);
+    expect((await call("GET", "/v1/tower/tickets", { token: me.token, via: tower })).body.tickets).toBe(2);
+    await new Promise((r) => setTimeout(r, 5));
+    await call("POST", "/internal/tower/poll", { headers: internal, via: tower });
+    const got = (await call("GET", `/v1/tower/calls/${made.body.id}`, { token: me.token, via: tower })).body;
+    expect(["locked", "price_moved"]).toContain(got.status); // the mock walks by the minute
+    const view = (await call("GET", `/v1/tower/markets/${mine.id}`, { token: me.token, via: tower })).body;
+    expect(view).toMatchObject({ source: "Odds via Polymarket", world: expect.any(Number) });
+    expect((await call("POST", "/v1/tower/calls", { token: me.token, via: tower, body: { marketId: mine.id, side: "sideways", chance: 50, seenPrice: 40 } })).status).toBe(400);
+  });
+
+  it("no feed configured: polling is a clear 503", async () => {
+    expect((await call("POST", "/internal/tower/poll", { headers: { "x-internal-secret": SECRET } })).status).toBe(503);
+  });
+});

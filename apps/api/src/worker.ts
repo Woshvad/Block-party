@@ -1,4 +1,4 @@
-import { createPrivyVerifier, openAiModeration } from "@bp/core";
+import { createPrivyVerifier, mockProvider, openAiModeration, sampleMarkets } from "@bp/core";
 import { createDb } from "@bp/db";
 import { createApp } from "./app";
 import { httpRoomsClient } from "./rooms-client";
@@ -16,7 +16,11 @@ type Env = {
   OPENAI_API_KEY?: string;
   ROOMS_URL?: string;
   TICKET_SECRET?: string;
+  // "mock" for staging; the Polymarket feed plugs in here.
+  ODDS_SOURCE?: string;
 };
+
+const oddsFor = (env: Env) => (env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
 
 export default {
   async fetch(req: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
@@ -37,6 +41,7 @@ export default {
         : {}),
       ...(privyVerify ? { privyVerify } : {}),
       notifier: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }),
+      ...(oddsFor(env) ? { odds: oddsFor(env) } : {}),
     });
     const res = await app.fetch(req);
     ctx.waitUntil(close());
@@ -48,10 +53,12 @@ export default {
   // half-hour and 45-minute time zones get their hour too).
   async scheduled(event: { scheduledTime?: number }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
     const { db, close } = createDb(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false });
-    const { runBell, runNotificationBatch, finishDueActions, queueDailyPings } = await import("@bp/db");
+    const { runBell, runNotificationBatch, finishDueActions, queueDailyPings, pollOdds } = await import("@bp/db");
     const at = new Date(event.scheduledTime ?? Date.now());
     const jobs: Array<Promise<unknown>> = [runBell(db), finishDueActions(db), runNotificationBatch(db, telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), { batch: 200 })];
     if (at.getUTCMinutes() % 15 === 0) jobs.push(queueDailyPings(db, { now: at }));
+    const odds = oddsFor(env);
+    if (odds) jobs.push(pollOdds(db, odds, { now: at }));
     ctx.waitUntil(Promise.allSettled(jobs).finally(() => close()));
   },
 };

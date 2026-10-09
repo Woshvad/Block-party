@@ -10,8 +10,9 @@ const origin = (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000").split(",
 if (!bot) throw new Error("TELEGRAM_BOT_TOKEN is not set");
 
 let failures = 0;
-async function step(name: string, method: string, path: string, opts: { token?: string; body?: unknown; expect?: number; idem?: boolean } = {}) {
+async function step(name: string, method: string, path: string, opts: { token?: string; body?: unknown; expect?: number; idem?: boolean; secret?: boolean } = {}) {
   const headers: Record<string, string> = { "content-type": "application/json", origin };
+  if (opts.secret) headers["x-internal-secret"] = process.env.INTERNAL_SECRET ?? "";
   if (opts.token) headers.authorization = `Bearer ${opts.token}`;
   if (opts.idem) headers["idempotency-key"] = crypto.randomUUID();
   const res = await fetch(`${base}${path}`, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
@@ -38,6 +39,23 @@ await step("relationships", "GET", "/v1/relationships", { token });
 await step("timetable", "GET", "/v1/city/timetable", { token });
 await step("away recap", "GET", "/v1/away/recap", { token });
 await step("proof of neighbour", "GET", "/v1/pon", { token });
+// The Tower, when the server runs with ODDS_SOURCE=mock.
+if (process.env.SMOKE_TOWER) {
+  await step("poll the odds (internal)", "POST", "/internal/tower/poll", { secret: true });
+  const floor = await step("the Floor", "GET", "/v1/tower/markets", { token });
+  const m = (floor as Array<{ id: string; price: number }>)[0];
+  if (m) {
+    const made = await step("make a call", "POST", "/v1/tower/calls", { token, body: { marketId: m.id, side: m.price < 99 ? "yes" : "no", chance: m.price < 99 ? Math.min(99, m.price + 10) : 90, seenPrice: m.price }, expect: 201 });
+    await new Promise((r) => setTimeout(r, 1100));
+    await step("next tick (internal)", "POST", "/internal/tower/poll", { secret: true });
+    const c = await step("the call", "GET", `/v1/tower/calls/${made?.id}`, { token });
+    console.log(`     call ${c?.status} at ${c?.lockedPrice ?? "-"}`);
+    await step("the market", "GET", `/v1/tower/markets/${m.id}`, { token });
+  } else {
+    failures++;
+    console.log("FAIL the Floor is empty");
+  }
+}
 await step("economy (internal)", "GET", `/internal/economy?from=2020-01-01&to=2100-01-01`, { expect: 404 }); // no secret
 console.log(failures ? `\n${failures} step(s) failed` : "\nall steps passed");
 process.exit(failures ? 1 : 0);

@@ -22,3 +22,4 @@ export * from "./life";
 export * from "./relationships";
 export * from "./pon";
 export * from "./faucet-fren";
+export * from "./tower";

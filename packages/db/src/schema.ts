@@ -1177,3 +1177,115 @@ export const rivalries = pgTable(
     index("rivalries_b").on(t.b),
   ],
 );
+
+// --- The Prediction Tower --------------------------------------------------------
+
+export const marketCategory = pgEnum("market_category", ["crypto", "sports", "politics", "culture", "other"]);
+export const marketStatus = pgEnum("market_status", ["open", "frozen", "resolved", "void"]);
+
+// Mirror markets from the odds feed (Polymarket; a mock in development).
+export const markets = pgTable(
+  "markets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    externalId: text("external_id").notNull(),
+    question: text("question").notNull(),
+    category: marketCategory("category").notNull(),
+    ladder: text("ladder"),
+    // Real politicians stay on the Odds Wall: information only, no calls.
+    infoOnly: boolean("info_only").notNull().default(false),
+    freezesAt: timestamp("freezes_at", { withTimezone: true }).notNull(),
+    settlesBy: timestamp("settles_by", { withTimezone: true }).notNull(),
+    status: marketStatus("status").notNull().default("open"),
+    outcome: boolean("outcome"),
+    price: integer("price").notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("markets_source_external").on(t.source, t.externalId),
+    check("markets_price", sql`${t.price} BETWEEN 1 AND 99`),
+    check("markets_resolved", sql`(${t.status} = 'resolved') = (${t.outcome} IS NOT NULL)`),
+    check("markets_order", sql`${t.settlesBy} >= ${t.freezesAt}`),
+  ],
+);
+
+// Every tick is kept: Aura scores against the tick a call locked on.
+export const marketTicks = pgTable(
+  "market_ticks",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    marketId: uuid("market_id")
+      .notNull()
+      .references(() => markets.id),
+    price: integer("price").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("market_ticks_market").on(t.marketId, t.at), check("market_ticks_price", sql`${t.price} BETWEEN 1 AND 99`)],
+);
+
+// One row per poll of the feed, for "odds paused at 20:41".
+export const feedPolls = pgTable("feed_polls", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  source: text("source").notNull(),
+  ok: boolean("ok").notNull(),
+  markets: integer("markets").notNull().default(0),
+  error: text("error"),
+  at: timestamp("at", { withTimezone: true }).notNull(),
+});
+
+export const callStatus = pgEnum("call_status", ["pending", "locked", "price_moved", "expired"]);
+export const callSide = pgEnum("call_side", ["yes", "no"]);
+
+// Free calls. One per resident per market (pending or locked), no edits.
+export const calls = pgTable(
+  "calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    marketId: uuid("market_id")
+      .notNull()
+      .references(() => markets.id),
+    side: callSide("side").notNull(),
+    chance: integer("chance").notNull(),
+    seenPrice: integer("seen_price").notNull(),
+    status: callStatus("status").notNull().default("pending"),
+    tickId: bigint("tick_id", { mode: "number" }).references(() => marketTicks.id),
+    lockedPrice: integer("locked_price"),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    onSlate: boolean("on_slate").notNull().default(false),
+    half: boolean("half").notNull().default(false),
+    ticket: boolean("ticket").notNull().default(false),
+    // A Tail copies a fren's side and earns no Aura; a Fade takes the other side.
+    via: text("via"),
+    viaUserId: uuid("via_user_id").references(() => users.id),
+    auraCenti: integer("aura_centi"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("calls_one_per_market").on(t.userId, t.marketId).where(sql`${t.status} IN ('pending', 'locked')`),
+    index("calls_pending").on(t.marketId).where(sql`${t.status} = 'pending'`),
+    index("calls_market").on(t.marketId, t.status),
+    check("calls_chance", sql`${t.chance} BETWEEN 1 AND 99 AND ${t.seenPrice} BETWEEN 1 AND 99`),
+    check("calls_locked", sql`(${t.status} = 'locked') = (${t.lockedPrice} IS NOT NULL AND ${t.tickId} IS NOT NULL AND ${t.lockedAt} IS NOT NULL)`),
+    check("calls_via", sql`(${t.via} IS NULL) = (${t.viaUserId} IS NULL) AND (${t.via} IS NULL OR ${t.via} IN ('tail', 'fade'))`),
+    // A call's side matches its chance (the slider only moves on your side).
+    check("calls_side", sql`(${t.side} = 'yes' AND ${t.chance} > ${t.seenPrice}) OR (${t.side} = 'no' AND ${t.chance} < ${t.seenPrice})`),
+  ],
+);
+
+// Off-slate tickets: 3 a day, stacking up to 9, never sold.
+export const tickets = pgTable(
+  "tickets",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id),
+    balance: integer("balance").notNull(),
+    asOf: date("as_of", { mode: "string" }).notNull(),
+  },
+  (t) => [check("tickets_range", sql`${t.balance} BETWEEN 0 AND 9`)],
+);

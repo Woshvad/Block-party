@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
+import { mockProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { createApp } from "./app";
 
@@ -20,6 +21,7 @@ const app = createApp({
   telegramBotToken: need("TELEGRAM_BOT_TOKEN"),
   internalSecret: need("INTERNAL_SECRET"),
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000").split(","),
+  ...(process.env.ODDS_SOURCE === "mock" ? { odds: mockProvider(() => sampleMarkets(new Date())) } : {}),
 });
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port });

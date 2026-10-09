@@ -21,6 +21,7 @@ import {
   NotifyError,
   LifeError,
   RelationshipError,
+  TowerError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -170,7 +171,23 @@ const LIFE: Record<LifeError["code"], number> = { INVALID_INPUT: 400, NOT_HOME: 
 
 const RELATIONSHIP: Record<RelationshipError["code"], number> = { INVALID_INPUT: 400, NO_SUCH_USER: 404, NOT_FRENS: 409, TOO_MANY: 409, BLOCKED: 403, NO_SUCH_REQUEST: 404 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP };
+const TOWER: Record<TowerError["code"], number> = {
+  INVALID_INPUT: 400,
+  NO_SUCH_MARKET: 404,
+  MARKET_CLOSED: 409,
+  INFO_ONLY: 409,
+  NO_RESIDENT: 404,
+  ALREADY_CALLED: 409,
+  PRICE_MOVED: 409,
+  NO_TICKETS: 409,
+  NOT_FRENS: 409,
+  NOTHING_TO_TAIL: 404,
+  TOO_MANY_TAILS: 429,
+  BLOCKED: 403,
+  FEED_PAUSED: 503,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -196,6 +213,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
+  if (e instanceof TowerError) return out(TOWER[e.code], e.code, e.message);
   if (e instanceof RelationshipError) return out(RELATIONSHIP[e.code], e.code, e.message);
   if (e instanceof LifeError) return out(LIFE[e.code], e.code, e.message);
   if (e instanceof NotifyError) return out(NOTIFY[e.code], e.code, e.message);
