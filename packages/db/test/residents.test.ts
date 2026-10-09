@@ -300,7 +300,7 @@ describe("residentsByIds", () => {
     const a = await makeResident(db);
     const b = await makeResident(db);
     const contrarian = "00000000-0000-4000-8000-000000000902";
-    const got = await residentsByIds(db, [a, b.toUpperCase(), contrarian, randomUUID(), a]);
+    const got = await residentsByIds(db, [a, b.toUpperCase(), contrarian, randomUUID(), a] as string[]);
     const byId = new Map(got.map((r) => [r.userId, r]));
     expect(got).toHaveLength(3); // the unknown id is left out, the duplicate counted once
     expect(byId.get(a)!.handle).toBe((await getResident(db, a))!.handle);
@@ -312,7 +312,7 @@ describe("residentsByIds", () => {
 
   it("junk gives an empty list, never an error, and at most 100 are looked up", async () => {
     for (const junk of [undefined, null, "x", 7, {}, [1, null, "not-a-uuid", "' or 1=1 --"]]) expect(await residentsByIds(db, junk)).toEqual([]);
-    const many = Array.from({ length: 150 }, () => randomUUID());
+    const many: string[] = Array.from({ length: 150 }, () => randomUUID());
     const a = await makeResident(db);
     many.push(a); // past the cap: not looked up
     expect(await residentsByIds(db, many)).toEqual([]);
