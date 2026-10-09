@@ -4,7 +4,9 @@ import { Html, OrbitControls } from "@react-three/drei";
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
-import type { Api, Look } from "./api";
+import { ApiError, type Api, type Home, type Look } from "./api";
+import { HomeRoom } from "./HomeRoom";
+import { homeSize, pieceOf } from "./furniture";
 import { fitCamera } from "./camera";
 import { useNow } from "./clock";
 import { HAIR, OUTFIT, SKIN } from "./palette";
@@ -12,6 +14,7 @@ import { placeName, roomSize } from "./places";
 import { type RoomState, applyEvent, bubbles, emptyRoom, showingEmote } from "./roomState";
 import { type SocketStatus, openRoomSocket } from "./roomSocket";
 import { haptic } from "./telegram";
+import { useToast } from "./useToast";
 
 // A live room: everyone here walking where they tapped, chat bubbles over
 // heads, emotes, and the dimmed away residents. Every body part is one
@@ -193,7 +196,14 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
   );
 }
 
-export default function LiveRoom({ api, place, onLeave }: { api: Api; place: string; onLeave: () => void }) {
+export default function LiveRoom({ api, place, onLeave, me }: { api: Api; place: string; onLeave: () => void; me?: string }) {
+  // Your own home: draw your furniture (the API only shares a layout with its owner).
+  const mine = !!me && place === `home:${me}`;
+  const [home, setHome] = useState<Home | null>(null);
+  const [napMsg, setNapMsg] = useToast<string>();
+  useEffect(() => {
+    if (mine) void api.home().then(setHome).catch(() => {});
+  }, [api, mine]);
   const size = roomSize(place) ?? { w: 10, h: 10 };
   const [room, dispatch] = useReducer((s: RoomState, a: { ev: unknown; now: number }) => applyEvent(s, a.ev, a.now), undefined, emptyRoom);
   const [status, setStatus] = useState<SocketStatus>({ kind: "connecting" });
@@ -279,18 +289,31 @@ export default function LiveRoom({ api, place, onLeave }: { api: Api; place: str
           <color attach="background" args={["#dfeaf5"]} />
           <hemisphereLight args={["#ffffff", "#b9c7d6", 1.1]} />
           <directionalLight position={[6, 12, 6]} intensity={1.3} />
-          <mesh rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
-            <planeGeometry args={[size.w, size.h]} />
-            <meshStandardMaterial map={tiles} />
-          </mesh>
-          <mesh position={[0, 1.2, -size.h / 2 - 0.1]}>
-            <boxGeometry args={[size.w + 0.4, 2.4, 0.2]} />
-            <meshStandardMaterial color="#e8b99a" />
-          </mesh>
-          <mesh position={[-size.w / 2 - 0.1, 1.2, 0]}>
-            <boxGeometry args={[0.2, 2.4, size.h]} />
-            <meshStandardMaterial color="#efc6a8" />
-          </mesh>
+          {home ? (
+            <HomeRoom
+              w={homeSize(home.tier).w}
+              d={homeSize(home.tier).d}
+              wallFinish={home.wallFinish}
+              floorFinish={home.floorFinish}
+              placed={home.placed}
+              onCell={(x, y) => send({ t: "move", to: { x, y } }) && haptic("light")}
+            />
+          ) : (
+            <>
+              <mesh rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
+                <planeGeometry args={[size.w, size.h]} />
+                <meshStandardMaterial map={tiles} />
+              </mesh>
+              <mesh position={[0, 1.2, -size.h / 2 - 0.1]}>
+                <boxGeometry args={[size.w + 0.4, 2.4, 0.2]} />
+                <meshStandardMaterial color="#e8b99a" />
+              </mesh>
+              <mesh position={[-size.w / 2 - 0.1, 1.2, 0]}>
+                <boxGeometry args={[0.2, 2.4, size.h]} />
+                <meshStandardMaterial color="#efc6a8" />
+              </mesh>
+            </>
+          )}
           <RoomCamera span={span} />
           <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />
           <People drawn={drawn} me={room.you} />
@@ -323,6 +346,24 @@ export default function LiveRoom({ api, place, onLeave }: { api: Api; place: str
         </div>
       )}
       {err && <div className="toast bad">{err.message}</div>}
+      {napMsg && <div className="toast">{napMsg}</div>}
+      {home && status.kind === "live" && home.placed.some((p) => pieceOf(p.pieceId)?.mood === "rested") && (
+        <button
+          className="pill napbtn"
+          onClick={async () => {
+            const bed = home.placed.find((p) => pieceOf(p.pieceId)?.mood === "rested")!;
+            try {
+              const a = await api.nap(bed.itemId);
+              setNapMsg(`😴 Napping until ${new Date(a.endsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. You'll wake up Rested.`);
+              haptic("success");
+            } catch (e) {
+              setNapMsg(e instanceof ApiError ? e.message : "couldn't nap");
+            }
+          }}
+        >
+          😴 Nap
+        </button>
+      )}
 
       {log && (
         <div className="chatlog" onClick={() => setLog(false)}>

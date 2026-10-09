@@ -126,3 +126,15 @@ button.pill { border: 0; cursor: pointer; text-align: left; color: var(--ink); }
 .tag3d .emo { font-size: 26px; }
 .tag3d { transform: translateY(-28px); }
 .npc { background: #534ab7; color: #fff; border-radius: 999px; padding: 1px 7px; font-size: 10px; font-weight: 700; }
+.homebar { position: fixed; left: 10px; right: 10px; bottom: calc(env(safe-area-inset-bottom) + 76px); display: flex; flex-wrap: wrap; gap: 6px; z-index: 3; justify-content: center; }
+.homebar button { border: 0; background: #fff; border-radius: 999px; padding: 9px 13px; font-size: 13px; cursor: pointer; box-shadow: 0 1px 3px rgba(20, 22, 31, 0.15); color: var(--ink); }
+.homebar button.primary { background: var(--ink); color: #fff; }
+.homebar button:disabled { opacity: 0.6; background: #faece7; color: #c0392b; }
+.homebar .what { width: 100%; text-align: center; font-size: 13px; background: rgba(255, 255, 255, 0.9); border-radius: 10px; padding: 6px; }
+.callsheet.tall { max-height: 80vh; overflow-y: auto; }
+.listrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid rgba(20, 22, 31, 0.06); font-size: 14px; }
+.listrow button { border: 0; background: var(--ink); color: #fff; border-radius: 10px; padding: 7px 12px; cursor: pointer; flex: none; }
+.listrow button:disabled { opacity: 0.35; }
+.band { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 12px 0 2px; }
+.napbtn { position: fixed; right: 12px; top: calc(env(safe-area-inset-top) + 56px); z-index: 3; border: 0; cursor: pointer; }
+.toast.good { color: var(--green); }

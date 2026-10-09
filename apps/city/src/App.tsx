@@ -11,6 +11,7 @@ const Today = dynamic(() => import("./Today"), { ssr: false });
 const Tower = dynamic(() => import("./Tower"), { ssr: false });
 const Travel = dynamic(() => import("./Travel"), { ssr: false });
 const LiveRoom = dynamic(() => import("./LiveRoom"), { ssr: false });
+const HomeEditor = dynamic(() => import("./HomeEditor"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -113,13 +114,13 @@ export default function App() {
   }
 }
 
-type Tab = "city" | "today" | "tower";
+type Tab = "city" | "home" | "today" | "tower";
 
 // A resident's home screen: the city board and Today, with the tab bar.
 function Home({ api, me: first }: { api: Api; me: Me }) {
   const [tab, setTab] = useState<Tab>(() => {
     const h = typeof location !== "undefined" ? location.hash.slice(1) : "";
-    return h === "today" || h === "tower" ? h : "city";
+    return h === "today" || h === "tower" || h === "home" ? h : "city";
   });
   const [me, setMe] = useState(first);
   const [trip, setTrip] = useState<{ place: string; ridesFree: boolean } | null>(null);
@@ -133,6 +134,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
     return (
       <LiveRoom
         api={api}
+        me={me.userId}
         place={room}
         onLeave={() => {
           setRoom(null);
@@ -158,13 +160,16 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
           }}
         />
       )}
+      {tab === "home" && <HomeEditor api={api} gm={me.gm} onGm={refreshGm} onGoInside={() => setTrip({ place: `home:${me.userId}`, ridesFree: false })} />}
       {tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} />}
       {tab === "tower" && <Tower api={api} />}
       <nav className="tabs">
         <button className={tab === "city" ? "on" : ""} onClick={() => go("city")}>
           City
         </button>
-        <a href="/room-test">Room</a>
+        <button className={tab === "home" ? "on" : ""} onClick={() => go("home")}>
+          Home
+        </button>
         <button className={tab === "today" ? "on" : ""} onClick={() => go("today")}>
           Today
         </button>

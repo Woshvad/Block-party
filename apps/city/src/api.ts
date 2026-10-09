@@ -116,6 +116,15 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     ride: (to: string, mode: string, key: string) => request<{ ride: Ride; replayed: boolean }>("POST", "/v1/rides", { to, mode }, { idempotencyKey: key }),
     roomTicket: (place: string) => request<{ ticket: string; url: string }>("POST", "/v1/rooms/ticket", { place }),
     resident: (handle: string) => request<PublicResident>("GET", `/v1/residents/${encodeURIComponent(handle)}`),
+    home: () => request<Home>("GET", "/v1/home"),
+    catalogue: () => request<{ pieces: CataloguePiece[]; finishes: { wall: string[]; floor: string[] } }>("GET", "/v1/catalogue"),
+    buy: (pieceId: string, key: string) => request<unknown>("POST", "/v1/home/buy", { pieceId }, { idempotencyKey: key }),
+    place: (itemId: string, placement: Placement) => request<unknown>("PUT", `/v1/home/items/${encodeURIComponent(itemId)}/place`, placement),
+    store: (itemId: string) => request<unknown>("DELETE", `/v1/home/items/${encodeURIComponent(itemId)}/place`),
+    setHome: (patch: { wall?: string; floor?: string; doorOpen?: boolean }) => request<Home>("PATCH", "/v1/home", patch),
+    nap: (itemId: string) => request<LongAction>("POST", "/v1/naps", { itemId }),
+    action: () => request<{ action: LongAction | null }>("GET", "/v1/actions/current"),
+    cancelAction: () => request<unknown>("DELETE", "/v1/actions/current"),
     markets: () => request<MarketRow[]>("GET", "/v1/tower/markets"),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
@@ -177,3 +186,9 @@ export type PublicResident = { userId: string; handle: string; name: string; loo
 
 // A fresh key per user action; reuse the same key when retrying that action.
 export const newKey = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+export type Placement = { layer: "floor" | "rug"; x: number; y: number; rot: 0 | 90 | 180 | 270; color: number } | { layer: "wall"; wall: "n" | "e" | "s" | "w"; offset: number; color: number };
+export type PlacedItem = { itemId: string; pieceId: string; room: string; placement: Placement };
+export type Home = { userId: string; tier: string; wallFinish: string; floorFinish: string; doorOpen: boolean; placed: PlacedItem[]; storage: { itemId: string; pieceId: string; source: string }[] };
+export type CataloguePiece = { id: string; band: string; layer: string; w: number; d: number; price: number | null; burnKind: string; mood?: string };
+// Only running actions come back from the API; finished ones are null.
+export type LongAction = { id: string; kind: string; startedAt: string; endsAt: string };
