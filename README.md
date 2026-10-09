@@ -8,6 +8,7 @@ pnpm monorepo. Built brick by brick; each brick ships with tests against a real 
 | `packages/db` | Drizzle schema, migrations, and the services that touch Postgres |
 | `apps/api` | The HTTP API (Hono): runs on Cloudflare Workers (`src/worker.ts`) and Node for local dev (`src/node.ts`) |
 | `apps/rooms` | The live city: a Cloudflare Worker with a Durable Object per room copy and a directory per place (hibernating WebSockets), tested in real workerd via Miniflare |
+| `apps/city` | The game client (Next.js, three.js via React Three Fiber): runs in the Telegram Mini App and the phone browser |
 
 ## Setup
 
@@ -122,6 +123,13 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Local results** (one Node process, local Postgres, a laptop): 200 bots, 50 at a time: 576 req/s, p99 under 310 ms, no errors. 2,000 bots, 200 at a time: 380 to 670 req/s across runs, p50 200 to 850 ms by route, no errors, with occasional multi-second tails I couldn't pin down on this machine.
    - **What limits it:** most sampled waits were Postgres waiting on the single Node process (Workers scale that out). The real database hot spot was the ledger's system shards, about 13% of waiting time at 16 shards. Moving to 64 shards (migration 0042) cut that to 4.9%; isolated burns ran the same at 16 or 64 (about 1,500/s, versus about 600/s on one row).
    - **Still to do before an open launch:** a distributed load test on Workers with Hyperdrive at tens of thousands of bots, and a look at the multi-second tails there.
+
+## Frontend
+
+`pnpm --filter @bp/city dev` serves the client at http://localhost:3100.
+
+- **Phase 0, the phone test** (in progress). `/room-test` is one cutaway room with 60 residents walking and 10 dimmed away residents, every body part one instanced draw call for the whole crowd: 30 draw calls, 17k triangles, 24 MB JS heap (the budget is 100 to 150 draw calls and 300 MB). `/` is the city board: icon pins with live headcounts, district names painted on the ground, "Coming soon" lots, a live banner (online count, Mayor, Law of the Week), day and night, and map-style dragging kept on the board: 29 draw calls, 4.5k triangles. Flipping day and night 20 times leaves GPU geometry, texture and shader counts unchanged. The camera fits tall phones (wider lens, pulled back) and wide screens.
+  - **Still to do:** frame rate on real mid-range phones inside Telegram (needs the bot token and a domain); desktop browser panes throttle animation, so fps there means nothing. Banner, pins and odds are mock values until phase 1 wires the API.
 
 ## Deploying
 
