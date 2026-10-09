@@ -76,6 +76,13 @@ export async function myTickets(db: Db, userId: string, opts: { now?: Date } = {
   return { tickets: t ? ticketsAfter(t.balance, daysBetween(t.asOf, cityDay(now))) : TOWER.ticketsPerDay, max: TOWER.ticketsMax };
 }
 
+// For other off-slate calls (City markets): spend one ticket, under its lock.
+export async function spendTicket(tx: Db, userId: string, now: Date) {
+  const { balance, today } = await lockTickets(tx, userId, now);
+  if (balance < 1) throw new TowerError("NO_TICKETS", "no tickets left; 3 more at the bell");
+  await tx.update(tickets).set({ balance: balance - 1, asOf: today }).where(eq(tickets.userId, userId));
+}
+
 async function refundTicket(tx: Db, userId: string, now: Date) {
   const { balance, today } = await lockTickets(tx, userId, now);
   await tx.update(tickets).set({ balance: Math.min(TOWER.ticketsMax, balance + 1), asOf: today }).where(eq(tickets.userId, userId));

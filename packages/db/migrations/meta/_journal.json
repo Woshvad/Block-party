@@ -239,6 +239,13 @@
       "when": 1791557988025,
       "tag": "0033_grudge",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791559930447,
+      "tag": "0034_city_markets",
+      "breakpoints": true
     }
   ]
 }

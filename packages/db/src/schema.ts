@@ -1456,3 +1456,56 @@ export const grudgeMatches = pgTable(
     check("grudge_winner", sql`(${t.status} = 'settled') = (${t.winnerId} IS NOT NULL) AND (${t.winnerId} IS NULL OR ${t.winnerId} IN (${t.newcomerId}, ${t.inviterId}))`),
   ],
 );
+
+// City markets: staff-written, settled from game data, GM only.
+export const cityMarketKind = pgEnum("city_market_kind", ["headcount", "manual"]);
+export const cityMarketStatus = pgEnum("city_market_status", ["open", "resolved", "void", "settled", "refunded"]);
+
+export const cityMarkets = pgTable(
+  "city_markets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    question: text("question").notNull(),
+    kind: cityMarketKind("kind").notNull(),
+    place: text("place"),
+    threshold: integer("threshold"),
+    measureAt: timestamp("measure_at", { withTimezone: true }),
+    bellDay: date("bell_day", { mode: "string" }).notNull(), // settles at this day's bell
+    locksAt: timestamp("locks_at", { withTimezone: true }).notNull(),
+    status: cityMarketStatus("status").notNull().default("open"),
+    outcome: boolean("outcome"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    resolvedBy: uuid("resolved_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("city_markets_bell").on(t.bellDay, t.status),
+    check("city_markets_headcount", sql`${t.kind} <> 'headcount' OR (${t.place} IS NOT NULL AND ${t.threshold} > 0 AND ${t.measureAt} IS NOT NULL)`),
+    check("city_markets_outcome", sql`(${t.status} IN ('resolved', 'settled')) = (${t.outcome} IS NOT NULL)`),
+  ],
+);
+
+export const cityPositions = pgTable(
+  "city_positions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    marketId: uuid("market_id")
+      .notNull()
+      .references(() => cityMarkets.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    side: callSide("side").notNull(),
+    stake: integer("stake").notNull(),
+    payout: integer("payout"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("city_positions_one").on(t.marketId, t.userId),
+    index("city_positions_user").on(t.userId),
+    check("city_positions_stake", sql`${t.stake} BETWEEN 1 AND 800 AND (${t.payout} IS NULL OR ${t.payout} >= 0)`),
+  ],
+);

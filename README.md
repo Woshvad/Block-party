@@ -94,6 +94,11 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 30. **The Grudge Match** (done). The one duel a newcomer can play from minute one: against the friend whose crew invite they redeemed (now recorded, first inviter wins), head to head on tomorrow's Slate. 10 GM each in its own escrow, no Snap, once per pair ever in either direction (a unique index, so racing offers make one match), never across a block. Settled at that day's bell only: higher Slate Aura takes the 20 GM pot, a tie gives both back, an unanswered offer goes home.
    - Also fixed: a brick 23 race test whose barrier locked a row that didn't exist yet (flaky), and a test that assumed which Coin Flip sits in which Slate slot.
 31. **Only neighbours move the city's numbers** (done). Per the plan, calls from accounts without Proof of Neighbour never move the City bar or the Aura boards, so one viral link can't brigade a market. One helper (`cityCalls`) now feeds the City bar, receipts, the reel and the paper's Vibe Gap with Proof of Neighbour calls only (never the cast), and the Right List ranks only Proof of Neighbour residents (the cast keeps its labelled rows). The crew bar is unchanged.
+32. **City markets and the Season Stack** (done).
+   - **The markets:** staff write them (a headcount like "20+ on the Roof at the bell?", or a manual one staff resolve), lock 2 hours before the bell, settle at the bell. Residents stake GM once per market with a ticket, inside a cap of 25% of their GM, 100 + 10 a day as a resident (800 at most), 200 before Proof of Neighbour, and 10 while tilted. The cap is checked under a per-resident lock, so two stakes at once can't share a balance.
+   - **Payouts:** winners split the losers' stakes by stake, minus the 2% bell burn on wins over 50 (capped at 500), and rounding dust burns. Paid + burned = staked (property-tested), and a winner never loses GM. One-sided or voided markets refund everyone; an unresolved manual market waits for a later bell.
+   - **Headcounts:** count Proof of Neighbour residents who made a call that day and were in the room at the moment, never away residents or the cast.
+   - **Season Stack:** GM profit on City markets and Fade Duels this season, counted by the market's bell day. City results open the reel.
 
 ## Deploying
 

@@ -797,3 +797,20 @@ describe("the Grudge Match over HTTP", () => {
     expect((await call("GET", "/v1/grudge", { token: me.token })).body).toEqual([]);
   });
 });
+
+describe("City markets over HTTP", () => {
+  it("staff write one, a resident stakes on it; non-staff can't write", async () => {
+    const { client } = await import("./harness");
+    const [staffer, me] = [await resident(), await resident()];
+    await client`INSERT INTO staff (user_id, role) VALUES (${staffer.userId}, 'moderator')`;
+    const day = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    expect((await call("POST", "/v1/staff/city-markets", { token: me.token, body: { question: "Will this be refused?", kind: "manual", bellDay: day } })).status).toBe(403);
+    const m = await call("POST", "/v1/staff/city-markets", { token: staffer.token, body: { question: "Will the API test pass?", kind: "manual", bellDay: day } });
+    expect(m.status).toBe(201);
+    expect((await call("GET", "/v1/city-markets", { token: me.token })).body.some((x: { id: string }) => x.id === m.body.id)).toBe(true);
+    expect((await call("POST", `/v1/city-markets/${m.body.id}/stake`, { token: me.token, body: { side: "yes", stake: 20 } })).status).toBe(201);
+    expect((await call("POST", `/v1/city-markets/${m.body.id}/stake`, { token: me.token, body: { side: "yes", stake: 20 } })).status).toBe(409);
+    expect((await call("POST", `/v1/staff/city-markets/${m.body.id}/resolve`, { token: staffer.token, body: { result: "yes" } })).body).toMatchObject({ result: "yes" });
+    expect((await call("GET", "/v1/season-stack", { token: me.token })).body).toMatchObject({ season: expect.any(Number) });
+  });
+});

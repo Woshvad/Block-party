@@ -1,13 +1,14 @@
 import { type CityDay, NPC_IDS, addDays, bellScoreMilli, bellStampFor, cityDay, median, userAccountId } from "@bp/core";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { chainStatus } from "./chain";
+import { settleCityMarkets } from "./city-markets";
 import { duelLines, settleDuels } from "./duels";
 import { settleGrudges } from "./grudge";
 import type { Db } from "./client";
 import { economyReport } from "./economy";
 import { mint } from "./ledger";
 import { grantMood, maybeTilt } from "./moods";
-import { bellStamps, calls, crewBellScores, crewMembers, crews, duels, markets, residents, slateCards } from "./schema";
+import { bellStamps, calls, cityMarkets, crewBellScores, crewMembers, crews, duels, markets, residents, slateCards } from "./schema";
 import { myGrid } from "./slate";
 import { cityCalls, settleCalls } from "./tower";
 
@@ -34,6 +35,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   // Duels settle at the bell too: the bell is the reveal.
   const duelsSettled = (await settleDuels(db, { now })).settled;
   const grudgesSettled = (await settleGrudges(db, bellDay, now)).settled;
+  const cityMarketsSettled = (await settleCityMarkets(db, bellDay, now)).settled;
   const from = dayStart(bellDay);
   const to = dayStart(addDays(bellDay, 1));
   const receipts = await db
@@ -128,7 +130,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
       .values({ bellDay, crewId, chips: t.chips, longShots: t.longShots, chainDays, scoreMilli: bellScoreMilli({ ...t, chainDays }) })
       .onConflictDoNothing();
   }
-  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled };
+  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled, cityMarketsSettled };
 }
 
 // --- Bell Stamps ------------------------------------------------------------------------
@@ -197,8 +199,14 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     .from(slateCards)
     .innerJoin(markets, eq(markets.id, slateCards.marketId))
     .where(and(eq(slateCards.cityDay, addDays(bellDay, 1)), eq(slateCards.tier, "long_shot")));
+  // City markets come first on the reel, smallest to biggest.
+  const city = await db
+    .select({ question: cityMarkets.question, outcome: cityMarkets.outcome, status: cityMarkets.status })
+    .from(cityMarkets)
+    .where(and(eq(cityMarkets.bellDay, bellDay), inArray(cityMarkets.status, ["settled", "refunded"])));
   return {
     bellDay,
+    cityMarkets: city.map((c) => ({ question: c.question, result: c.status === "refunded" ? "void" : c.outcome ? "yes" : "no" })),
     slate: cards.map((c) => {
       const cs = chances.filter((x) => x.marketId === c.marketId).map((x) => x.chance);
       return { slot: c.slot, tier: c.tier, question: c.question, result: c.status === "void" ? "void" : c.outcome === null ? "pending" : c.outcome ? "yes" : "no", world: c.world, city: cs.length >= 10 ? median(cs) : null };

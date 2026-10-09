@@ -168,6 +168,11 @@ import {
   respondGrudge,
   cancelGrudge,
   myGrudges,
+  createCityMarket,
+  resolveCityMarket,
+  stakeCity,
+  openCityMarkets,
+  seasonStack,
   reel,
   setCrewBotMutes,
   startNap,
@@ -870,6 +875,15 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/grudge", auth, async (c) => c.json(await offerGrudge(db, c.get("userId"), opts()), 201));
   app.post("/v1/grudge/:id/respond", auth, async (c) => c.json(await respondGrudge(db, c.get("userId"), uuid(c, "id"), (await body(c)).accept, opts())));
   app.post("/v1/grudge/:id/cancel", auth, async (c) => c.json(await cancelGrudge(db, c.get("userId"), uuid(c, "id"), opts())));
+  // City markets: staff-written, GM only, settled at the bell.
+  app.get("/v1/city-markets", auth, async (c) => c.json(await openCityMarkets(db, opts())));
+  app.post("/v1/city-markets/:id/stake", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await stakeCity(db, c.get("userId"), { marketId: uuid(c, "id"), side: b.side, stake: b.stake }, opts()), 201);
+  });
+  app.get("/v1/season-stack", auth, async (c) => c.json(await seasonStack(db, opts())));
+  app.post("/v1/staff/city-markets", auth, async (c) => c.json(await createCityMarket(db, c.get("userId"), await body(c), opts()), 201));
+  app.post("/v1/staff/city-markets/:id/resolve", auth, async (c) => c.json(await resolveCityMarket(db, c.get("userId"), uuid(c, "id"), (await body(c)).result, opts())));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
