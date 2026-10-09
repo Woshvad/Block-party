@@ -162,6 +162,13 @@
       "when": 1791532330250,
       "tag": "0022_proof_of_neighbour",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791533344045,
+      "tag": "0023_notifications",
+      "breakpoints": true
     }
   ]
 }

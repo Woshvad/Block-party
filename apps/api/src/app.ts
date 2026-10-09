@@ -130,6 +130,12 @@ import {
   updateGoal,
   updateLook,
   updateName,
+  type NotificationSender,
+  getPrefs,
+  setPrefs,
+  markOpened,
+  runNotificationBatch,
+  setCrewBotMutes,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -178,6 +184,8 @@ export type AppConfig = {
   phoneVerifier?: PhoneVerifier;
   cryptoProofs?: CryptoProofVerifier;
   ponPepper?: string;
+  // Push delivery (Telegram bot messages).
+  notifier?: NotificationSender;
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -733,6 +741,17 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/shifts/:id/answers", auth, async (c) => c.json(await submitShift(db, c.get("userId"), uuid(c, "id"), (await body(c)).answers, opts())));
   app.post("/v1/shifts/:id/collect", auth, async (c) => c.json(await collectShift(db, c.get("userId"), uuid(c, "id"), opts())));
 
+  // --- Notifications --------------------------------------------------------
+
+  app.get("/v1/notifications/prefs", auth, async (c) => c.json(await getPrefs(db, c.get("userId"))));
+  app.patch("/v1/notifications/prefs", auth, async (c) => c.json(await setPrefs(db, c.get("userId"), await body(c))));
+  app.post("/v1/notifications/:id/opened", auth, async (c) => {
+    await markOpened(db, c.get("userId"), uuid(c, "id"), opts());
+    return c.body(null, 204);
+  });
+  // The crew group bot: the lead and deputies choose which posts it makes.
+  app.put("/v1/crews/mine/bot-mutes", auth, async (c) => c.json(await setCrewBotMutes(db, c.get("userId"), (await body(c)).kinds)));
+
   // --- Internal (cron and ops), behind a shared secret ----------------------
 
   const internal = async (c: C, next: () => Promise<void>) => {
@@ -742,6 +761,10 @@ export function createApp(cfg: AppConfig) {
     }
     await next();
   };
+  app.post("/internal/notifications/run", internal, async (c) => {
+    if (!cfg.notifier) throw new ApiError(503, "NOTIFICATIONS_DISABLED", "no push sender configured");
+    return c.json(await runNotificationBatch(db, cfg.notifier, opts()));
+  });
   app.post("/internal/bell", internal, async (c) => c.json(await runBell(db, opts())));
   app.post("/internal/moderation/run", internal, async (c) => {
     if (!cfg.moderation) throw new ApiError(503, "MODERATION_DISABLED", "no moderation provider configured");

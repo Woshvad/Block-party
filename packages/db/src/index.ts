@@ -10,6 +10,7 @@ export * from "./economy";
 export * from "./home";
 export * from "./ledger";
 export * from "./moods";
+export * from "./notify";
 export * from "./politics";
 export * from "./pon";
 export * from "./ratelimit";

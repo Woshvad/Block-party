@@ -1,7 +1,7 @@
 import { shiftPuzzle } from "@bp/core";
 import { createDb } from "@bp/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ORIGIN, SECRET, app, arrive, call, close, idem, logs, makeApp, ready, resident, telegramInit } from "./harness";
+import { ORIGIN, SECRET, app, arrive, call, close, idem, logs, makeApp, pushes, ready, resident, telegramInit } from "./harness";
 
 beforeAll(ready);
 afterAll(close);
@@ -566,5 +566,54 @@ describe("Proof of Neighbour over HTTP", () => {
     const u = await resident();
     expect((await call("POST", "/v1/pon/phone", { token: u.token, body: { phone: "+2348011111111" }, via: bare })).status).toBe(503);
     expect((await call("POST", "/v1/pon/crypto", { token: u.token, body: { kind: "world_id", proof: {} }, via: bare })).status).toBe(503);
+  });
+});
+
+describe("notifications over HTTP", () => {
+  const internal = { "x-internal-secret": SECRET };
+
+  it("prefs: read, change, refuse junk; another resident's are untouched", async () => {
+    const [me, other] = [await resident(), await resident()];
+    expect((await call("GET", "/v1/notifications/prefs", { token: me.token })).body).toMatchObject({ timeZone: "UTC", alerts: [], pushOff: false });
+    const ok = await call("PATCH", "/v1/notifications/prefs", { token: me.token, body: { timeZone: "Africa/Lagos", alerts: ["snap"] } });
+    expect(ok.status).toBe(200);
+    expect(ok.body).toMatchObject({ timeZone: "Africa/Lagos", alerts: ["snap"] });
+    for (const bad of [{ timeZone: "Nowhere/Land" }, { quietStart: 99 }, { alerts: ["wallet"] }, { pushOff: 1 }])
+      expect((await call("PATCH", "/v1/notifications/prefs", { token: me.token, body: bad })).status).toBe(400);
+    expect((await call("GET", "/v1/notifications/prefs", { token: other.token })).body.timeZone).toBe("UTC");
+    expect((await call("GET", "/v1/notifications/prefs")).status).toBe(401);
+  });
+
+  it("the dispatcher sends due pings; opening one is the owner's only", async () => {
+    const { client } = await import("./harness");
+    const { notify } = await import("@bp/db");
+    const { db } = await import("./harness");
+    const [me, other] = [await resident(), await resident()];
+    await call("PATCH", "/v1/notifications/prefs", { token: me.token, body: { quietStart: 0, quietEnd: 0 } }); // no quiet hours, whatever the test clock
+    const n = await notify(db, me.userId, "daily", {});
+    const run = await call("POST", "/internal/notifications/run", { headers: internal });
+    expect(run.status).toBe(200);
+    expect(pushes.filter((p) => p.userId === me.userId)).toHaveLength(1);
+    expect((await call("POST", "/internal/notifications/run")).status).toBe(404); // no secret, no route
+    expect((await call("POST", `/v1/notifications/${n!.id}/opened`, { token: other.token })).status).toBe(204);
+    expect((await client`SELECT opened_at FROM notifications WHERE id = ${n!.id}`)[0]!.opened_at).toBeNull();
+    expect((await call("POST", "/v1/notifications/not-a-uuid/opened", { token: me.token })).status).toBe(404);
+    expect((await call("POST", `/v1/notifications/${n!.id}/opened`, { token: me.token })).status).toBe(204);
+    expect((await client`SELECT opened_at FROM notifications WHERE id = ${n!.id}`)[0]!.opened_at).not.toBeNull();
+  });
+
+  it("no push sender configured: a clear 503", async () => {
+    expect((await call("POST", "/internal/notifications/run", { headers: internal, via: makeApp({ notifier: undefined }) })).status).toBe(503);
+  });
+
+  it("crew bot mutes: the lead yes, a member no, someone crewless no", async () => {
+    const [lead, member, loner] = [await resident(), await resident(), await resident()];
+    const crew = await call("POST", "/v1/crews", { token: lead.token, body: { name: `Pings ${Math.random().toString(36).slice(2, 7)}`, joinPolicy: "open" } });
+    expect(crew.status).toBe(201);
+    expect((await call("POST", `/v1/crews/${crew.body.id}/join`, { token: member.token })).status).toBeLessThan(300);
+    expect((await call("PUT", "/v1/crews/mine/bot-mutes", { token: lead.token, body: { kinds: ["crew_card"] } })).body).toEqual({ muted: ["crew_card"] });
+    expect((await call("PUT", "/v1/crews/mine/bot-mutes", { token: member.token, body: { kinds: [] } })).status).toBe(403);
+    expect((await call("PUT", "/v1/crews/mine/bot-mutes", { token: loner.token, body: { kinds: [] } })).status).toBe(403);
+    expect((await call("PUT", "/v1/crews/mine/bot-mutes", { token: lead.token, body: { kinds: "all" } })).status).toBe(400);
   });
 });

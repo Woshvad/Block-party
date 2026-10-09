@@ -17,3 +17,4 @@ export * from "./room";
 export * from "./ticket";
 export * from "./rides";
 export * from "./away";
+export * from "./notifications";

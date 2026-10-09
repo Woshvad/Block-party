@@ -1034,3 +1034,76 @@ export const phoneChecks = pgTable(
   },
   (t) => [index("phone_checks_user").on(t.userId, t.createdAt), check("phone_checks_status", sql`${t.status} IN ('pending','verified','failed')`)],
 );
+
+// --- Notifications ------------------------------------------------------------------
+
+export const notificationPrefs = pgTable(
+  "notification_prefs",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id),
+    timeZone: text("time_zone").notNull().default("UTC"),
+    quietStart: integer("quiet_start").notNull().default(23),
+    quietEnd: integer("quiet_end").notNull().default(8),
+    alerts: text("alerts").array().notNull().default(sql`'{}'::text[]`),
+    bell2h: boolean("bell_2h").notNull().default(false),
+    pushOff: boolean("push_off").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("notification_prefs_hours", sql`${t.quietStart} BETWEEN 0 AND 23 AND ${t.quietEnd} BETWEEN 0 AND 23`)],
+);
+
+export const notificationStatus = pgEnum("notification_status", ["queued", "sent", "suppressed", "failed"]);
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    kind: text("kind").notNull(),
+    values: jsonb("values").$type<Record<string, string | number>>().notNull().default({}),
+    status: notificationStatus("status").notNull().default("queued"),
+    reason: text("reason"),
+    template: text("template"),
+    text: text("text"),
+    localDay: text("local_day"),
+    attempts: integer("attempts").notNull().default(0),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("notifications_due").on(t.scheduledFor).where(sql`${t.status} = 'queued'`),
+    index("notifications_user").on(t.userId, t.createdAt),
+    check("notifications_sent", sql`(${t.status} = 'sent') = (${t.sentAt} IS NOT NULL)`),
+  ],
+);
+
+// The Telegram bot in a crew group: at most 3 posts a city day; leads mute types.
+export const crewBotPosts = pgTable(
+  "crew_bot_posts",
+  {
+    crewId: uuid("crew_id")
+      .notNull()
+      .references(() => crews.id),
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    kind: text("kind").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.crewId, t.cityDay, t.kind] })],
+);
+
+export const crewBotMutes = pgTable(
+  "crew_bot_mutes",
+  {
+    crewId: uuid("crew_id")
+      .notNull()
+      .references(() => crews.id),
+    kind: text("kind").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.crewId, t.kind] })],
+);

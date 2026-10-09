@@ -24,6 +24,15 @@ export const fakeRooms = {
 };
 export const TICKET_SECRET = "k".repeat(40);
 
+// A stand-in push channel: records what would have gone to Telegram.
+export const pushes: Array<{ userId: string; text: string }> = [];
+export const fakeNotifier = {
+  send: async (userId: string, text: string) => {
+    pushes.push({ userId, text });
+    return "sent" as const;
+  },
+};
+
 export function makeApp(over: Partial<AppConfig> = {}) {
   return createApp({
     db,
@@ -40,6 +49,7 @@ export function makeApp(over: Partial<AppConfig> = {}) {
     ponPepper: "q".repeat(40),
     roomsUrl: "https://rooms.test",
     ticketSecret: TICKET_SECRET,
+    notifier: fakeNotifier,
     ...over,
   });
 }
