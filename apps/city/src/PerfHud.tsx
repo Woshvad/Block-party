@@ -2,6 +2,9 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useRef } from "react";
 
+// The meter shows on the room test, or anywhere with ?perf in the address.
+export const SHOW_PERF = typeof location !== "undefined" && (/[?&]perf\b/.test(location.search) || location.pathname === "/room-test");
+
 // Frame rate, draw calls, triangles and JS memory, written straight to a DOM
 // node (no React re-render per frame). Lives inside the Canvas.
 export function PerfProbe({ target }: { target: React.RefObject<HTMLDivElement | null> }) {

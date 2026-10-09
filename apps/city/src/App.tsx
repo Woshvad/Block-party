@@ -9,6 +9,8 @@ const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
 const MoveIn = dynamic(() => import("./MoveIn"), { ssr: false });
 const Today = dynamic(() => import("./Today"), { ssr: false });
 const Tower = dynamic(() => import("./Tower"), { ssr: false });
+const Travel = dynamic(() => import("./Travel"), { ssr: false });
+const LiveRoom = dynamic(() => import("./LiveRoom"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -120,13 +122,42 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
     return h === "today" || h === "tower" ? h : "city";
   });
   const [me, setMe] = useState(first);
+  const [trip, setTrip] = useState<{ place: string; ridesFree: boolean } | null>(null);
+  const [room, setRoom] = useState<string | null>(null);
   const go = (t: Tab) => {
     setTab(t);
     history.replaceState(null, "", t === "city" ? location.pathname + location.search : `#${t}`);
   };
+  const refreshGm = () => void api.me().then((m) => setMe(m)).catch(() => {});
+  if (room) {
+    return (
+      <LiveRoom
+        api={api}
+        place={room}
+        onLeave={() => {
+          setRoom(null);
+          refreshGm();
+        }}
+      />
+    );
+  }
   return (
     <>
-      {tab === "city" && <CityBoard api={api} me={me} onOpenToday={() => go("today")} />}
+      {tab === "city" && <CityBoard api={api} me={me} onOpenToday={() => go("today")} onPlace={(place, ridesFree) => setTrip({ place, ridesFree })} />}
+      {trip && (
+        <Travel
+          api={api}
+          place={trip.place}
+          gm={me.gm}
+          ridesFree={trip.ridesFree}
+          onCancel={() => setTrip(null)}
+          onArrive={() => {
+            setRoom(trip.place);
+            setTrip(null);
+            refreshGm();
+          }}
+        />
+      )}
       {tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} />}
       {tab === "tower" && <Tower api={api} />}
       <nav className="tabs">

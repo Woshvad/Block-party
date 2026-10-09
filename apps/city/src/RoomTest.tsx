@@ -4,7 +4,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ROOM, type Resident, animatedThisFrame, makeCrowd, rng, stepCrowd, walking } from "./crowd";
-import { PerfProbe } from "./PerfHud";
+import { PerfProbe, SHOW_PERF } from "./PerfHud";
 import { initTelegram } from "./telegram";
 
 // The plan's week-1 phone test: one room, 60 residents and 10 dimmed away
@@ -165,7 +165,11 @@ export default function RoomTest() {
     <>
       <div className="hud">
         <div className="pill">Room test · 60 here · 10 away</div>
-        <div className="perf" ref={perf}>measuring…</div>
+        {SHOW_PERF && (
+          <div className="perf" ref={perf}>
+            measuring…
+          </div>
+        )}
       </div>
       <div className="stage">
         <Canvas dpr={[1, 2]} camera={{ position: [14, 15, 17], fov: 38 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
@@ -176,7 +180,7 @@ export default function RoomTest() {
           <Crowd crowd={crowd} away={false} />
           <Crowd crowd={crowd} away />
           <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={12} maxDistance={34} target={[0, 0, 0]} />
-          <PerfProbe target={perf} />
+          {SHOW_PERF && <PerfProbe target={perf} />}
         </Canvas>
       </div>
     </>

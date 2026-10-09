@@ -111,6 +111,11 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     market: (id: string) => request<MarketView>("GET", `/v1/tower/markets/${encodeURIComponent(id)}`),
     call: (c: { marketId: string; side: Side; chance: number; seenPrice: number }) => request<CallMade>("POST", "/v1/tower/calls", c),
     myCall: (id: string) => request<CallStatus>("GET", `/v1/tower/calls/${encodeURIComponent(id)}`),
+    whereabouts: () => request<Whereabouts>("GET", "/v1/whereabouts"),
+    // The key makes a retried tap the same ride: never charged twice.
+    ride: (to: string, mode: string, key: string) => request<{ ride: Ride; replayed: boolean }>("POST", "/v1/rides", { to, mode }, { idempotencyKey: key }),
+    roomTicket: (place: string) => request<{ ticket: string; url: string }>("POST", "/v1/rooms/ticket", { place }),
+    resident: (handle: string) => request<PublicResident>("GET", `/v1/residents/${encodeURIComponent(handle)}`),
     markets: () => request<MarketRow[]>("GET", "/v1/tower/markets"),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
@@ -166,3 +171,9 @@ export type CallMade = { id: string; status: CallState; side: Side; chance: numb
 export type CallStatus = { id: string; marketId: string; side: Side; chance: number; status: CallState; lockedPrice: number | null };
 export type CallState = "pending" | "locked" | "price_moved" | "expired";
 export type MarketRow = { id: string; question: string; category: string; price: number; freezesAt: string; infoOnly: boolean };
+export type Whereabouts = { area: string; arrived: boolean; arriveAt: string | null; from: string | null };
+export type Ride = { id: string; fromArea: string; toArea: string; mode: string; fare: number; busId: string | null; departedAt: string; arriveAt: string };
+export type PublicResident = { userId: string; handle: string; name: string; look: Look } & Record<string, unknown>;
+
+// A fresh key per user action; reuse the same key when retrying that action.
+export const newKey = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");

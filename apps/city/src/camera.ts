@@ -5,13 +5,13 @@ export const BOARD = { width: 34, depth: 26 } as const;
 // A phone held upright sees far less width than a laptop. Widen the lens and
 // pull back on tall screens so about `seeWidth` world units fit across, then
 // let the player drag to see the rest (like a map).
-export function fitCamera(aspect: number, seeWidth = 22): { fov: number; distance: number } {
+export function fitCamera(aspect: number, seeWidth = 22, range: { min: number; max: number } = { min: 26, max: 60 }): { fov: number; distance: number } {
   const a = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
   const fov = a < 1 ? 50 : 36;
   const halfH = (fov * Math.PI) / 360;
   const halfW = Math.atan(Math.tan(halfH) * a);
   const distance = seeWidth / 2 / Math.tan(halfW);
-  return { fov, distance: Math.min(Math.max(distance, 26), 60) };
+  return { fov, distance: Math.min(Math.max(distance, range.min), range.max) };
 }
 
 // Keeps the camera's focus point on the board while dragging.

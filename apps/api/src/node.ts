@@ -4,6 +4,7 @@ import { mockProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { createApp } from "./app";
 import { runMinute } from "./cron";
+import { httpRoomsClient } from "./rooms-client";
 
 // Local dev server. Production runs src/worker.ts on Cloudflare Workers.
 const need = (k: string) => {
@@ -25,6 +26,10 @@ const app = createApp({
   // Dev and load tests only: trust a header for the client IP (Cloudflare's cf-connecting-ip in production).
   ...(process.env.CLIENT_IP_HEADER ? { clientIpHeader: process.env.CLIENT_IP_HEADER } : {}),
   ...(process.env.ODDS_SOURCE === "mock" ? { odds: mockProvider(() => sampleMarkets(new Date())) } : {}),
+  // The live rooms (pnpm --filter @bp/rooms dev), wired as on Workers.
+  ...(process.env.ROOMS_URL && process.env.TICKET_SECRET
+    ? { rooms: httpRoomsClient({ url: process.env.ROOMS_URL, secret: need("INTERNAL_SECRET") }), roomsUrl: process.env.ROOMS_URL, ticketSecret: process.env.TICKET_SECRET }
+    : {}),
 });
 // LOCAL_CRON=1: run the Worker's minute cron here too, so a local city has a
 // bell, live odds and a Slate. Notifications aren't sent (no real bot locally).

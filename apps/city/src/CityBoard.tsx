@@ -7,7 +7,7 @@ import { BOARD, clampTarget, fitCamera } from "./camera";
 import type { Api, Me } from "./api";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
-import { PerfProbe } from "./PerfHud";
+import { PerfProbe, SHOW_PERF } from "./PerfHud";
 import { haptic, initTelegram } from "./telegram";
 
 // The city board: low-poly blocks from an angled camera, a pin with a live
@@ -191,6 +191,11 @@ function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) 
         <Building key={p.key} p={p} night={night} onTap={onTap} />
       ))}
       <TowerTop night={night} />
+      <Html position={[0, 13.2, 0]} center distanceFactor={40} zIndexRange={[1, 0]}>
+        <button className="pin" onClick={() => onTap({ ...PLACES[0]!, key: "roof", name: "The Roof", icon: "🌃", info: "Where the city watches the bell ring" })} aria-label="The Roof">
+          <span className="ico">🌃</span>
+        </button>
+      </Html>
       {HOMES.map((h, i) => (
         <mesh key={i} position={[h.x, 0.8, h.z]}>
           <boxGeometry args={[1.8, 1.6, 1.8]} />
@@ -209,7 +214,7 @@ function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) 
   );
 }
 
-export default function CityBoard({ api, me, onOpenToday }: { api: Api; me: Me; onOpenToday?: () => void }) {
+export default function CityBoard({ api, me, onOpenToday, onPlace }: { api: Api; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void }) {
   const hall = useLoad(() => api.cityHall(), [api]);
   const slate = useLoad(() => api.slate(), [api]);
   const now = useNow(1000);
@@ -264,15 +269,19 @@ export default function CityBoard({ api, me, onOpenToday }: { api: Api; me: Me; 
         <button className="pill" onClick={() => setNight((n) => !n)}>
           {night ? "Show day" : "Show night"}
         </button>
-        <div className="perf" ref={perf}>
-          measuring…
-        </div>
+        {SHOW_PERF && (
+          <div className="perf" ref={perf}>
+            measuring…
+          </div>
+        )}
       </div>
       {picked && (
         <div className="sheet" onClick={() => setPicked(null)}>
-          <strong>{picked.name}</strong>
+          <strong>
+            {picked.icon} {picked.name}
+          </strong>
           <span className="muted">{picked.info}</span>
-          <span className="go">Walk (free) · Rollup 5 GM · Priority 15 GM</span>
+          <span className="go">Move in to visit: open Block Party in Telegram.</span>
         </div>
       )}
       <div className="stage" style={{ background: night ? "#0b1020" : "#dfeaf5" }}>
@@ -284,7 +293,9 @@ export default function CityBoard({ api, me, onOpenToday }: { api: Api; me: Me; 
             night={night}
             onTap={(p) => {
               haptic("light");
-              setPicked(p);
+              // Residents go there; guests can only look.
+              if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
+              else setPicked(p);
             }}
           />
           <CameraRig />
@@ -309,7 +320,7 @@ export default function CityBoard({ api, me, onOpenToday }: { api: Api; me: Me; 
               }
             }}
           />
-          <PerfProbe target={perf} />
+          {SHOW_PERF && <PerfProbe target={perf} />}
         </Canvas>
       </div>
     </>

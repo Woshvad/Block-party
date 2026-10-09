@@ -20,6 +20,16 @@
         "dev"
       ],
       "port": 8787
+    },
+    {
+      "name": "rooms",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@bp/rooms",
+        "dev"
+      ],
+      "port": 8788
     }
   ]
 }

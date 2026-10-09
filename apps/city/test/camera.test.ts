@@ -29,6 +29,16 @@ describe("fitCamera", () => {
   });
 });
 
+describe("fitCamera for rooms", () => {
+  it("fits any room on a phone, inside the room's own zoom range", () => {
+    for (const span of [8, 10, 16, 20, 30]) {
+      const { distance } = fitCamera(390 / 844, span * 1.25, { min: span * 0.9, max: span * 3 });
+      expect(distance).toBeGreaterThanOrEqual(span * 0.9);
+      expect(distance).toBeLessThanOrEqual(span * 3);
+    }
+  });
+});
+
 describe("clampTarget", () => {
   it("keeps the focus on the board", () => {
     expect(clampTarget(0, 0)).toEqual({ x: 0, z: 0 });
