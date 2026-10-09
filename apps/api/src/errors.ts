@@ -29,6 +29,7 @@ import {
   SyndicateError,
   RatioError,
   LightsError,
+  RealMoneyError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -270,7 +271,9 @@ const RATIO: Record<RatioError["code"], number> = {
 
 const LIGHTS: Record<LightsError["code"], number> = { NOT_ALLOWED: 403, INVALID_INPUT: 400, UNDER_RESERVE: 409, NOT_HIGHER: 409, NOT_ENOUGH_GM: 409 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET, SYNDICATE, RATIO, LIGHTS };
+const REAL_MONEY: Record<RealMoneyError["code"], number> = { INVALID_INPUT: 400, UNDER_18: 403, NOT_SET_UP: 409, NOT_YET: 409, NO_SUCH_RAISE: 404, ON_A_BREAK: 409, NOT_STAFF: 403 };
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET, SYNDICATE, RATIO, LIGHTS, REAL_MONEY };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -296,6 +299,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
+  if (e instanceof RealMoneyError) return out(REAL_MONEY[e.code], e.code, e.message);
   if (e instanceof LightsError) return out(LIGHTS[e.code], e.code, e.message);
   if (e instanceof RatioError) return out(RATIO[e.code], e.code, e.message);
   if (e instanceof SyndicateError) return out(SYNDICATE[e.code], e.code, e.message);

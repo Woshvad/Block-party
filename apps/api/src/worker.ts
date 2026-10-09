@@ -22,6 +22,8 @@ type Env = {
   // "on" once the alt checks are live.
   FEATURE_DUELS?: string;
   FEATURE_TOWER_LIGHTS?: string;
+  // "on" only after the legal opinion.
+  FEATURE_REAL_MONEY?: string;
 };
 
 const oddsFor = (env: Env) => (env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
@@ -47,7 +49,8 @@ export default {
       notifier: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }),
       ...(oddsFor(env) ? { odds: oddsFor(env) } : {}),
       ...(env.RECEIPT_SECRET ? { receiptSecret: env.RECEIPT_SECRET } : {}),
-      features: { duels: env.FEATURE_DUELS === "on", towerLights: env.FEATURE_TOWER_LIGHTS === "on" },
+      features: { duels: env.FEATURE_DUELS === "on", towerLights: env.FEATURE_TOWER_LIGHTS === "on", realMoney: env.FEATURE_REAL_MONEY === "on" },
+      countryHeader: "cf-ipcountry",
     });
     const res = await app.fetch(req);
     ctx.waitUntil(close());

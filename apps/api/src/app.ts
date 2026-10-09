@@ -1,5 +1,6 @@
 import {
   parseBunker,
+  feeQuote,
   type OddsProvider,
   receiptToken,
   verifyReceiptToken,
@@ -180,6 +181,14 @@ import {
   bidLights,
   lightsBoard,
   staffAltFlags,
+  setupReal,
+  changeLimit,
+  confirmRaise,
+  takeBreak,
+  askBack,
+  setCountrySwitch,
+  realTradeGate,
+  inFirstSession,
   createCityMarket,
   resolveCityMarket,
   stakeCity,
@@ -257,7 +266,9 @@ export type AppConfig = {
   receiptSecret?: string;
   // Switches for features the plan turns on mid-beta (Fade Duels wait for
   // the alt checks). Off unless set.
-  features?: { duels?: boolean; towerLights?: boolean };
+  features?: { duels?: boolean; towerLights?: boolean; realMoney?: boolean };
+  // Where the request comes from, as the edge sees it (cf-ipcountry on Cloudflare).
+  countryHeader?: string;
 };
 
 type Vars = { requestId: string; userId: string; status: "guest" | "claimed"; sessionToken: string };
@@ -945,6 +956,51 @@ export function createApp(cfg: AppConfig) {
     if (!flags) throw new ApiError(403, "NOT_STAFF", "staff only");
     return c.json(flags);
   });
+  // --- Real money, safely (behind FEATURE_REAL_MONEY until the legal opinion) ---
+  app.post("/v1/real/setup", auth, async (c) => c.json(await setupReal(db, c.get("userId"), await body(c), opts()), 201));
+  app.patch("/v1/real/limits", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await changeLimit(db, c.get("userId"), b.kind, b.cents, opts()));
+  });
+  app.post("/v1/real/limits/:id/confirm", auth, async (c) => c.json(await confirmRaise(db, c.get("userId"), uuid(c, "id"), opts())));
+  app.post("/v1/real/break", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await takeBreak(db, c.get("userId"), b.kind, b.length, opts()), 201);
+  });
+  app.post("/v1/real/ask-back", auth, async (c) => c.json(await askBack(db, c.get("userId"), opts())));
+  app.get("/v1/real/fees", auth, async (c) => {
+    const amount = Number(c.req.query("amountCents"));
+    const pm = Number(c.req.query("polymarketFeeCents") ?? 0);
+    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 100_00 || !Number.isSafeInteger(pm) || pm < 0 || pm > amount) throw new ApiError(400, "INVALID_INPUT", "amountCents (1 to 10000) and polymarketFeeCents");
+    return c.json(feeQuote(amount, pm));
+  });
+  // Whether "Back it for real" may show. The device reports its own location
+  // check; the edge reports the country; both must agree.
+  app.post("/v1/real/gate", auth, async (c) => {
+    const b = await body(c);
+    const country = (cfg.countryHeader && c.req.header(cfg.countryHeader)) || null;
+    const amountCents = b.amountCents === undefined ? null : b.amountCents;
+    if (amountCents !== null && (!Number.isSafeInteger(amountCents) || (amountCents as number) <= 0)) throw new ApiError(400, "INVALID_INPUT", "amountCents");
+    if (b.marketId !== undefined && (typeof b.marketId !== "string" || !UUID.test(b.marketId))) throw new ApiError(400, "INVALID_INPUT", "marketId");
+    const locationOk = b.deviceLocationOk === true && typeof b.deviceCountry === "string" && country !== null && b.deviceCountry === country;
+    return c.json(
+      await realTradeGate(
+        db,
+        c.get("userId"),
+        {
+          switchOn: !!cfg.features?.realMoney,
+          country,
+          locationOk,
+          firstSession: await inFirstSession(db, c.get("userId")),
+          inMiniApp: c.req.header("x-client") === "telegram-mini-app",
+          marketId: b.marketId as string | undefined,
+          amountCents: amountCents as number | null,
+        },
+        opts(),
+      ),
+    );
+  });
+  app.put("/v1/staff/countries/:code", auth, async (c) => c.json(await setCountrySwitch(db, c.get("userId"), c.req.param("code"), (await body(c)).on, opts())));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.

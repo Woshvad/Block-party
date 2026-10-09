@@ -871,3 +871,28 @@ describe("Tower Lights over HTTP", () => {
     expect((await call("GET", "/v1/tower-lights", { token: me.token })).body).toMatchObject({ reserve: expect.any(Number), mine: null });
   });
 });
+
+describe("real money over HTTP", () => {
+  it("off until the legal opinion; on, the device and the edge must agree, the country must be on, never a first session or the Mini App", async () => {
+    const { client } = await import("./harness");
+    const me = await resident();
+    const gate = (via: ReturnType<typeof makeApp>, body: Record<string, unknown>, headers: Record<string, string> = { "cf-ipcountry": "QQ" }) =>
+      call("POST", "/v1/real/gate", { token: me.token, via, body, headers }).then((r) => r.body);
+    expect(await gate(app, { deviceLocationOk: true, deviceCountry: "QQ" })).toEqual({ ok: false, reason: "switch_off" });
+    const on = makeApp({ features: { realMoney: true } });
+    expect((await call("POST", "/v1/real/setup", { token: me.token, via: on, body: { birthYear: 1990, notRestricted: true, noVpn: true, weeklyCents: 5000, monthlyCents: 20000, lossCents: 10000 } })).status).toBe(201);
+    expect(await gate(on, { deviceLocationOk: true, deviceCountry: "QQ" })).toEqual({ ok: false, reason: "country_off" });
+    const [staffer] = [await resident()];
+    await client`INSERT INTO staff (user_id, role) VALUES (${staffer.userId}, 'admin')`;
+    expect((await call("PUT", "/v1/staff/countries/QQ", { token: me.token, via: on, body: { on: true } })).status).toBe(403);
+    expect((await call("PUT", "/v1/staff/countries/QQ", { token: staffer.token, via: on, body: { on: true } })).body).toEqual({ country: "QQ", realTrades: true });
+    expect(await gate(on, { deviceLocationOk: true, deviceCountry: "RR" })).toEqual({ ok: false, reason: "location" }); // device and edge disagree
+    expect(await gate(on, { deviceLocationOk: false, deviceCountry: "QQ" })).toEqual({ ok: false, reason: "location" });
+    expect(await gate(on, { deviceLocationOk: true, deviceCountry: "QQ" })).toEqual({ ok: false, reason: "first_session" });
+    await client`INSERT INTO play_sessions (user_id, started_at, last_seen_at) VALUES (${me.userId}, now() - interval '3 days', now() - interval '3 days')`;
+    expect(await gate(on, { deviceLocationOk: true, deviceCountry: "QQ" }, { "cf-ipcountry": "QQ", "x-client": "telegram-mini-app" })).toEqual({ ok: false, reason: "mini_app" });
+    expect(await gate(on, { deviceLocationOk: true, deviceCountry: "QQ" })).toEqual({ ok: true });
+    expect((await call("GET", "/v1/real/fees?amountCents=1000&polymarketFeeCents=35", { token: me.token })).body).toEqual({ amountCents: 1000, polymarketFeeCents: 35, builderFeeCents: 5, totalCents: 1040 });
+    expect((await call("GET", "/v1/real/fees?amountCents=20000", { token: me.token })).status).toBe(400);
+  });
+});

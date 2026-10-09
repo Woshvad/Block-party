@@ -111,6 +111,13 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Fixed here:** the prompt could have picked a stale market from an earlier day.
 37. **Tower Lights** (done; bidding is behind `FEATURE_TOWER_LIGHTS`, off until mid-beta as the plan says). The lead or a deputy bids from the crew pot to light the Tower at tonight's bell: at least the reserve (1,000 GM, or half last week's median winning bid once there's a week of winners), raised but never lowered (a raise moves only the difference). Bids sit in one escrow per night, one bidder at a time. The Tower shows the top bid all day and tells crews they've been outbid. At the bell the top bid burns and lights the Tower (on the reel), and every other bid goes back to its pot.
 38. **Alt checks** (done). Nightly, after the bell's payouts: a flow graph of GM between each pair of residents over 14 days, across duels (the loser's stake, a retreat's ante), Grudge Matches and City markets (each loser's stake split to winners by stake). More than 500 GM one way with under 20% back is flagged, once a day, for staff review. A flagged pair can't Fade Duel or Grudge Match each other for 14 days. This is the check the plan waits for before switching duels on.
+39. **Real money, safely: the controls and the gate** (done; the whole path is behind `FEATURE_REAL_MONEY`, off until the legal opinion, and every country's switch is off by default).
+   - **Setup:** before a first real trade, a birth year (18+ as given, no ID check), the two declarations (not in a restricted place, no VPN) and weekly, monthly and loss limits.
+   - **Limits:** lowering works at once; raising waits 24 hours and must be confirmed. The city caps sit above everything: $100 a trade, $500 a month from 25 and $250 for ages 18 to 24.
+   - **Breaks:** time-outs (24h, 1w, 1m or up to 42 days) and self-exclusion (6m, 1y, 5y, for good) can't end early, and the database refuses to shorten or delete them. After a fixed break ends, real money stays off until you ask, then waits one more day.
+   - **The gate:** "Back it for real" shows only when the switch, the country, location agreement (the device's own check and the edge's country must match), not-a-first-session, not-the-Mini-App, setup, no break, no tilt pause, a real Mirror market (never politics), a live feed, the per-trade cap and every limit all pass, and it says why when not.
+   - **Fees:** the quote shows Polymarket's fee and our 0.5% builder fee in cents, never more than the 1% cap.
+   - **Still to come (39b):** the trade record, the activity page and statement, and the hourly reality check.
 
 ## Deploying
 

@@ -281,6 +281,13 @@
       "when": 1791564495724,
       "tag": "0039_alt_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1791565676510,
+      "tag": "0040_real_money",
+      "breakpoints": true
     }
   ]
 }

@@ -1677,3 +1677,79 @@ export const altFlags = pgTable(
   },
   (t) => [primaryKey({ columns: [t.cityDay, t.low, t.high] }), index("alt_flags_pair").on(t.low, t.high), check("alt_flags_order", sql`${t.low} < ${t.high}`)],
 );
+
+// --- Real money (behind a switch until the legal opinion) ---------------------
+
+export const realProfiles = pgTable("real_profiles", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  birthYear: integer("birth_year").notNull(), // given, not checked (no ID or age checks anywhere)
+  declaredAt: timestamp("declared_at", { withTimezone: true }).notNull(), // not in a restricted place, no VPN
+  weeklyCents: integer("weekly_cents").notNull(),
+  monthlyCents: integer("monthly_cents").notNull(),
+  lossCents: integer("loss_cents").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+});
+
+// Raising a limit waits 24 hours and asks again.
+export const realLimitRaises = pgTable("real_limit_raises", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
+  kind: text("kind").notNull(), // weekly | monthly | loss
+  cents: integer("cents").notNull(),
+  confirmableAt: timestamp("confirmable_at", { withTimezone: true }).notNull(),
+  status: text("status").notNull().default("pending"), // pending | applied | cancelled
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+});
+
+// Time-outs and self-exclusion: never ended early.
+export const realBreaks = pgTable(
+  "real_breaks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    kind: text("kind").notNull(), // timeout | exclusion
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }), // null: for good
+    returnAt: timestamp("return_at", { withTimezone: true }), // set when they ask back: a day after asking
+  },
+  (t) => [index("real_breaks_user").on(t.userId, t.startedAt)],
+);
+
+// One switch per country; off unless the legal opinion clears it.
+export const countrySwitches = pgTable("country_switches", {
+  country: text("country").primaryKey(), // ISO 3166-1 alpha-2
+  realTrades: boolean("real_trades").notNull().default(false),
+  updatedBy: uuid("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+});
+
+// Trades the player's device signed and sent (we never relay or hold funds).
+export const realTrades = pgTable(
+  "real_trades",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    marketId: uuid("market_id")
+      .notNull()
+      .references(() => markets.id),
+    side: callSide("side").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    polymarketFeeCents: integer("polymarket_fee_cents").notNull(),
+    builderFeeCents: integer("builder_fee_cents").notNull(),
+    status: text("status").notNull().default("intent"), // intent | filled | failed | settled
+    fillPricePct: integer("fill_price_pct"),
+    pnlCents: integer("pnl_cents"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    filledAt: timestamp("filled_at", { withTimezone: true }),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+  },
+  (t) => [index("real_trades_user").on(t.userId, t.createdAt), check("real_trades_amount", sql`${t.amountCents} BETWEEN 1 AND 10000`)],
+);
