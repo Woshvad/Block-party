@@ -150,7 +150,7 @@ describe("the bell's Tower step", () => {
     // The reel: the Slate in tier order, the top crews, my crew's rank, the burn, tomorrow's Long Shot.
     const r = await reel(db, crewB[0]!, { now: new Date(s.d0 + D + 10 * MIN) });
     expect(r!.slate.map((c) => c.tier)).toEqual(["lock", "coin_flip", "coin_flip", "spicy", "spicy", "long_shot"]);
-    expect(r!.slate.find((c) => c.tier === "long_shot")!.result).toBe("yes");
+    expect(r!.slate.find((c) => c.tier === "long_shot")).toMatchObject({ result: "yes", darkBunker: "no" });
     expect(r!.bellScores.top.map((t) => t.score)).toEqual([4.5, 1]);
     expect(r!.bellScores.mine).toEqual({ score: 1, rank: 2 });
     expect(typeof r!.burned).toBe("number");

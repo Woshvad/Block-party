@@ -19,6 +19,7 @@ export type Area = (typeof AREAS)[number];
 export function areaOf(place: string): Area | null {
   const kind = place.split(":")[0]!;
   if (kind === "home" || kind === "crew_house" || kind === "crew_row") return "street";
+  if (kind === "bunker") return "tower"; // the Bunkers are on the Tower's third floor
   return (AREAS as readonly string[]).includes(kind) && kind !== "street" ? (kind as Area) : null;
 }
 
@@ -27,3 +28,12 @@ export const isRideMode = (x: unknown): x is RideMode => typeof x === "string" &
 
 // The Mayor's Gas Holiday makes every ride free.
 export const fareFor = (mode: RideMode, ridesFree: boolean) => (ridesFree ? 0 : RIDES[mode].fare);
+
+// The Bunkers: a YES room and a NO room per market; you only get into the side you called.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const bunkerPlace = (marketId: string, side: "yes" | "no") => `bunker:${marketId.toLowerCase()}:${side}`;
+export function parseBunker(place: string): { marketId: string; side: "yes" | "no" } | null {
+  const [kind, id, side, ...rest] = place.split(":");
+  if (kind !== "bunker" || rest.length || !id || !UUID_RE.test(id) || (side !== "yes" && side !== "no")) return null;
+  return { marketId: id, side };
+}

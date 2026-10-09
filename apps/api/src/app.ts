@@ -1,4 +1,5 @@
 import {
+  parseBunker,
   type OddsProvider,
   receiptToken,
   verifyReceiptToken,
@@ -168,6 +169,7 @@ import {
   respondGrudge,
   cancelGrudge,
   myGrudges,
+  lockedSide,
   createCityMarket,
   resolveCityMarket,
   stakeCity,
@@ -707,6 +709,11 @@ export function createApp(cfg: AppConfig) {
         if (!home?.doorOpen) throw new ApiError(403, "DOOR_CLOSED", "their door is closed");
         if (await isBlockedEitherWay(db, userId, owner)) throw new ApiError(403, "DOOR_CLOSED", "their door is closed");
       }
+    } else if (kind === "bunker") {
+      // You only get into the side you called.
+      const b = parseBunker(place);
+      if (!b) throw new ApiError(404, "NOT_FOUND", "no such Bunker");
+      if ((await lockedSide(db, userId, b.marketId)) !== b.side) throw new ApiError(403, "WRONG_BUNKER", "you get into the side you called");
     } else if (kind === "crew_house") {
       if (!crew || crew.crew.id !== owner) throw new ApiError(403, "NOT_ALLOWED", "members only");
     } else if (owner !== undefined) {

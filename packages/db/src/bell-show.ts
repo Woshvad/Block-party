@@ -209,7 +209,10 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     cityMarkets: city.map((c) => ({ question: c.question, result: c.status === "refunded" ? "void" : c.outcome ? "yes" : "no" })),
     slate: cards.map((c) => {
       const cs = chances.filter((x) => x.marketId === c.marketId).map((x) => x.chance);
-      return { slot: c.slot, tier: c.tier, question: c.question, result: c.status === "void" ? "void" : c.outcome === null ? "pending" : c.outcome ? "yes" : "no", world: c.world, city: cs.length >= 10 ? median(cs) : null };
+      const result = c.status === "void" ? "void" : c.outcome === null ? "pending" : c.outcome ? "yes" : "no";
+      // The losing Bunker's lights go out.
+      const dark = result === "yes" ? "no" : result === "no" ? "yes" : null;
+      return { slot: c.slot, tier: c.tier, question: c.question, result, world: c.world, city: cs.length >= 10 ? median(cs) : null, darkBunker: dark };
     }),
     bellScores: { top: top.map((t) => ({ ...t, score: t.scoreMilli / 1000 })), mine: myCrew && { score: myCrew.scoreMilli / 1000, rank: myCrew.rank } },
     // Duels settle at the bell after the day: "@a ate @b's Snap".

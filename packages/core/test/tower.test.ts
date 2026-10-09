@@ -130,3 +130,16 @@ describe("the mock feed", () => {
     expect(after[1]).toMatchObject({ resolved: null, voided: true });
   });
 });
+
+describe("the Bunkers", () => {
+  it("a YES and a NO room per market, on the Tower's floor", async () => {
+    const { areaOf, bunkerPlace, parseBunker, PLACE_RE } = await import("../src");
+    const id = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    const p = bunkerPlace(id.toUpperCase(), "yes");
+    expect(p).toBe(`bunker:${id}:yes`);
+    expect(PLACE_RE.test(p)).toBe(true);
+    expect(areaOf(p)).toBe("tower");
+    expect(parseBunker(p)).toEqual({ marketId: id, side: "yes" });
+    for (const bad of ["bunker", `bunker:${id}`, `bunker:${id}:maybe`, `bunker:nope:yes`, `bunker:${id}:yes:extra`, `tower:${id}:yes`]) expect(parseBunker(bad)).toBeNull();
+  });
+});

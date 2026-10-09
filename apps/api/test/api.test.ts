@@ -831,3 +831,24 @@ describe("the Crew League over HTTP", () => {
     expect(Array.isArray((await call("GET", "/v1/league/champions", { token: me.token })).body)).toBe(true);
   });
 });
+
+describe("the Bunkers over HTTP", () => {
+  it("you only get into the side you called, once you've arrived at the Tower", async () => {
+    const { client, db } = await import("./harness");
+    const { pollOdds } = await import("@bp/db");
+    const t0 = Date.now();
+    const ext = `bunker-${crypto.randomUUID()}`;
+    const feed = { source: "bunker-test", fetch: async () => [{ externalId: ext, question: "Bunker?", category: "sports" as const, ladder: null, freezesAt: new Date(t0 + 3_600_000), settlesBy: new Date(t0 + 7_200_000), price: 50, resolved: null, voided: false }] };
+    await pollOdds(db, feed, { now: new Date(t0 - 1000) });
+    const [m] = await client`SELECT id FROM markets WHERE external_id = ${ext}`;
+    const me = await resident();
+    await call("POST", "/v1/tower/calls", { token: me.token, body: { marketId: m!.id, side: "yes", chance: 60, seenPrice: 50 } });
+    await pollOdds(db, feed, { now: new Date() });
+    const yes = `bunker:${m!.id}:yes`;
+    expect((await call("POST", "/v1/rooms/ticket", { token: me.token, body: { place: yes } })).body.error.code).toBe("RIDE_FIRST");
+    await arrive(me.userId, "tower");
+    expect((await call("POST", "/v1/rooms/ticket", { token: me.token, body: { place: yes } })).status).toBe(200);
+    expect((await call("POST", "/v1/rooms/ticket", { token: me.token, body: { place: `bunker:${m!.id}:no` } })).body.error.code).toBe("WRONG_BUNKER");
+    expect((await call("POST", "/v1/rooms/ticket", { token: me.token, body: { place: "bunker:nope:yes" } })).status).toBe(404);
+  });
+});

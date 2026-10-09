@@ -39,6 +39,7 @@ const PLACES: Record<string, PlaceSpec> = {
   crew_row: { w: 30, h: 8, npcs: 0, cozy: "none" },
   crew_house: { w: 10, h: 10, npcs: 0, cozy: "room" }, // crew_house:<crewId>
   home: { w: 8, h: 8, npcs: 0, cozy: "room" }, // home:<userId>
+  bunker: { w: 12, h: 10, npcs: 0, cozy: "none" }, // bunker:<marketId>:<side>
 };
 export const placeSpec = (place: string): PlaceSpec | null => PLACES[place.split(":")[0]!] ?? null;
 

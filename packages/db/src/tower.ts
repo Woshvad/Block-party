@@ -553,3 +553,12 @@ export async function openMarkets(db: Db, opts: { infoOnly?: boolean; limit?: nu
     .orderBy(markets.freezesAt)
     .limit(Math.min(Math.max(opts.limit ?? 100, 1), 200));
 }
+
+// The side of a resident's locked call on a market, if any (the Bunkers' door).
+export async function lockedSide(db: Db, userId: string, marketId: string): Promise<"yes" | "no" | null> {
+  const [c] = await db
+    .select({ side: calls.side })
+    .from(calls)
+    .where(and(eq(calls.userId, userId), eq(calls.marketId, marketId), eq(calls.status, "locked")));
+  return c?.side ?? null;
+}
