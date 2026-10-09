@@ -6,8 +6,10 @@
   "main": "src/app.ts",
   "scripts": {
     "dev": "tsx src/node.ts",
-    "test": "vitest run",
-    "typecheck": "tsc -p ."
+    "smoke": "tsx scripts/smoke.ts",
+    "test": "node build.mjs && vitest run",
+    "typecheck": "tsc -p .",
+    "build": "node build.mjs"
   },
   "dependencies": {
     "@bp/core": "workspace:*",
@@ -19,6 +21,9 @@
     "dotenv": "^18.0.6",
     "fast-check": "^4.10.2",
     "jose": "^6.2.12",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "esbuild": "^0.28.2",
+    "miniflare": "4.20260730.0",
+    "@cloudflare/workers-types": "^5.20261009.1"
   }
 }

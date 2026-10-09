@@ -1,0 +1,20 @@
+// The live rooms Worker: one Durable Object per room copy, plus a directory
+// per place. Deploy: pnpm --filter @bp/rooms build && wrangler deploy
+// Secrets (wrangler secret put ...): TICKET_SECRET, INTERNAL_SECRET (both the
+// same as the API's).
+{
+  "name": "block-party-rooms",
+  "main": "dist/worker.js",
+  "no_bundle": true, // build.mjs bundles it (see the rooms tests)
+  "build": { "command": "node build.mjs" },
+  "compatibility_date": "2026-07-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "RoomDO" },
+      { "name": "DIRECTORY", "class_name": "DirectoryDO" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO", "DirectoryDO"] }],
+  "vars": { "API_URL": "https://api.blockparty.city" },
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,22 @@
+// The API Worker. Deploy: pnpm --filter @bp/api build && wrangler deploy
+// Secrets (wrangler secret put ...): TELEGRAM_BOT_TOKEN, INTERNAL_SECRET (32+
+// chars, shared with the rooms Worker), TICKET_SECRET (shared with rooms),
+// OPENAI_API_KEY, PRIVY_APP_ID, PRIVY_VERIFICATION_KEY.
+{
+  "name": "block-party-api",
+  "main": "dist/worker.js",
+  "no_bundle": true, // build.mjs bundles it (see the worker-runtime test)
+  "build": { "command": "node build.mjs" },
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Postgres through Hyperdrive: create it with `wrangler hyperdrive create`
+  // and put its id here.
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "REPLACE_WITH_HYPERDRIVE_ID" }],
+  // Every minute: the bell (each step runs once), finished long actions, due pushes.
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "ALLOWED_ORIGINS": "https://blockparty.city,https://t.me",
+    "ROOMS_URL": "https://rooms.blockparty.city"
+  },
+  "observability": { "enabled": true }
+}

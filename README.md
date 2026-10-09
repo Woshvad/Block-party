@@ -50,6 +50,14 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 19. **Best frens, rivals and crew bonds** (done). Best frens: up to 3 picks from your frens (crewmates count). A pick is private, and the badge shows only when it's mutual. A pick goes quiet if you stop being frens and comes back if you do. Rivals: proposed to a fren, accepted by them (or by proposing back), ended by either; 3 each at most, pending included, checked on both sides under locks taken in id order (no deadlocks when two propose to each other). Crew bonds: distinct days you actually shared a room with a current crewmate for a minute or more, in 4 levels (1, 5, 15, 40 days). None of it touches GM. A block now ends everything between two residents: frenship, fren taps, picks and rivalry (before this, a block left a frenship in place).
 20. **The ledger in shards** (done). `sys:mint` and `sys:burn` are now 16 shards each, chosen by a stable hash of the other account (one resident always uses the same shard; shard 0 keeps the old id, so history stays put). Supply stats, the Drip Committee report, rent, the Halving and the purchase guard all read every shard. Measured with `pnpm --filter @bp/db bench` (200 residents burning at once, local Postgres): 646 burns/s on one row, 1,818/s sharded.
    - Also fixed a production bug found here: nothing outside the tests created the system accounts, so a fresh production database would have failed its first mint. Migration 0026 now creates them, and a test migrates an empty database to prove it.
+21. **Deploy and CI** (done). `wrangler.jsonc` for both Workers (Hyperdrive, the minute cron, Durable Objects on SQLite storage, no secrets in config), each checked by a test against the code it deploys. The API is bundled by `build.mjs` and tested as a bundle on workerd through Miniflare against real Postgres: sign-in to purchase, internal routes and the cron. `pnpm --filter @bp/api smoke` walks a new resident through the real Node server on a migrated database (it caught the missing system accounts). CI runs Postgres, migrations, typecheck and every suite, one package at a time since the db and API suites share the test database.
+
+## Deploying
+
+1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
+2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc`.
+3. Secrets on both Workers (`wrangler secret put`): `INTERNAL_SECRET` and `TICKET_SECRET` (the same on both), plus the API's `TELEGRAM_BOT_TOKEN`, and when ready `OPENAI_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`.
+4. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Check `/health` says the schema is up to date.
 
 ## Notes for later bricks
 
