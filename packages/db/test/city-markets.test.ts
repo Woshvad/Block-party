@@ -83,6 +83,17 @@ describe("writing City markets", () => {
     for (const bad of [{ question: "?" }, { kind: "vibes" }, { bellDay: "2000-01-01" }, { bellDay: "junk" }, { place: "home:x" }, { threshold: 0 }, { threshold: 2.5 }, { measureAt: new Date(d0).toISOString() }])
       expect(await code(createCityMarket(db, s, { ...ok, ...bad }, { now: new Date(d0) }))).toBe("INVALID_INPUT");
   });
+
+  it("never writes a market that's already locked (nobody could stake on it)", async () => {
+    const d0 = freshDay();
+    const s = await staffer();
+    const manual = { question: "Will the Mayor pick Gas Holiday?", kind: "manual", bellDay: dayOf(d0) };
+    expect((await createCityMarket(db, s, manual, { now: new Date(d0 + 22 * H - 1000) })).locksAt.toISOString()).toBe(new Date(d0 + 22 * H).toISOString());
+    expect(await code(createCityMarket(db, s, manual, { now: new Date(d0 + 22 * H) }))).toBe("INVALID_INPUT");
+    expect(await code(createCityMarket(db, s, manual, { now: new Date(d0 + 23 * H) }))).toBe("INVALID_INPUT");
+    // Tomorrow's bell is fine at the same moment.
+    expect((await createCityMarket(db, s, { ...manual, bellDay: dayOf(d0 + D) }, { now: new Date(d0 + 23 * H) })).id).toBeTruthy();
+  });
 });
 
 describe("the headcount", () => {

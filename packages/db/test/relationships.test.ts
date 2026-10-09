@@ -187,7 +187,10 @@ describe("crew bonds", () => {
     await createCrew(db, lead!, { name: `Bond ${randomUUID().slice(0, 6)}` });
     for (const u of [mate, other]) await redeemInvite(db, u!, (await createInvite(db, lead!)).code);
     const room = `diner#${Math.floor(Math.random() * 1e6)}`;
-    const t0 = Date.now() - 10 * DAY;
+    // 09:00 UTC ten days ago: both sessions of a day stay inside that city day.
+    // (From Date.now() the second session crossed midnight between 21:00 and
+    // 24:00 UTC, and three days counted as four.)
+    const t0 = Math.floor(Date.now() / DAY) * DAY - 10 * DAY + 9 * 3_600_000;
     for (let d = 0; d < 3; d++) {
       for (const k of [0, 1]) {
         // two sessions the same day still count once

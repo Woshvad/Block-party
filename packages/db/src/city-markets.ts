@@ -38,6 +38,8 @@ export async function createCityMarket(
   if (typeof input.bellDay !== "string" || !DAY.test(input.bellDay) || input.bellDay < cityDay(now)) throw new CityMarketError("INVALID_INPUT", "a bell day from today on");
   const bell = dayStart(addDays(input.bellDay, 1));
   const locksAt = new Date(bell.getTime() - CITY.lockBeforeBellHours * 3_600_000);
+  // A market born locked can't take a single stake.
+  if (now >= locksAt) throw new CityMarketError("INVALID_INPUT", "that bell's markets have already locked: pick a later bell day");
   let place: string | null = null;
   let threshold: number | null = null;
   let measureAt: Date | null = null;
