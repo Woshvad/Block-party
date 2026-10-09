@@ -1,4 +1,5 @@
 import {
+  bigNights,
   areaOf,
   PLACE_RE,
   signRoomTicket,
@@ -136,6 +137,10 @@ import {
   markOpened,
   runNotificationBatch,
   setCrewBotMutes,
+  startNap,
+  cancelLongAction,
+  myLongAction,
+  finishDueActions,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -741,6 +746,13 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/shifts/:id/answers", auth, async (c) => c.json(await submitShift(db, c.get("userId"), uuid(c, "id"), (await body(c)).answers, opts())));
   app.post("/v1/shifts/:id/collect", auth, async (c) => c.json(await collectShift(db, c.get("userId"), uuid(c, "id"), opts())));
 
+  // --- Long actions and the city clock ---------------------------------------
+
+  app.post("/v1/naps", auth, async (c) => c.json(await startNap(db, c.get("userId"), (await body(c)).itemId, where, opts()), 201));
+  app.get("/v1/actions/current", auth, async (c) => c.json({ action: await myLongAction(db, c.get("userId"), opts()) }));
+  app.delete("/v1/actions/current", auth, async (c) => c.json(await cancelLongAction(db, c.get("userId"), opts())));
+  app.get("/v1/city/timetable", auth, async (c) => c.json({ bigNights: bigNights(now()) }));
+
   // --- Notifications --------------------------------------------------------
 
   app.get("/v1/notifications/prefs", auth, async (c) => c.json(await getPrefs(db, c.get("userId"))));
@@ -761,6 +773,7 @@ export function createApp(cfg: AppConfig) {
     }
     await next();
   };
+  app.post("/internal/actions/run", internal, async (c) => c.json(await finishDueActions(db, opts())));
   app.post("/internal/notifications/run", internal, async (c) => {
     if (!cfg.notifier) throw new ApiError(503, "NOTIFICATIONS_DISABLED", "no push sender configured");
     return c.json(await runNotificationBatch(db, cfg.notifier, opts()));

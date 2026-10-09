@@ -11,7 +11,7 @@ export const NOTIFY = {
   crewPostsPerDay: 3,
 } as const;
 
-export const ALERT_KINDS = ["shift_done", "away_shift_ready", "faded", "snap", "syndicate_shake", "warmup_settled"] as const;
+export const ALERT_KINDS = ["shift_done", "nap_done", "away_shift_ready", "faded", "snap", "syndicate_shake", "warmup_settled"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type NotifyKind = "daily" | "bell_2h" | AlertKind;
 
@@ -36,6 +36,7 @@ export const TEMPLATES: Record<NotifyKind, readonly string[]> = {
   ],
   bell_2h: ["Bell in 2h. Lock your calls.", "Two hours to the bell. The Roof is filling up.", "Bell in 2h, ser."],
   shift_done: ["Your Mod Shift is done. Collect your pay.", "Shift's over. Your GM is ready."],
+  nap_done: ["Nap's over. Your resident woke up Rested.", "Your resident's up from a nap, fresh eyes and all."],
   away_shift_ready: ["Your away shift is ready to collect.", "While you were out, your resident worked a shift. Collect it."],
   faded: ["@{handle} faded your call.", "Someone took the other side: @{handle}."],
   snap: ["@{handle} hit Snap on your duel.", "Snap from @{handle}. The pot just doubled."],

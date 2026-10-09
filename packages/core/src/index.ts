@@ -18,3 +18,4 @@ export * from "./ticket";
 export * from "./rides";
 export * from "./away";
 export * from "./notifications";
+export * from "./life";

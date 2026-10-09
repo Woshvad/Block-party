@@ -617,3 +617,29 @@ describe("notifications over HTTP", () => {
     expect((await call("PUT", "/v1/crews/mine/bot-mutes", { token: lead.token, body: { kinds: "all" } })).status).toBe(400);
   });
 });
+
+describe("naps and the city clock over HTTP", () => {
+  it("nap at home on your own bed; one at a time; wake early", async () => {
+    const { client, roomsState } = await import("./harness");
+    const me = await resident();
+    const [bed] = await client`SELECT i.id FROM items i JOIN placements p ON p.item_id = i.id WHERE i.owner_user_id = ${me.userId} AND i.piece_id LIKE '%_bed'`;
+    expect((await call("POST", "/v1/naps", { token: me.token, body: { itemId: bed!.id } })).body.error.code).toBe("NOT_HOME");
+    roomsState.where.set(`${me.userId}|home:${me.userId}`, 1);
+    const nap = await call("POST", "/v1/naps", { token: me.token, body: { itemId: bed!.id } });
+    expect(nap.status).toBe(201);
+    expect((await call("POST", "/v1/naps", { token: me.token, body: { itemId: bed!.id } })).status).toBe(409);
+    expect((await call("GET", "/v1/actions/current", { token: me.token })).body.action).toMatchObject({ kind: "nap" });
+    expect((await call("DELETE", "/v1/actions/current", { token: me.token })).status).toBe(200);
+    expect((await call("GET", "/v1/actions/current", { token: me.token })).body.action).toBeNull();
+    expect((await call("DELETE", "/v1/actions/current", { token: me.token })).status).toBe(409);
+    expect((await call("POST", "/v1/naps", { token: me.token, body: { itemId: "nope" } })).status).toBe(400);
+  });
+
+  it("the timetable, and the finisher behind the secret", async () => {
+    const me = await resident();
+    const t = await call("GET", "/v1/city/timetable", { token: me.token });
+    expect(t.body.bigNights.find((b: { place: string }) => b.place === "diner")).toMatchObject({ kind: "rotating" });
+    expect((await call("POST", "/internal/actions/run", { headers: { "x-internal-secret": SECRET } })).status).toBe(200);
+    expect((await call("POST", "/internal/actions/run")).status).toBe(404);
+  });
+});

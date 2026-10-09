@@ -46,9 +46,9 @@ export default {
   // step once) and whatever pushes have fallen due.
   async scheduled(_event: unknown, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
     const { db, close } = createDb(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false });
-    const { runBell, runNotificationBatch } = await import("@bp/db");
+    const { runBell, runNotificationBatch, finishDueActions } = await import("@bp/db");
     ctx.waitUntil(
-      Promise.allSettled([runBell(db), runNotificationBatch(db, telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), { batch: 200 })]).finally(() => close()),
+      Promise.allSettled([runBell(db), finishDueActions(db), runNotificationBatch(db, telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), { batch: 200 })]).finally(() => close()),
     );
   },
 };

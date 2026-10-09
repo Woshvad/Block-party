@@ -1107,3 +1107,30 @@ export const crewBotMutes = pgTable(
   },
   (t) => [primaryKey({ columns: [t.crewId, t.kind] })],
 );
+
+// Long actions (a nap now; more later): they run for real minutes on their
+// own, then finish once, by the cron or whenever the resident looks.
+export const longActionStatus = pgEnum("long_action_status", ["running", "done", "cancelled"]);
+
+export const longActions = pgTable(
+  "long_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    kind: text("kind").notNull(),
+    itemId: uuid("item_id").references(() => items.id),
+    status: longActionStatus("status").notNull().default("running"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [
+    // One at a time.
+    uniqueIndex("long_actions_one_running").on(t.userId).where(sql`${t.status} = 'running'`),
+    index("long_actions_due").on(t.endsAt).where(sql`${t.status} = 'running'`),
+    check("long_actions_order", sql`${t.endsAt} > ${t.startedAt}`),
+    check("long_actions_finished", sql`(${t.status} = 'running') = (${t.finishedAt} IS NULL)`),
+  ],
+);
