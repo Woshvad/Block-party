@@ -40,6 +40,7 @@ import {
   economyReport,
   editCrew,
   findByHandle,
+  residentsByIds,
   getBalance,
   getCrew,
   getCrewHouse,
@@ -509,6 +510,8 @@ export function createApp(cfg: AppConfig) {
     return c.json(r);
   });
   app.put("/v1/resident/traits", auth, async (c) => c.json(await swapTraits(db, c.get("userId"), (await body(c)).traits, opts())));
+  // Who's who, for chat, DMs, boards and frens lists: ?ids=a,b,c (up to 100).
+  app.get("/v1/residents", auth, async (c) => c.json(await residentsByIds(db, (c.req.query("ids") ?? "").split(",").filter(Boolean))));
   app.get("/v1/residents/:handle", auth, async (c) => {
     const r = await findByHandle(db, c.req.param("handle") ?? "");
     if (!r) throw new ApiError(404, "NOT_FOUND", "no such resident");

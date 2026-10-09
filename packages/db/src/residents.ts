@@ -1,4 +1,5 @@
 import {
+  CAST,
   type RandomInt,
   ResidentInputError,
   cityDay,
@@ -13,7 +14,7 @@ import {
   validateResidentInput,
   validateTraits,
 } from "@bp/core";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { setUpHome } from "./home";
 import { residents, users } from "./schema";
@@ -89,6 +90,23 @@ export async function createResident(
 export async function getResident(db: Db, userId: string): Promise<Resident | null> {
   const [r] = await db.select().from(residents).where(eq(residents.userId, userId));
   return r ?? null;
+}
+
+// Who's who for a page of messages or a frens list: handle and look by id,
+// at most 100 at a time. The NPCs answer with their names. Unknown ids are
+// simply left out; junk input gets an empty list, never an error.
+export const LOOKUP_MAX = 100;
+const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function residentsByIds(db: Db, ids: unknown): Promise<Array<{ userId: string; handle: string; name: string; look: Record<string, unknown> | null; npc: string | null }>> {
+  if (!Array.isArray(ids)) return [];
+  const wanted = [...new Set(ids.filter((x): x is string => typeof x === "string" && ID_RE.test(x)).map((x) => x.toLowerCase()))].slice(0, LOOKUP_MAX);
+  if (wanted.length === 0) return [];
+  const out: Array<{ userId: string; handle: string; name: string; look: Record<string, unknown> | null; npc: string | null }> = [];
+  for (const c of Object.values(CAST)) if (wanted.includes(c.id)) out.push({ userId: c.id, handle: c.name, name: c.name, look: null, npc: c.label });
+  const rows = await db.select({ userId: residents.userId, handle: residents.handle, name: residents.name, look: residents.look }).from(residents).where(inArray(residents.userId, wanted));
+  for (const r of rows) out.push({ ...r, npc: null });
+  return out;
 }
 
 export async function findByHandle(db: Db, handle: string): Promise<Resident | null> {
