@@ -160,6 +160,62 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     bellStamp: () => request<Record<string, unknown>>("POST", "/v1/bell-stamp"),
     awayRecap: () => request<Record<string, unknown>>("GET", "/v1/away/recap"),
     oddsWall: () => request<MarketRow[]>("GET", "/v1/tower/odds-wall"),
+
+    // --- People
+    who: (ids: string[]) => request<Who[]>("GET", `/v1/residents?ids=${ids.map(encodeURIComponent).join(",")}`),
+    relationships: () => request<Relationships>("GET", "/v1/relationships"),
+    fren: (userId: string, place: string) => request<Record<string, unknown>>("POST", `/v1/frens/${encodeURIComponent(userId)}`, { place }),
+    unfren: (userId: string) => request<{ ok: boolean }>("DELETE", `/v1/frens/${encodeURIComponent(userId)}`),
+    bestFren: (userId: string, on: boolean) => request<Record<string, unknown>>("PUT", `/v1/frens/${encodeURIComponent(userId)}/best`, { on }),
+    rival: (userId: string) => request<Record<string, unknown>>("POST", `/v1/rivals/${encodeURIComponent(userId)}`),
+    acceptRival: (userId: string) => request<Record<string, unknown>>("POST", `/v1/rivals/${encodeURIComponent(userId)}/accept`),
+    endRival: (userId: string) => request<unknown>("DELETE", `/v1/rivals/${encodeURIComponent(userId)}`),
+    block: (userId: string) => request<{ ok: boolean }>("POST", `/v1/blocks/${encodeURIComponent(userId)}`),
+    unblock: (userId: string) => request<{ ok: boolean }>("DELETE", `/v1/blocks/${encodeURIComponent(userId)}`),
+    mute: (userId: string, hours?: number) => request<{ ok: boolean }>("POST", `/v1/mutes/${encodeURIComponent(userId)}`, hours ? { hours } : {}),
+    unmute: (userId: string) => request<{ ok: boolean }>("DELETE", `/v1/mutes/${encodeURIComponent(userId)}`),
+    report: (r: { targetUserId: string; reason: string; note?: string; place?: string; context?: { kind: string; id: string; copy?: number } }) => request<{ id: string; status: string; dueAt: string }>("POST", "/v1/reports", r),
+    checkMessage: (text: string) => request<{ ok: boolean; reason?: string; message?: string; text?: string }>("POST", "/v1/moderation/check", { text }),
+    dms: () => request<DmThread[]>("GET", "/v1/dms"),
+    dmThread: (id: string) => request<{ notice: string; messages: Msg[] }>("GET", `/v1/dms/${encodeURIComponent(id)}`),
+    dm: (userId: string, text: string) => request<{ threadId: string; message: Msg; notice: string }>("POST", `/v1/dms/to/${encodeURIComponent(userId)}`, { text }),
+    board: (place: string) => request<(Msg & { npc?: { name: string; label: string } })[]>("GET", `/v1/boards/${encodeURIComponent(place)}`),
+    postBoard: (place: string, text: string) => request<Msg>("POST", `/v1/boards/${encodeURIComponent(place)}`, { text }),
+    follow: (place: string, on: boolean) => request<unknown>(on ? "POST" : "DELETE", `/v1/boards/${encodeURIComponent(place)}/follow`),
+
+    // --- Crews
+    myCrew: () => request<MyCrew>("GET", "/v1/crews/mine").catch((e) => (e instanceof ApiError && e.code === "NOT_IN_CREW" ? null : Promise.reject(e))),
+    createCrew: (name: string, joinPolicy: "approval" | "open") => request<Record<string, unknown>>("POST", "/v1/crews", { name, joinPolicy }),
+    editCrew: (patch: { name?: string; joinPolicy?: string; banner?: string[] }) => request<Record<string, unknown>>("PATCH", "/v1/crews/mine", patch),
+    openTables: () => request<OpenTable[]>("GET", "/v1/open-tables"),
+    joinOpen: (crewId: string) => request<Record<string, unknown>>("POST", `/v1/crews/${encodeURIComponent(crewId)}/join`),
+    invite: (ttlHours?: number) => request<{ code: string; expiresAt: string }>("POST", "/v1/crews/mine/invites", ttlHours ? { ttlHours } : {}),
+    revokeInvite: (code: string) => request<unknown>("DELETE", `/v1/crews/invites/${encodeURIComponent(code)}`),
+    redeem: (code: string) => request<{ joined: boolean; crewId: string; requested?: boolean }>("POST", "/v1/crews/join", { code }),
+    requests: () => request<{ id: string; userId: string; handle?: string; createdAt: string }[]>("GET", "/v1/crews/mine/requests"),
+    decide: (id: string, approve: boolean) => request<unknown>("POST", `/v1/crews/requests/${encodeURIComponent(id)}/${approve ? "approve" : "decline"}`),
+    leaveCrew: () => request<unknown>("POST", "/v1/crews/mine/leave"),
+    removeMember: (userId: string) => request<unknown>("DELETE", `/v1/crews/mine/members/${encodeURIComponent(userId)}`),
+    setDeputy: (userId: string, deputy: boolean) => request<unknown>("PUT", `/v1/crews/mine/deputies/${encodeURIComponent(userId)}`, { deputy }),
+    transferLead: (userId: string) => request<unknown>("POST", "/v1/crews/mine/transfer", { userId }),
+    dissolve: () => request<unknown>("POST", "/v1/crews/mine/dissolve"),
+    pot: (amount: number, key: string) => request<Record<string, unknown>>("POST", "/v1/crews/mine/pot", { amount }, { idempotencyKey: key }),
+    chain: () => request<Chain>("GET", "/v1/crews/mine/chain"),
+    relight: () => request<Record<string, unknown>>("POST", "/v1/crews/mine/chain/relight"),
+    crewChat: () => request<Msg[]>("GET", "/v1/crews/mine/chat"),
+    postCrewChat: (text: string) => request<Msg>("POST", "/v1/crews/mine/chat", { text }),
+    crewHouse: () => request<CrewHouse>("GET", "/v1/crews/mine/house"),
+    proposePiece: (pieceId: string) => request<Record<string, unknown>>("POST", "/v1/crews/mine/house/proposals", { pieceId }),
+    approvePiece: (id: string) => request<Record<string, unknown>>("POST", `/v1/crews/house/proposals/${encodeURIComponent(id)}/approve`),
+    cancelPiece: (id: string) => request<unknown>("POST", `/v1/crews/house/proposals/${encodeURIComponent(id)}/cancel`),
+    placeCrewItem: (itemId: string, room: string, placement: Placement) => request<unknown>("PUT", `/v1/crews/mine/house/items/${encodeURIComponent(itemId)}/place`, { room, placement }),
+    storeCrewItem: (itemId: string) => request<unknown>("DELETE", `/v1/crews/mine/house/items/${encodeURIComponent(itemId)}/place`),
+    crewTable: () => request<Syndicate[]>("GET", "/v1/crews/mine/table"),
+    propose: (s: { marketId?: string; cityMarketId?: string; side: Side; perShake?: number }) => request<Record<string, unknown>>("POST", "/v1/syndicates", s),
+    shake: (id: string, chance?: number) => request<Record<string, unknown>>("POST", `/v1/syndicates/${encodeURIComponent(id)}/shake`, chance === undefined ? {} : { chance }),
+    league: () => request<Record<string, unknown> | null>("GET", "/v1/crews/mine/league"),
+    champions: () => request<Record<string, unknown>[]>("GET", "/v1/league/champions"),
+    botMutes: (kinds: string[]) => request<Record<string, unknown>>("PUT", "/v1/crews/mine/bot-mutes", { kinds }),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
 }
@@ -239,3 +295,21 @@ export type Prefs = { timeZone: string; quietStart: number; quietEnd: number; al
 export type Restriction = { id: string; kind: string; reason: string; startsAt: string; endsAt: string | null };
 export type Law = { id: string; name: string; touches: string[]; effects: Record<string, unknown> };
 export type BigNight = { place: string; kind: string; days?: string | number[]; day?: number | null; region?: string; hourUtc?: number };
+export type Who = { userId: string; handle: string; name: string; look: Look | null; npc: string | null };
+export type Msg = { id: string; authorId: string; text: string; createdAt: string };
+export type DmThread = { id: string; a: string; b: string; createdBy: string; createdAt: string };
+export type Relationships = {
+  frens: { userId: string; crewmate: boolean; bestFren: boolean; mutualBest: boolean }[];
+  bestFrens: string[];
+  rivals: { userId: string; since: string | null }[];
+  rivalRequests: { incoming: string[]; outgoing: string[] };
+  crewBonds: { userId: string; days: number; level: number }[];
+};
+export type MyCrew = {
+  role: "lead" | "deputy" | "member";
+  crew: { id: string; name: string; joinPolicy: string; banner: string[]; createdBy: string; roster: { userId: string; role: string; handle: string; joinedAt: string }[]; status: "forming" | "active"; pot: number };
+};
+export type OpenTable = { id: string; name: string; members?: number; banner?: string[]; [k: string]: unknown };
+export type Chain = { length: number; needsRelight: string | null; relightVotes: number; relightNeeded: number; today: { gms: number; active: number; needed: number } };
+export type CrewHouse = { wallFinish: string; floorFinish: string; rooms: string[]; proposals: { id: string; pieceId: string; proposerId?: string; approvals?: number; [k: string]: unknown }[]; approvalsNeeded: { lead: number; others: number }; maxMembers: number; placed: PlacedItem[]; storage: { itemId: string; pieceId: string }[] };
+export type Syndicate = { id: string; marketId: string | null; cityMarketId: string | null; side: Side; perShake: number; status: string; needed: number; expiresAt: string; [k: string]: unknown };

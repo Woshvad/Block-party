@@ -32,7 +32,9 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
   const [traits, setTraits] = useState<string[]>(r.traits);
   const [appeal, setAppeal] = useState<Record<string, string>>({});
   const keys = useRef({ copium: newKey(), hodl: newKey() });
-  useEffect(() => setTraits(r.traits), [r.traits]);
+  useEffect(() => {
+    setTraits(r.traits);
+  }, [r.traits]);
 
   const m = moods.data;
   const p = pon.data;

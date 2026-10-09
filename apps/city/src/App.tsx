@@ -18,6 +18,8 @@ const MePage = dynamic(() => import("./screens/MePage"), { ssr: false });
 const CityHall = dynamic(() => import("./screens/CityHall"), { ssr: false });
 const Results = dynamic(() => import("./screens/Results"), { ssr: false });
 const FaucetFren = dynamic(() => import("./screens/FaucetFren"), { ssr: false });
+const Social = dynamic(() => import("./screens/Social"), { ssr: false });
+const Crew = dynamic(() => import("./screens/Crew"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -171,6 +173,10 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       <Results api={api} onBack={back} />
     ) : page === "faucet" ? (
       <FaucetFren api={api} onBack={back} />
+    ) : page === "social" ? (
+      <Social api={api} me={me} onBack={back} />
+    ) : page === "crew" ? (
+      <Crew api={api} me={me} onBack={back} onChanged={refreshGm} onGoToHouse={(crewId) => (setPage(null), setTrip({ place: `crew_house:${crewId}`, ridesFree: false }))} />
     ) : page ? (
       <div className="screen center">
         <p>Coming in the next build.</p>

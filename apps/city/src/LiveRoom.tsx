@@ -6,6 +6,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
 import { ApiError, type Api, type Home, type Look } from "./api";
 import { HomeRoom } from "./HomeRoom";
+import Person from "./Person";
 import { homeSize, pieceOf } from "./furniture";
 import { fitCamera } from "./camera";
 import { useNow } from "./clock";
@@ -47,7 +48,7 @@ function hashHue(s: string) {
   return (h % 360) / 360;
 }
 
-function People({ drawn, me }: { drawn: React.MutableRefObject<Drawn[]>; me: string | null }) {
+function People({ drawn, me, onPerson }: { drawn: React.MutableRefObject<Drawn[]>; me: string | null; onPerson?: (userId: string) => void }) {
   const legs = useRef<THREE.InstancedMesh>(null);
   const body = useRef<THREE.InstancedMesh>(null);
   const head = useRef<THREE.InstancedMesh>(null);
@@ -108,7 +109,17 @@ function People({ drawn, me }: { drawn: React.MutableRefObject<Drawn[]>; me: str
       <instancedMesh ref={legs} args={[geo.leg, undefined, CAP * 2]} frustumCulled={false}>
         <meshStandardMaterial />
       </instancedMesh>
-      <instancedMesh ref={body} args={[geo.body, undefined, CAP]} frustumCulled={false}>
+      <instancedMesh
+        ref={body}
+        args={[geo.body, undefined, CAP]}
+        frustumCulled={false}
+        onPointerDown={(e) => {
+          const d = e.instanceId === undefined ? undefined : drawn.current[e.instanceId];
+          if (!d || d.dim || d.id === me || !onPerson) return;
+          e.stopPropagation();
+          onPerson(d.id);
+        }}
+      >
         <meshStandardMaterial />
       </instancedMesh>
       <instancedMesh ref={head} args={[geo.head, undefined, CAP]} frustumCulled={false}>
@@ -210,6 +221,7 @@ export default function LiveRoom({ api, place, onLeave, me }: { api: Api; place:
   const [text, setText] = useState("");
   const [emotes, setEmotes] = useState(false);
   const [log, setLog] = useState(false);
+  const [person, setPerson] = useState<string | null>(null);
   const [, bump] = useReducer((x: number) => x + 1, 0);
   const conn = useRef<ReturnType<typeof openRoomSocket> | null>(null);
   const drawn = useRef<Drawn[]>([]);
@@ -316,7 +328,7 @@ export default function LiveRoom({ api, place, onLeave, me }: { api: Api; place:
           )}
           <RoomCamera span={span} />
           <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />
-          <People drawn={drawn} me={room.you} />
+          <People drawn={drawn} me={room.you} onPerson={setPerson} />
           <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />
           <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 3} />
         </Canvas>
@@ -346,6 +358,7 @@ export default function LiveRoom({ api, place, onLeave, me }: { api: Api; place:
         </div>
       )}
       {err && <div className="toast bad">{err.message}</div>}
+      {person && <Person api={api} userId={person} place={place} onClose={() => setPerson(null)} />}
       {napMsg && <div className="toast">{napMsg}</div>}
       {home && status.kind === "live" && home.placed.some((p) => pieceOf(p.pieceId)?.mood === "rested") && (
         <button
