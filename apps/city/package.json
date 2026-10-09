@@ -11,6 +11,7 @@
     "typecheck": "tsc -p . --noEmit"
   },
   "dependencies": {
+    "@bp/core": "workspace:*",
     "@react-three/drei": "10.0.0",
     "@react-three/fiber": "9.0.4",
     "next": "16.3.8",
@@ -22,6 +23,7 @@
     "@types/react": "19.1.12",
     "@types/react-dom": "19.1.9",
     "@types/three": "0.170.0",
+    "fast-check": "^4.10.2",
     "typescript": "^7.0.2"
   }
 }

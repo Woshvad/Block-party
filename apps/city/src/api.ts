@@ -1,0 +1,118 @@
+// The city's only door to the API. Every call goes through `request`, which
+// adds the session, turns error bodies into ApiError, and never lets a network
+// failure or a non-JSON reply escape as anything else.
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly field?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+// Where the session token lives. Browser storage can be missing or throw
+// (private windows, Telegram's webview with storage cleared), so every access
+// is guarded and the city still works for the visit without it.
+export type TokenStore = { get(): string | null; set(token: string | null): void };
+
+export function browserTokenStore(key = "bp.session"): TokenStore {
+  let memory: string | null = null;
+  return {
+    get() {
+      try {
+        return window.localStorage.getItem(key) ?? memory;
+      } catch {
+        return memory;
+      }
+    },
+    set(token) {
+      memory = token;
+      try {
+        if (token) window.localStorage.setItem(key, token);
+        else window.localStorage.removeItem(key);
+      } catch {
+        // memory only for this visit
+      }
+    },
+  };
+}
+
+export const memoryTokenStore = (initial: string | null = null): TokenStore => {
+  let t = initial;
+  return { get: () => t, set: (v) => void (t = v) };
+};
+
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+export type Api = ReturnType<typeof createApi>;
+
+export function createApi(opts: { base: string; store: TokenStore; fetch?: typeof fetch }) {
+  const doFetch = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+  const base = opts.base.replace(/\/+$/, "");
+
+  async function request<T>(method: Method, path: string, body?: unknown, extra: { idempotencyKey?: string } = {}): Promise<T> {
+    const headers: Record<string, string> = {};
+    const token = opts.store.get();
+    if (token) headers.authorization = `Bearer ${token}`;
+    if (body !== undefined) headers["content-type"] = "application/json";
+    if (extra.idempotencyKey) headers["idempotency-key"] = extra.idempotencyKey;
+    let res: Response;
+    try {
+      res = await doFetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch {
+      throw new ApiError(0, "OFFLINE", "can't reach the city right now");
+    }
+    let data: unknown = null;
+    const text = await res.text().catch(() => "");
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
+    }
+    if (!res.ok) {
+      const e = (data as { error?: { code?: unknown; message?: unknown; field?: unknown } } | null)?.error;
+      const code = typeof e?.code === "string" ? e.code : `HTTP_${res.status}`;
+      const message = typeof e?.message === "string" ? e.message : "something went wrong";
+      // A dead session is forgotten so the next boot signs in fresh.
+      if (res.status === 401) opts.store.set(null);
+      throw new ApiError(res.status, code, message, typeof e?.field === "string" ? e.field : undefined);
+    }
+    if (data === null) throw new ApiError(res.status, "BAD_REPLY", "the city sent something unreadable");
+    return data as T;
+  }
+
+  const signedIn = (r: AuthResult) => {
+    opts.store.set(r.sessionToken);
+    return r;
+  };
+
+  return {
+    request,
+    hasSession: () => opts.store.get() !== null,
+    signOut: () => opts.store.set(null),
+    guest: async () => signedIn(await request<AuthResult>("POST", "/v1/auth/guest", { ageAck: true })),
+    telegram: async (initData: string, ageAck: boolean) => signedIn(await request<AuthResult>("POST", "/v1/auth/telegram", { initData, ageAck })),
+    me: () => request<Me>("GET", "/v1/me"),
+    pickForMe: () => request<ResidentDraft>("GET", "/v1/resident/pick-for-me"),
+    handleAvailable: (handle: string) => request<{ available: boolean }>("GET", `/v1/handles/${encodeURIComponent(handle)}/available`),
+    moveIn: (draft: ResidentDraft) => request<Resident>("POST", "/v1/resident", draft),
+  };
+}
+
+export type AuthResult = { userId: string; sessionToken: string; expiresAt: string; status: "guest" | "claimed"; isNew: boolean; leftGuest: boolean };
+
+export type Look = { v: 1; bodyType: string; face: string; hair: string; top: string; bottom: string; shoes: string; hat: string; glasses: string; skinTone: number; hairColor: number; outfitColor: number };
+
+export type ResidentDraft = { handle: string; name: string; look: Look; traits: string[]; goal: string; kitStyle: string };
+
+export type Resident = ResidentDraft & { userId: string; backstory: string; starterItem: string };
+
+export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null };
+
+export const apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";

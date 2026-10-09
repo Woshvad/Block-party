@@ -130,16 +130,20 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 
 - **Phase 0, the phone test** (in progress). `/room-test` is one cutaway room with 60 residents walking and 10 dimmed away residents, every body part one instanced draw call for the whole crowd: 30 draw calls, 17k triangles, 24 MB JS heap (the budget is 100 to 150 draw calls and 300 MB). `/` is the city board: icon pins with live headcounts, district names painted on the ground, "Coming soon" lots, a live banner (online count, Mayor, Law of the Week), day and night, and map-style dragging kept on the board: 29 draw calls, 4.5k triangles. Flipping day and night 20 times leaves GPU geometry, texture and shader counts unchanged. The camera fits tall phones (wider lens, pulled back) and wide screens.
   - **Still to do:** frame rate on real mid-range phones inside Telegram (needs the bot token and a domain); desktop browser panes throttle animation, so fps there means nothing. Banner, pins and odds are mock values until phase 1 wires the API.
+- **Phase 1a, sign-in and move-in** (done). One-tap 18+ notice, then: inside Telegram, sign-in with the signed launch data every visit (it claims a guest on that device, or switches to the Telegram account's owner); in a browser, a guest who can look around and is asked to open Telegram to move in. Move-in: look (live 3D preview, part arrows, palette swatches), name and handle (free-handle check as you type, newest answer wins), 3 traits, goal and room style, then the city deals a backstory and starter item. The form uses `@bp/core`'s own validators, and a property test checks it agrees with the server on 2,000 random bad inputs.
+  - **Tested by hand against the real API:** a taken handle (any case) blocks Next; a handle taken by someone else between the check and Move in sends you back to Name with "taken"; three rapid taps on Move in send one request (two went out before a ref guard was added); a stored session survives a reload; a dead one asks for the notice again (browser) or is dropped and Telegram sign-in retried once (Telegram, as the API asks).
+  - **Local dev:** run the `api` and `city` servers (`.claude/launch.json`); add `http://localhost:3100` to `ALLOWED_ORIGINS`. `/?tg=<id>` or the guest screen's dev button signs in as a Telegram tester with the local bot token. The dev route is a 404 in production builds and from anything but localhost.
 
 ## Deploying
 
 1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
 2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc`.
 3. Secrets on both Workers (`wrangler secret put`): `INTERNAL_SECRET` and `TICKET_SECRET` (the same on both), plus the API's `TELEGRAM_BOT_TOKEN`, and when ready `OPENAI_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`.
-4. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Check `/health` says the schema is up to date.
+4. `wrangler deploy` in `apps/api`, then in `apps/rooms` (each runs its own build). Check `/health` says the schema is up to date. Rooms require the API's `/internal/rooms/access` endpoint to refresh safety permissions before joins and actions; if it is unavailable, those actions are refused.
 
 ## Notes for later bricks
 
+- **Real trade failures.** Client-reported failed orders keep their weekly and monthly spending reservations until the original window expires. Releasing them requires trusted exchange reconciliation; a device's failure report alone cannot prove that no order filled.
 - **Rent vs open stakes.** Rent's "can't pay" check reads the wallet balance. When duels and City/Crew markets add escrowed stakes, GM parked in a stake over a Saturday could dodge rent. Count open stakes there the same way `gmNetWorth` will.
 - **The bell job** must run `collectAllRent` at the Saturday bell before players can act, and `settleCrewChain` for every crew each night.
 - **Hot system rows (scale).** Mints and burns are sharded (bricks 20 and 40, now 64 shards). Still single rows: `sys:city_purse` (rent's 10%, Saturdays only) and each crew pot. Load-test the whole API with bots before the open launch.

@@ -8,6 +8,8 @@ export default {
   outputFileTracingRoot: root,
   turbopack: { root },
   reactStrictMode: true,
+  // Shared game rules (names, handles, looks) come straight from the backend's pure core.
+  transpilePackages: ["@bp/core"],
   // Telegram blocks Mini App calls to other domains: the city is served from our own.
   poweredByHeader: false,
   // No server-side image optimization: it's the only thing that would run

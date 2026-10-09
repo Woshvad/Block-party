@@ -64,6 +64,9 @@ importers:
 
   apps/city:
     dependencies:
+      '@bp/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@react-three/drei':
         specifier: 10.0.0
         version: 10.0.0(@react-three/fiber@9.0.4(@types/react@19.1.12)(react-dom@19.1.9(react@19.1.9))(react@19.1.9)(three@0.170.0))(@types/react@19.1.12)(@types/three@0.170.0)(react-dom@19.1.9(react@19.1.9))(react@19.1.9)(three@0.170.0)
@@ -92,6 +95,9 @@ importers:
       '@types/three':
         specifier: 0.170.0
         version: 0.170.0
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

@@ -4,8 +4,22 @@
     {
       "name": "city",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@bp/city", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@bp/city",
+        "dev"
+      ],
       "port": 3100
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@bp/api",
+        "dev"
+      ],
+      "port": 8787
     }
   ]
 }

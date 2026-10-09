@@ -6,7 +6,8 @@ type WebApp = {
   disableVerticalSwipes?: () => void;
   requestFullscreen?: () => void;
   platform?: string;
-  HapticFeedback?: { impactOccurred(style: "light" | "medium" | "heavy"): void };
+  initData?: string;
+  HapticFeedback?: { impactOccurred(style: "light" | "medium" | "heavy"): void; notificationOccurred?(kind: "success" | "error" | "warning"): void };
 };
 
 export function telegram(): WebApp | null {
@@ -29,4 +30,11 @@ export function initTelegram() {
   return true;
 }
 
-export const haptic = (style: "light" | "medium" | "heavy" = "light") => telegram()?.HapticFeedback?.impactOccurred(style);
+// Telegram's signed launch data: who opened the Mini App. Empty outside Telegram.
+export const launchData = (): string | null => telegram()?.initData || null;
+
+export const haptic = (style: "light" | "medium" | "heavy" | "success" | "error" = "light") => {
+  const h = telegram()?.HapticFeedback;
+  if (style === "success" || style === "error") h?.notificationOccurred?.(style);
+  else h?.impactOccurred(style);
+};

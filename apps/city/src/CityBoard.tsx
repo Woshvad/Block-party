@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { BOARD, clampTarget, fitCamera, shortCount } from "./camera";
+import type { Me } from "./api";
 import { PerfProbe } from "./PerfHud";
 import { haptic, initTelegram } from "./telegram";
 
@@ -204,7 +205,7 @@ function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) 
   );
 }
 
-export default function CityBoard() {
+export default function CityBoard({ me }: { me?: Me | null }) {
   const hour = new Date().getHours();
   const [night, setNight] = useState(hour >= 19 || hour < 6);
   const [picked, setPicked] = useState<Place | null>(null);
@@ -219,6 +220,11 @@ export default function CityBoard() {
         <span className="live" /> 1,284 online · Mayor <b>ada.eth</b> · Law: <b>Double Faucet</b>
       </div>
       <div className="hud">
+        {me?.resident ? (
+          <div className="pill">
+            @{me.resident.handle} · <b>{me.gm.toLocaleString("en-US")} GM</b>
+          </div>
+        ) : null}
         <div className="pill">gm · Bell in 2h 14m</div>
         <div className="pill">World 8% · City 61% · Vibe Gap +53</div>
         <button className="pill" onClick={() => setNight((n) => !n)}>
