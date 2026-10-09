@@ -9,7 +9,7 @@ import { mint } from "./ledger";
 import { grantMood, maybeTilt } from "./moods";
 import { bellStamps, calls, crewBellScores, crewMembers, crews, duels, markets, residents, slateCards } from "./schema";
 import { myGrid } from "./slate";
-import { settleCalls } from "./tower";
+import { cityCalls, settleCalls } from "./tower";
 
 const dayStart = (d: CityDay) => new Date(`${d}T00:00:00Z`);
 
@@ -171,13 +171,7 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     .innerJoin(markets, eq(markets.id, slateCards.marketId))
     .where(eq(slateCards.cityDay, bellDay))
     .orderBy(asc(slateCards.slot));
-  const chances = cards.length
-    ? await db
-        .select({ userId: calls.userId, marketId: calls.marketId, chance: calls.chance })
-        .from(calls)
-        .where(and(inArray(calls.marketId, cards.map((c) => c.marketId)), eq(calls.status, "locked")))
-        .then((rows) => rows.filter((r) => !NPC_IDS.includes(r.userId)))
-    : [];
+  const chances = await cityCalls(db, cards.map((c) => c.marketId));
   const top = await db
     .select({ crewId: crewBellScores.crewId, name: crews.name, chips: crewBellScores.chips, longShots: crewBellScores.longShots, scoreMilli: crewBellScores.scoreMilli })
     .from(crewBellScores)

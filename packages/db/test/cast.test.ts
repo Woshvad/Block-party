@@ -45,6 +45,7 @@ async function slateDay() {
   await publishSlate(db, { now: new Date(d0 + 9 * H - MIN) });
   return { d0, f, ms, ids: await Promise.all(ms.map((m) => idOf(m.externalId))) };
 }
+const pon = (ids: string[]) => client`UPDATE users SET proof_of_neighbour_at = now() WHERE id IN ${client(ids)}`;
 const npcCallsOn = (npc: keyof typeof CAST, ids: string[]) => client`SELECT market_id, side, chance FROM calls WHERE user_id = ${CAST[npc].id} AND market_id IN ${client(ids)}`;
 
 beforeAll(() => ensureSystemAccounts(db));
@@ -93,6 +94,7 @@ describe("the cast plays the Slate", () => {
   it("their calls lock like anyone's without crashing the poll (no streak, no GM), and never move the City bar", async () => {
     const s = await slateDay();
     const people = await Promise.all(Array.from({ length: 10 }, () => makeResident(db)));
+    await pon(people);
     for (const u of people) await makeCall(db, u, { marketId: s.ids[1], side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(s.d0 + 9 * H) });
     await npcCalls(db, { now: new Date(s.d0 + 9 * H) });
     const r = await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 9 * H + MIN) });

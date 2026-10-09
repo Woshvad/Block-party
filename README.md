@@ -93,6 +93,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Tests:** every scenario checks that no GM is created or lost.
 30. **The Grudge Match** (done). The one duel a newcomer can play from minute one: against the friend whose crew invite they redeemed (now recorded, first inviter wins), head to head on tomorrow's Slate. 10 GM each in its own escrow, no Snap, once per pair ever in either direction (a unique index, so racing offers make one match), never across a block. Settled at that day's bell only: higher Slate Aura takes the 20 GM pot, a tie gives both back, an unanswered offer goes home.
    - Also fixed: a brick 23 race test whose barrier locked a row that didn't exist yet (flaky), and a test that assumed which Coin Flip sits in which Slate slot.
+31. **Only neighbours move the city's numbers** (done). Per the plan, calls from accounts without Proof of Neighbour never move the City bar or the Aura boards, so one viral link can't brigade a market. One helper (`cityCalls`) now feeds the City bar, receipts, the reel and the paper's Vibe Gap with Proof of Neighbour calls only (never the cast), and the Right List ranks only Proof of Neighbour residents (the cast keeps its labelled rows). The crew bar is unchanged.
 
 ## Deploying
 

@@ -23,7 +23,7 @@ import {
   ticketsAfter,
   vibeGap,
 } from "@bp/core";
-import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { areFrens } from "./chat";
 import { recordStreakDay } from "./daily";
@@ -31,7 +31,7 @@ import { moodState } from "./moods";
 import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
 import { isOnSlate, slateModifier } from "./slate";
-import { calls, crewMembers, feedPolls, marketTicks, markets, residents, tickets } from "./schema";
+import { calls, crewMembers, feedPolls, marketTicks, markets, residents, tickets, users } from "./schema";
 
 export class TowerError extends Error {
   constructor(
@@ -220,6 +220,20 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
   return { ...result, settled: (await settleCalls(db, { now })).settled };
 }
 
+// --- The city's calls ------------------------------------------------------------------
+
+// The calls that move the City bar: Proof of Neighbour accounts only (so one
+// viral link can't brigade a market), and never the cast.
+export async function cityCalls(db: Db, marketIds: string[]) {
+  if (!marketIds.length) return [];
+  const rows = await db
+    .select({ userId: calls.userId, marketId: calls.marketId, side: calls.side, chance: calls.chance })
+    .from(calls)
+    .innerJoin(users, eq(users.id, calls.userId))
+    .where(and(inArray(calls.marketId, marketIds), eq(calls.status, "locked"), isNotNull(users.proofOfNeighbourAt)));
+  return rows.filter((r) => !NPC_IDS.includes(r.userId));
+}
+
 // --- Settling -------------------------------------------------------------------------
 
 // Scores every locked call on a resolved market, once (the database refuses a
@@ -281,9 +295,7 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
   if (!r) return null;
   const npc = npcById((await db.select({ u: calls.userId }).from(calls).where(eq(calls.id, callId)))[0]!.u);
   if (!r.handle && !npc) return null;
-  const cityRows = (await db.select({ userId: calls.userId, chance: calls.chance }).from(calls).where(and(eq(calls.marketId, r.marketId), eq(calls.status, "locked")))).filter(
-    (x) => !NPC_IDS.includes(x.userId),
-  );
+  const cityRows = await cityCalls(db, [r.marketId]);
   const city = cityRows.length >= TOWER.cityBarMin ? median(cityRows.map((x) => x.chance)) : null;
   const revealed = r.status === "resolved" && r.resolvedAt !== null && now >= revealAt(r.resolvedAt);
   return {
@@ -317,7 +329,9 @@ async function seasonTotals(db: Db, season: number, now: Date) {
   return db.execute<{ user_id: string; aura: string; settled: number; auras: number[]; last_call: Date }>(sql`
     SELECT c.user_id, SUM(c.aura_centi)::text AS aura, count(*)::int AS settled, array_agg(c.aura_centi) AS auras, max(c.locked_at) AS last_call
     FROM calls c JOIN markets m ON m.id = c.market_id
+    JOIN users u ON u.id = c.user_id
     WHERE c.status = 'locked' AND c.aura_centi IS NOT NULL AND c.via IS DISTINCT FROM 'tail'
+      AND (u.proof_of_neighbour_at IS NOT NULL OR u.id IN (SELECT user_id FROM npcs))
       AND m.status = 'resolved' AND m.resolved_at >= ${from.toISOString()}::timestamptz AND m.resolved_at < ${until.toISOString()}::timestamptz
     GROUP BY c.user_id`);
 }
@@ -482,15 +496,17 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
   let cityCount = 0;
   let crewCount = 0;
   if (!blurred && !m.infoOnly) {
-    // The cast's calls never move the City or Crew bars.
+    // The cast's calls never move the City or Crew bars; the City bar counts
+    // Proof of Neighbour accounts only.
     const locked = (
       await db
         .select({ userId: calls.userId, chance: calls.chance })
         .from(calls)
         .where(and(eq(calls.marketId, m.id), eq(calls.status, "locked")))
     ).filter((c) => !NPC_IDS.includes(c.userId));
-    cityCount = locked.length;
-    if (cityCount >= TOWER.cityBarMin) city = median(locked.map((c) => c.chance));
+    const neighbours = await cityCalls(db, [m.id]);
+    cityCount = neighbours.length;
+    if (cityCount >= TOWER.cityBarMin) city = median(neighbours.map((c) => c.chance));
     const [myCrew] = await db.select({ crewId: crewMembers.crewId }).from(crewMembers).where(and(eq(crewMembers.userId, userId), isNull(crewMembers.leftAt)));
     if (myCrew) {
       const mates = new Set(

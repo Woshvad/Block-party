@@ -2,6 +2,7 @@ import { CAST, type CityDay, type CloseItem, NPC_IDS, VERDICTS, addDays, getLaw,
 import { and, asc, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { duelLines } from "./duels";
+import { cityCalls } from "./tower";
 import { calls, crewBellScores, crews, dailyCloses, markets, mayorTerms, messages, moods, residents, slateCards } from "./schema";
 
 const dayStart = (d: CityDay) => new Date(`${d}T00:00:00Z`);
@@ -36,8 +37,9 @@ export async function stepClose(db: Db, bellDay: CityDay, now: Date) {
   }
   // The biggest Vibe Gap on the Slate (once 10 neighbours called), and how it settled.
   let gap: { question: string; world: number; city: number; size: number; verdict: string } | null = null;
+  const neighbours = await cityCalls(db, cards.map((c) => c.marketId));
   for (const c of cards) {
-    const cs = locked.filter((x) => x.marketId === c.marketId).map((x) => x.chance);
+    const cs = neighbours.filter((x) => x.marketId === c.marketId).map((x) => x.chance);
     if (cs.length < 10) continue;
     const city = median(cs)!;
     const size = Math.abs(city - c.world);

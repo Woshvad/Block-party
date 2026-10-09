@@ -47,6 +47,7 @@ function feed() {
   return { provider, ms, add };
 }
 const idOf = async (ext: string) => (await client`SELECT id FROM markets WHERE external_id = ${ext}`)[0]!.id as string;
+const pon = (ids: string[]) => client`UPDATE users SET proof_of_neighbour_at = now() WHERE id IN ${client(ids)}`;
 const callRow = async (id: string) => (await client`SELECT * FROM calls WHERE id = ${id}`)[0]!;
 
 async function code(p: Promise<unknown>) {
@@ -295,9 +296,12 @@ describe("the Floor: World, City, Crew", () => {
     await pollOdds(db, f.provider, { now: new Date(t) });
     const id = await idOf(m.externalId);
     const people = await Promise.all(Array.from({ length: 10 }, () => makeResident(db)));
+    await pon(people);
     await createCrew(db, people[0]!, { name: `Floor ${randomUUID().slice(0, 6)}` });
     for (const u of people.slice(1, 3)) await redeemInvite(db, u, (await createInvite(db, people[0]!)).code);
     for (const [i, u] of people.entries()) await makeCall(db, u, { marketId: id, side: "yes", chance: 55 + i, seenPrice: 10 }, { now: new Date(t + 1000) });
+    // A caller without Proof of Neighbour never moves the City bar.
+    await makeCall(db, await makeResident(db), { marketId: id, side: "yes", chance: 99, seenPrice: 10 }, { now: new Date(t + 1000) });
     await pollOdds(db, f.provider, { now: new Date(t + MIN) });
     const v = await marketView(db, people[0]!, id, { now: new Date(t + 2 * MIN) });
     expect(v).toMatchObject({ world: 10, city: 60, crew: 56, vibeGap: 50, blurred: false, counts: { city: 10, crew: 3 } });
@@ -324,6 +328,7 @@ describe("the Floor: World, City, Crew", () => {
     const id = await idOf(m.externalId);
     const slate = { onSlate: async () => true };
     const people = await Promise.all(Array.from({ length: 10 }, () => makeResident(db)));
+    await pon(people);
     for (const u of people) await makeCall(db, u, { marketId: id, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + 1000), ...slate });
     await pollOdds(db, f.provider, { now: new Date(t + MIN) });
     const me = await makeResident(db);
@@ -466,6 +471,7 @@ describe("settling, receipts and the Right List", () => {
     await pollOdds(db, f.provider, { now: new Date(t) });
     const ids = await Promise.all(ms.map((m) => idOf(m.externalId)));
     const [steady, few, meh] = [await makeResident(db), await makeResident(db), await makeResident(db)];
+    await pon([steady, few, meh]);
     const topUp = (u: string) => client`INSERT INTO tickets (user_id, balance, as_of) VALUES (${u}, 9, ${new Date(t).toISOString().slice(0, 10)}) ON CONFLICT (user_id) DO UPDATE SET balance = 9`;
     // steady: 12 calls at YES 60 (all YES); few: 3 calls at YES 99
     await client`UPDATE tickets SET balance = 9 WHERE user_id = ${steady}`;
@@ -496,6 +502,9 @@ describe("settling, receipts and the Right List", () => {
     const order = after.rows.filter((r) => r.userId === steady || r.userId === meh).map((r) => r.userId);
     expect(order).toEqual([steady, meh]); // +9 a call beats +1.96
     expect(after.rows.find((r) => r.userId === meh)!.rank).toBeGreaterThan(after.me!.rank);
+    // Without Proof of Neighbour you're not on the Aura boards.
+    await client`UPDATE users SET proof_of_neighbour_at = NULL WHERE id = ${meh}`;
+    expect((await rightList(db, { now: new Date(t + D) })).rows.some((r) => r.userId === meh)).toBe(false);
     const later = await rightList(db, { now: new Date(t + 20 * D), season: after.season, userId: steady });
     expect(later.me).toMatchObject({ settled: 12, rusty: true }); // still listed, marked rusty
   });
