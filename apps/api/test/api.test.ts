@@ -529,3 +529,15 @@ describe("getting around over HTTP", () => {
     expect((await call("POST", "/v1/rooms/ticket", { token: u.token, body: { place: `home:${u.userId}` }, via: city })).body.error.code).toBe("RIDE_FIRST");
   });
 });
+
+describe("away life over HTTP", () => {
+  it("the recap is the player's own; the away list is internal only", async () => {
+    const u = await resident();
+    const r = await call("GET", "/v1/away/recap", { token: u.token });
+    expect(r.status).toBe(200);
+    expect(r.body).toHaveProperty("highlights");
+    expect((await call("GET", "/internal/rooms/away?place=roof")).status).toBe(404);
+    expect((await call("GET", "/internal/rooms/away?place=roof", { headers: { "x-internal-secret": SECRET } })).status).toBe(200);
+    expect((await call("GET", "/internal/rooms/away?place=../x", { headers: { "x-internal-secret": SECRET } })).status).toBe(400);
+  });
+});

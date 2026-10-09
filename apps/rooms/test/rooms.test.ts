@@ -17,7 +17,13 @@ beforeAll(async () => {
     bindings: { TICKET_SECRET, INTERNAL_SECRET, API_URL: "https://api.test" },
     // Stands in for the API: captures room effects the Worker posts.
     outboundService: async (req: Request) => {
-      if (new URL(req.url).pathname === "/internal/rooms/effects") effects.push(await req.json());
+      const path = new URL(req.url).pathname;
+      if (path === "/internal/rooms/effects") effects.push(await req.json());
+      if (path === "/internal/rooms/away") {
+        // Two dimmed residents on the watch party floor; garbage elsewhere must not break a room.
+        if (new URL(req.url).searchParams.get("place") === "watch_party") return Response.json([{ userId: "zz1", handle: "away1" }, { userId: "zz2", handle: "away2" }]);
+        return new Response("not json at all");
+      }
       return new Response("{}");
     },
   });
@@ -240,4 +246,18 @@ describe("reconnecting across copies", () => {
     expect(await (await internal("/internal/presence?place=home:split&u=kme")).json()).toEqual({ here: true, copy: 1 });
     for (const p of [...crowd.slice(5), again]) p.ws.close();
   }, 60_000);
+});
+
+describe("away residents in a live room", () => {
+  it("the room draws away residents from the API, and a junk answer breaks nothing", async () => {
+    const a = await connect("aw1", { place: "watch_party" });
+    await a.next("welcome");
+    const hc = await a.next("headcount");
+    const later = hc.headcount.away === 2 ? hc : await a.next("headcount");
+    expect(later.headcount.away).toBe(2);
+    const b = await connect("aw2", { place: "faucet" });
+    expect((await b.next("welcome")).headcount.away).toBe(0);
+    a.ws.close();
+    b.ws.close();
+  });
 });

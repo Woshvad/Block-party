@@ -192,6 +192,23 @@ export class RoomDO implements DurableObject {
   private engine: RoomEngine | null = null;
   private place = "";
   private copy = 0;
+  private awayFetchedAt = 0;
+
+  // Away residents are drawn dimmed; refresh the list at most every 15 minutes.
+  private refreshAway(e: RoomEngine) {
+    if (!this.env.API_URL || Date.now() - this.awayFetchedAt < 15 * 60_000) return;
+    this.awayFetchedAt = Date.now();
+    this.ctx.waitUntil(
+      fetch(`${this.env.API_URL}/internal/rooms/away?place=${encodeURIComponent(this.place)}`, { headers: { "x-internal-secret": this.env.INTERNAL_SECRET } })
+        .then(async (r) => {
+          if (!r.ok) return;
+          const list = (await r.json()) as Array<{ userId: string; handle: string }>;
+          if (!Array.isArray(list)) return;
+          this.deliver(e.setAway(list.filter((x) => typeof x?.userId === "string").map((x) => ({ userId: x.userId, handle: String(x.handle) }))).deliveries);
+        })
+        .catch(() => undefined),
+    );
+  }
 
   constructor(
     private ctx: DurableObjectState,
@@ -291,6 +308,7 @@ export class RoomDO implements DurableObject {
       }
       server.serializeAttachment(fromMember(e.snapshot(t.u)!, t.age));
       this.deliver(out.deliveries);
+      this.refreshAway(e);
       await this.dir().fetch("https://dir/joined", { method: "POST", body: JSON.stringify({ copy: this.copy, u: t.u, crew: t.crew }) });
       await this.afterEvent(e, out.effects);
       return new Response(null, { status: 101, webSocket: client });

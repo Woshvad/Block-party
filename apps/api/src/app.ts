@@ -40,6 +40,8 @@ import {
   getResident,
   isHandleAvailable,
   accountAgeDays,
+  awayAt,
+  awayRecap,
   takeRide,
   whereabouts,
   endCozy,
@@ -650,6 +652,10 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ticket, url: `${cfg.roomsUrl}/connect?ticket=${encodeURIComponent(ticket)}` });
   });
 
+  // --- Away life --------------------------------------------------------------
+
+  app.get("/v1/away/recap", auth, async (c) => c.json(await awayRecap(db, c.get("userId"), opts())));
+
   // --- Getting around --------------------------------------------------------
 
   app.get("/v1/whereabouts", auth, async (c) => c.json(await whereabouts(db, c.get("userId"), opts())));
@@ -721,6 +727,13 @@ export function createApp(cfg: AppConfig) {
         },
       }),
     );
+  });
+
+  // Who's wandering a place in their away life, for the rooms to draw dimmed.
+  app.get("/internal/rooms/away", internal, async (c) => {
+    const place = c.req.query("place") ?? "";
+    if (!PLACE_RE.test(place)) throw new ApiError(400, "INVALID_INPUT", "which place?");
+    return c.json(await awayAt(db, place, { ...opts(), limit: 50 }));
   });
 
   // The rooms Worker reports what happened: Cozy, and room chat for the AI check.

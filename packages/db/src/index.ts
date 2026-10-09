@@ -1,4 +1,5 @@
 export * from "./accounts";
+export * from "./away";
 export * from "./bell";
 export * from "./chain";
 export * from "./chat";
