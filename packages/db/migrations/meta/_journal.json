@@ -204,6 +204,13 @@
       "when": 1791551707769,
       "tag": "0028_slate",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791552488556,
+      "tag": "0029_bell_show",
+      "breakpoints": true
     }
   ]
 }

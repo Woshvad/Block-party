@@ -153,6 +153,8 @@ import {
   todaySlate,
   myGrid,
   publishSlate,
+  claimBellStamp,
+  reel,
   setCrewBotMutes,
   startNap,
   cancelLongAction,
@@ -822,6 +824,13 @@ export function createApp(cfg: AppConfig) {
     if (!g) throw new ApiError(404, "NOT_FOUND", "no Slate that day");
     return c.json(g);
   });
+  // The bell: tonight's reel, and the Bell Stamp for calling today.
+  app.get("/v1/reel", auth, async (c) => {
+    const r = await reel(db, c.get("userId"), { ...opts(), bellDay: c.req.query("day") });
+    if (!r) throw new ApiError(404, "NOT_FOUND", "the bell hasn't rung for that day yet");
+    return c.json(r);
+  });
+  app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
   app.get("/v1/receipts/:token", async (c) => {

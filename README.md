@@ -70,6 +70,12 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Bell Modifier:** one a day (Contrarian Day, NOTHING Day, Blind Slate); Blind Slate hides your crew's bar even after you lock.
    - **The grid:** sealed until the bell, then coloured by Aura (🟩 ⬜ 🟥 ⬛, 🟨 for a Long Shot YES that hit, grey for a voided card, ⏳ for one not settled by the bell), plus the share line ("Block Party #5 🟩⬜🟥⬛🟩🟨") and your city percentile (a tie isn't a win). Calls made before the Slate went out don't count on it.
    - **Fixed here:** the feed status could read a poll stamped later than "now" as proof the feed was alive.
+26. **The bell show** (done).
+   - **The Tower step:** a new `runBell` step, run once per bell after the gm chains, scores anything outstanding and reveals every market that settled that day (one settling just after the bell waits for the next). Receipts become moods: CALLED IT, and REKT with its free Copium. 4+ REKT squares on the day's grid tilt you; small misses (white squares) and calls from before the Slate went out don't count.
+   - **Crew Bell Scores:** one chip per CALLED IT by a current crewmate, ×1.5 per Long Shot caught (a YES that hit), ×1.25 for a 7+ day gm chain. The ×2 for a won Snap waits for Fade Duels.
+   - **Bell Stamps:** one tap after a locked call that day pays 25 GM (150 on Sundays), once, even with racing taps.
+   - **The reel's data:** the Slate band by band with the Long Shot last, the top 3 crews and yours, the day's burn, your grid, and tomorrow's Long Shot. Only after the bell.
+   - **Waits for later bricks:** the foil stamp for being on the Roof at the bell, the losing Bunkers' lights, the Ratio of the Day and Tower Lights.
 
 ## Deploying
 

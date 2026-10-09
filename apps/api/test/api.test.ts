@@ -756,3 +756,12 @@ describe("the Slate over HTTP", () => {
     expect((await call("GET", "/v1/slate")).status).toBe(401);
   });
 });
+
+describe("the bell over HTTP", () => {
+  it("no call today: no Bell Stamp; the reel for a day the bell hasn't rung is a 404", async () => {
+    const me = await resident();
+    expect((await call("POST", "/v1/bell-stamp", { token: me.token })).body.error.code).toBe("NO_CALL_TODAY");
+    expect((await call("GET", "/v1/reel?day=2999-01-01", { token: me.token })).status).toBe(404);
+    expect((await call("GET", "/v1/reel", { token: me.token })).status).toBe(200); // last night's, even if empty
+  });
+});

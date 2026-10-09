@@ -1316,3 +1316,36 @@ export const slateCards = pgTable(
     check("slate_cards_slot", sql`${t.slot} BETWEEN 0 AND 5`),
   ],
 );
+
+// Bell Stamps: one a city day, for calling that day.
+export const bellStamps = pgTable(
+  "bell_stamps",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    gm: integer("gm").notNull(),
+    txId: uuid("tx_id")
+      .notNull()
+      .references(() => gmTransactions.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.cityDay] })],
+);
+
+// Each crew's Bell Score at a bell (scores never touch GM or Aura).
+export const crewBellScores = pgTable(
+  "crew_bell_scores",
+  {
+    bellDay: date("bell_day", { mode: "string" }).notNull(),
+    crewId: uuid("crew_id")
+      .notNull()
+      .references(() => crews.id),
+    chips: integer("chips").notNull(),
+    longShots: integer("long_shots").notNull(),
+    chainDays: integer("chain_days").notNull(),
+    scoreMilli: integer("score_milli").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.bellDay, t.crewId] }), index("crew_bell_scores_rank").on(t.bellDay, t.scoreMilli)],
+);

@@ -57,7 +57,7 @@ describe("the Halving", () => {
     const burnBefore = (await supplyStats(db)).destroyed;
 
     const out = await runBell(db, { now: bellOf(1) });
-    expect(Object.keys(out.ran).sort()).toEqual(["chains", "election", "halving"]); // 2026-11-02 is a Monday
+    expect(Object.keys(out.ran).sort()).toEqual(["chains", "election", "halving", "tower"]); // 2026-11-02 is a Monday
 
     expect(await bal(big)).toBe(3500);
     expect(await bal(odd)).toBe(3501); // rounds for the player

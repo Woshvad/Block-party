@@ -22,6 +22,7 @@ import {
   LifeError,
   RelationshipError,
   TowerError,
+  BellShowError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -187,7 +188,9 @@ const TOWER: Record<TowerError["code"], number> = {
   FEED_PAUSED: 503,
 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER };
+const BELL_SHOW: Record<BellShowError["code"], number> = { NO_CALL_TODAY: 409, NO_RESIDENT: 404 };
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -213,6 +216,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof SafetyError) return out(SAFETY[e.code], e.code, e.message);
   if (e instanceof RideError) return out(RIDE[e.code], e.code, e.message);
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
+  if (e instanceof BellShowError) return out(BELL_SHOW[e.code], e.code, e.message);
   if (e instanceof TowerError) return out(TOWER[e.code], e.code, e.message);
   if (e instanceof RelationshipError) return out(RELATIONSHIP[e.code], e.code, e.message);
   if (e instanceof LifeError) return out(LIFE[e.code], e.code, e.message);
