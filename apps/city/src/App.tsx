@@ -20,6 +20,7 @@ const Results = dynamic(() => import("./screens/Results"), { ssr: false });
 const FaucetFren = dynamic(() => import("./screens/FaucetFren"), { ssr: false });
 const Social = dynamic(() => import("./screens/Social"), { ssr: false });
 const Crew = dynamic(() => import("./screens/Crew"), { ssr: false });
+const Games = dynamic(() => import("./screens/Games"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -175,6 +176,8 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       <FaucetFren api={api} onBack={back} />
     ) : page === "social" ? (
       <Social api={api} me={me} onBack={back} />
+    ) : page === "games" ? (
+      <Games api={api} me={me} onBack={back} onChanged={refreshGm} />
     ) : page === "crew" ? (
       <Crew api={api} me={me} onBack={back} onChanged={refreshGm} onGoToHouse={(crewId) => (setPage(null), setTrip({ place: `crew_house:${crewId}`, ridesFree: false }))} />
     ) : page ? (

@@ -26,6 +26,8 @@ const app = createApp({
   // Dev and load tests only: trust a header for the client IP (Cloudflare's cf-connecting-ip in production).
   ...(process.env.CLIENT_IP_HEADER ? { clientIpHeader: process.env.CLIENT_IP_HEADER } : {}),
   ...(process.env.ODDS_SOURCE === "mock" ? { odds: mockProvider(() => sampleMarkets(new Date())) } : {}),
+  // The same switches as on Workers, off unless set to "on".
+  features: { duels: process.env.FEATURE_DUELS === "on", towerLights: process.env.FEATURE_TOWER_LIGHTS === "on", realMoney: process.env.FEATURE_REAL_MONEY === "on" },
   // The live rooms (pnpm --filter @bp/rooms dev), wired as on Workers.
   ...(process.env.ROOMS_URL && process.env.TICKET_SECRET
     ? { rooms: httpRoomsClient({ url: process.env.ROOMS_URL, secret: need("INTERNAL_SECRET") }), roomsUrl: process.env.ROOMS_URL, ticketSecret: process.env.TICKET_SECRET }

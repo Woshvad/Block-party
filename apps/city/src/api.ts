@@ -216,6 +216,32 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     league: () => request<Record<string, unknown> | null>("GET", "/v1/crews/mine/league"),
     champions: () => request<Record<string, unknown>[]>("GET", "/v1/league/champions"),
     botMutes: (kinds: string[]) => request<Record<string, unknown>>("PUT", "/v1/crews/mine/bot-mutes", { kinds }),
+
+    // --- Games
+    duels: () => request<Duel[]>("GET", "/v1/duels"),
+    duelPrefs: (p: Record<string, unknown>) => request<Record<string, unknown>>("PUT", "/v1/duels/prefs", p),
+    challenge: (marketId: string, opponentId: string) => request<Duel>("POST", "/v1/duels", { marketId, opponentId }),
+    respondDuel: (id: string, accept: boolean) => request<Duel>("POST", `/v1/duels/${encodeURIComponent(id)}/respond`, { accept }),
+    cancelDuel: (id: string) => request<Duel>("POST", `/v1/duels/${encodeURIComponent(id)}/cancel`),
+    snap: (id: string) => request<Duel>("POST", `/v1/duels/${encodeURIComponent(id)}/snap`),
+    retreat: (id: string) => request<Duel>("POST", `/v1/duels/${encodeURIComponent(id)}/retreat`),
+    grudges: () => request<Grudge[]>("GET", "/v1/grudge"),
+    offerGrudge: () => request<Grudge>("POST", "/v1/grudge"),
+    respondGrudge: (id: string, accept: boolean) => request<Grudge>("POST", `/v1/grudge/${encodeURIComponent(id)}/respond`, { accept }),
+    cancelGrudge: (id: string) => request<Grudge>("POST", `/v1/grudge/${encodeURIComponent(id)}/cancel`),
+    cityMarkets: () => request<CityMarket[]>("GET", "/v1/city-markets"),
+    stake: (id: string, side: Side, stake: number) => request<Record<string, unknown>>("POST", `/v1/city-markets/${encodeURIComponent(id)}/stake`, { side, stake }),
+    seasonStack: () => request<{ season: number; rows: Record<string, unknown>[] }>("GET", "/v1/season-stack"),
+    ratio: () => request<{ cityDay: string; marketId: string; prompt: string; votingFrom: string }>("GET", "/v1/ratio"),
+    submitRatio: (text: string) => request<Record<string, unknown>>("POST", "/v1/ratio", { text }),
+    ratioPair: () => request<{ a: { id: string; text: string }; b: { id: string; text: string } } | null>("GET", "/v1/ratio/pair"),
+    voteRatio: (a: string, b: string, winner: string) => request<Record<string, unknown>>("POST", "/v1/ratio/vote", { a, b, winner }),
+    lights: () => request<{ cityDay: string; reserve: number; top: Record<string, unknown> | null; mine: Record<string, unknown> | null }>("GET", "/v1/tower-lights"),
+    bidLights: (amount: number) => request<Record<string, unknown>>("POST", "/v1/tower-lights/bid", { amount }),
+    startShift: () => request<{ shiftId: string; items: { text: string }[]; answerBy: string; endsAt: string }>("POST", "/v1/shifts"),
+    answerShift: (id: string, answers: boolean[]) => request<{ score: number; pay: number }>("POST", `/v1/shifts/${encodeURIComponent(id)}/answers`, { answers }),
+    collectShift: (id: string) => request<{ pay: number; replayed: boolean }>("POST", `/v1/shifts/${encodeURIComponent(id)}/collect`),
+    awayShift: () => request<Record<string, unknown>>("POST", "/v1/shifts/away"),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
 }
@@ -313,3 +339,6 @@ export type OpenTable = { id: string; name: string; members?: number; banner?: s
 export type Chain = { length: number; needsRelight: string | null; relightVotes: number; relightNeeded: number; today: { gms: number; active: number; needed: number } };
 export type CrewHouse = { wallFinish: string; floorFinish: string; rooms: string[]; proposals: { id: string; pieceId: string; proposerId?: string; approvals?: number; [k: string]: unknown }[]; approvalsNeeded: { lead: number; others: number }; maxMembers: number; placed: PlacedItem[]; storage: { itemId: string; pieceId: string }[] };
 export type Syndicate = { id: string; marketId: string | null; cityMarketId: string | null; side: Side; perShake: number; status: string; needed: number; expiresAt: string; [k: string]: unknown };
+export type Duel = { id: string; marketId: string; challengerId: string; opponentId: string; challengerSide: Side; status: string; stakeChallenger: number; stakeOpponent: number; snapChallenger: number; snapOpponent: number; lastCall: boolean; retreatedBy: string | null; winnerId: string | null; createdAt: string };
+export type Grudge = { id: string; cityDay: string; newcomerId: string; inviterId: string; status: string; winnerId: string | null };
+export type CityMarket = { id: string; question: string; kind: string; place: string | null; threshold: number | null; locksAt: string; bellDay: string };
