@@ -1,0 +1,19 @@
+:root { --bg: #dfeaf5; --ink: #14161f; --pill: #ffffff; --muted: #6b7180; --green: #1d9e75; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overscroll-behavior: none; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.stage { position: fixed; inset: 0; touch-action: none; }
+.pill { background: var(--pill); border-radius: 999px; padding: 8px 14px; font-size: 14px; box-shadow: 0 1px 2px rgba(20, 22, 31, 0.08); }
+.hud { position: fixed; top: calc(env(safe-area-inset-top) + 52px); left: 10px; display: flex; flex-direction: column; gap: 6px; z-index: 2; font-variant-numeric: tabular-nums; }
+.perf { font: 12px ui-monospace, monospace; background: rgba(20, 22, 31, 0.82); color: #e6f1fb; border-radius: 10px; padding: 8px 10px; white-space: pre; }
+.tabs { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 12px); display: flex; justify-content: space-around; background: var(--pill); border-radius: 22px; padding: 8px; z-index: 2; }
+.tabs a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 8px 14px; border-radius: 14px; }
+.tabs a.on { background: var(--ink); color: #fff; }
+.pin { border: 0; background: var(--pill); color: var(--ink); border-radius: 999px; padding: 4px 10px 4px 5px; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 13px; white-space: nowrap; box-shadow: 0 1px 3px rgba(20, 22, 31, 0.18); cursor: pointer; }
+button.pill { border: 0; cursor: pointer; text-align: left; color: var(--ink); }
+.sheet { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 84px); background: var(--pill); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; z-index: 3; font-size: 14px; }
+.sheet .go { color: var(--green); }
+.pin .ico { width: 26px; height: 26px; border-radius: 50%; background: #f1efe8; display: grid; place-items: center; font-size: 15px; }
+.banner { position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 10px; right: 10px; z-index: 2; background: rgba(20, 22, 31, 0.86); color: #e6f1fb; border-radius: 999px; padding: 8px 14px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.banner b { color: #fff; font-weight: 600; }
+.banner .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; margin-right: 4px; vertical-align: middle; }

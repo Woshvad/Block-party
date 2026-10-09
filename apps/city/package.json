@@ -1,0 +1,27 @@
+{
+  "name": "@bp/city",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "start": "next start -p 3100",
+    "test": "vitest run",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "@react-three/drei": "10.0.0",
+    "@react-three/fiber": "9.0.4",
+    "next": "16.3.8",
+    "react": "19.1.9",
+    "react-dom": "19.1.9",
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "@types/three": "0.170.0",
+    "typescript": "^7.0.2"
+  }
+}

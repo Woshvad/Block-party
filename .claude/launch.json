@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "city",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@bp/city", "dev"],
+      "port": 3100
+    }
+  ]
+}
