@@ -18,6 +18,7 @@ import {
   redeemInvite,
   receipt,
   rightList,
+  receiptBinder,
   settleCalls,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
@@ -507,5 +508,49 @@ describe("settling, receipts and the Right List", () => {
     expect((await rightList(db, { now: new Date(t + D) })).rows.some((r) => r.userId === meh)).toBe(false);
     const later = await rightList(db, { now: new Date(t + 20 * D), season: after.season, userId: steady });
     expect(later.me).toMatchObject({ settled: 12, rusty: true }); // still listed, marked rusty
+  });
+
+  it("the Receipt Binder: your 9 best CALLED ITs of the season, by Aura, revealed only, never a Tail or a REKT", async () => {
+    const t = fresh();
+    const f = feed();
+    const ms = Array.from({ length: 13 }, (_, i) => f.add(t, { question: `Q${i}?`, freezesAt: new Date(t + 2 * H), settlesBy: new Date(t + 3 * H) }));
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const ids = await Promise.all(ms.map((m) => idOf(m.externalId)));
+    const [me, fren] = [await makeResident(db), await makeResident(db)];
+    await pon([me, fren]);
+    const topUp = (u: string) => client`INSERT INTO tickets (user_id, balance, as_of) VALUES (${u}, 9, ${new Date(t).toISOString().slice(0, 10)}) ON CONFLICT (user_id) DO UPDATE SET balance = 9`;
+    // 12 YES calls, more sure each time (more Aura when right); market 12 is a Tail of my fren.
+    for (const [i, id] of ids.slice(0, 12).entries()) {
+      if (i % 3 === 0) {
+        await topUp(me);
+        await topUp(fren);
+      }
+      await makeCall(db, me, { marketId: id, side: "yes", chance: 55 + i * 3, seenPrice: 50 }, { now: new Date(t + 1000) });
+    }
+    await makeCall(db, fren, { marketId: ids[12]!, side: "yes", chance: 95, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await pollOdds(db, f.provider, { now: new Date(t + MIN) });
+    const [p, q] = me < fren ? [me, fren] : [fren, me];
+    await client`INSERT INTO frens (a, b) VALUES (${p}, ${q})`;
+    await topUp(me);
+    await makeCall(db, me, { marketId: ids[12]!, via: "tail", viaUserId: fren, chance: 95, seenPrice: 50 }, { now: new Date(t + 2 * MIN) });
+    // My fren: one right (12), one REKT (1), and a Tail of me (0). Only the right one belongs in a binder.
+    await topUp(fren);
+    await makeCall(db, fren, { marketId: ids[1]!, side: "yes", chance: 90, seenPrice: 50 }, { now: new Date(t + 2 * MIN) });
+    await makeCall(db, fren, { marketId: ids[0]!, via: "tail", viaUserId: me, chance: 95, seenPrice: 50 }, { now: new Date(t + 2 * MIN) });
+    await pollOdds(db, f.provider, { now: new Date(t + 3 * MIN) });
+    // Markets 1 and 4 resolve NO (REKT); the rest, and the tailed one, YES.
+    ms.forEach((m, i) => (m.resolved = i !== 1 && i !== 4));
+    await pollOdds(db, f.provider, { now: new Date(t + 4 * H) });
+
+    expect((await receiptBinder(db, me, { now: new Date(t + 5 * H) })).receipts).toEqual([]); // sealed until the bell
+    const { receipts } = await receiptBinder(db, me, { now: new Date(t + D) });
+    expect(receipts).toHaveLength(9);
+    // The surest right calls first: markets 11 down to 3 (1 and 4 were REKT; the tail never counts).
+    expect(receipts.map((r) => r.question)).toEqual(["Q11?", "Q10?", "Q9?", "Q8?", "Q7?", "Q6?", "Q5?", "Q3?", "Q2?"]);
+    expect(receipts.every((r) => r.aura > 0)).toBe(true);
+    for (let i = 1; i < receipts.length; i++) expect(receipts[i - 1]!.aura).toBeGreaterThanOrEqual(receipts[i]!.aura);
+    expect(JSON.stringify(receipts)).not.toMatch(/wallet|usdc|amount|real/i);
+    // Someone else's binder isn't mine, and holds no REKT and no Tail even with room to spare.
+    expect((await receiptBinder(db, fren, { now: new Date(t + D) })).receipts.map((r) => r.question)).toEqual(["Q12?"]);
   });
 });

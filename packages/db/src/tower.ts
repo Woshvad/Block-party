@@ -346,6 +346,36 @@ async function seasonTotals(db: Db, season: number, now: Date) {
     GROUP BY c.user_id`);
 }
 
+// The Receipt Binder: your 9 best receipts of the season (CALLED IT, by Aura),
+// for your profile and the trophy wall at home. Revealed only, as on the Right
+// List; Tails earn no Aura and don't count. Never an amount or "backed for real".
+export const BINDER_SIZE = 9;
+export async function receiptBinder(db: Db, userId: string, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const season = seasonOf(cityDay(now));
+  const from = seasonStart(season);
+  const lastBell = new Date(`${cityDay(now)}T00:00:00Z`);
+  const rows = await db
+    .select({ callId: calls.id, question: markets.question, side: calls.side, chance: calls.chance, world: calls.lockedPrice, aura: calls.auraCenti, resolvedAt: markets.resolvedAt })
+    .from(calls)
+    .innerJoin(markets, eq(markets.id, calls.marketId))
+    .where(
+      and(
+        eq(calls.userId, userId),
+        eq(calls.status, "locked"),
+        isNotNull(calls.auraCenti),
+        sql`${calls.via} IS DISTINCT FROM 'tail'`,
+        eq(markets.status, "resolved"),
+        sql`(${calls.side} = 'yes') = ${markets.outcome}`,
+        gte(markets.resolvedAt, from),
+        lt(markets.resolvedAt, lastBell),
+      ),
+    )
+    .orderBy(desc(calls.auraCenti), desc(markets.resolvedAt))
+    .limit(BINDER_SIZE);
+  return { season, receipts: rows.map((r) => ({ callId: r.callId, question: r.question, side: r.side, chance: r.chance, world: r.world, aura: r.aura! / 100, resolvedAt: r.resolvedAt })) };
+}
+
 // Season Aura ÷ (settled calls + 15), shown as "Aura +6.2 per call ± 3.1".
 // 10 settled calls to appear; no call in 14 days marks you rusty, not gone.
 export async function rightList(db: Db, opts: { now?: Date; season?: number; limit?: number; userId?: string } = {}) {
