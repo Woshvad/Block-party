@@ -93,7 +93,7 @@ function xz(r: Rect) {
 export type Lot =
   | { kind: "house"; x: number; z: number; w: number; d: number; h: number; color: string; roof: string; yaw: number }
   | { kind: "shop"; x: number; z: number; w: number; d: number; h: number; color: string; awning: string; yaw: number }
-  | { kind: "office"; x: number; z: number; w: number; d: number; h: number; color: string; glass: string; scale?: number }
+  | { kind: "office"; x: number; z: number; w: number; d: number; h: number; color: string; glass: string; tall?: number }
   | { kind: "tree"; x: number; z: number; s: number }
   | { kind: "parking"; x: number; z: number; w: number; d: number }
   | { kind: "pool"; x: number; z: number; w: number; d: number }
@@ -157,6 +157,11 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
           continue;
         }
         if (bx === DINER_BLOCK.bx && bz === DINER_BLOCK.bz && i === 0 && j === 0) continue; // the Diner's lot
+        if (j === 1) {
+          // The side lots stay open: a pocket of trees between the shops, so a block breathes.
+          out.push({ kind: "tree", x: p.x - 0.6, z: p.z - 0.5, s: 0.8 }, { kind: "tree", x: p.x + 0.5, z: p.z + 0.6, s: 0.65 });
+          continue;
+        }
         out.push({ kind: "shop", x: p.x, z: p.z, w: cell * 0.9, d: cell * 0.85, h: 1.6 + Math.floor(r() * 3) * 0.9, color: pick(r, SHOP), awning: pick(r, AWNING), yaw: facing(i, j) });
       }
   } else if (zone === "office" || (zone === "residential" && nearSquare(bx, bz))) {
@@ -177,7 +182,7 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
         return;
       }
       const h = (5 + r() * 9) * (0.6 + near * 0.7) * flat;
-      out.push({ kind: "office", x, z, w: half * 0.72, d: half * 0.72, h, color: pick(r, OFFICE), glass: pick(r, GLASS), scale: (1.9 + near * 1.6 + r() * 0.5) * (zone === "residential" ? 0.75 : 1) });
+      out.push({ kind: "office", x, z, w: half * 0.72, d: half * 0.72, h, color: pick(r, OFFICE), glass: pick(r, GLASS), tall: (0.75 + near * 1.3 + r() * 0.35) * (zone === "residential" ? 0.6 : 1) });
     });
   } else if (zone === "industrial") {
     // Factories on the four quarters, yard kit (chimneys, tanks, containers, a water tower) between.

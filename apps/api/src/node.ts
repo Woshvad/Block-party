@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
-import { mockProvider, sampleMarkets } from "@bp/core";
+import { type OddsProvider, mockProvider, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { createApp } from "./app";
 import { runMinute } from "./cron";
@@ -18,6 +18,9 @@ if (!schema.upToDate) {
   console.error(`database has ${schema.applied}/${schema.expected} migrations; run pnpm db:migrate first`);
   process.exit(1);
 }
+// ODDS_SOURCE: "polymarket" (the live feed, read-only) or "mock" (a sample feed); unset, no odds.
+const ODDS: OddsProvider | undefined =
+  process.env.ODDS_SOURCE === "polymarket" ? polymarketProvider() : process.env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined;
 const app = createApp({
   db,
   telegramBotToken: need("TELEGRAM_BOT_TOKEN"),
@@ -25,7 +28,7 @@ const app = createApp({
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? "http://localhost:3000").split(","),
   // Dev and load tests only: trust a header for the client IP (Cloudflare's cf-connecting-ip in production).
   ...(process.env.CLIENT_IP_HEADER ? { clientIpHeader: process.env.CLIENT_IP_HEADER } : {}),
-  ...(process.env.ODDS_SOURCE === "mock" ? { odds: mockProvider(() => sampleMarkets(new Date())) } : {}),
+  ...(ODDS ? { odds: ODDS } : {}),
   // The same switches as on Workers, off unless set to "on".
   features: { duels: process.env.FEATURE_DUELS === "on", towerLights: process.env.FEATURE_TOWER_LIGHTS === "on", realMoney: process.env.FEATURE_REAL_MONEY === "on" },
   // The live rooms (pnpm --filter @bp/rooms dev), wired as on Workers.
@@ -36,7 +39,7 @@ const app = createApp({
 // LOCAL_CRON=1: run the Worker's minute cron here too, so a local city has a
 // bell, live odds and a Slate. Notifications aren't sent (no real bot locally).
 if (process.env.LOCAL_CRON === "1") {
-  const odds = process.env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined;
+  const odds = ODDS;
   let running = false;
   const tick = async () => {
     if (running) return; // a slow minute never overlaps the next

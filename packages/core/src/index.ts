@@ -23,6 +23,7 @@ export * from "./relationships";
 export * from "./pon";
 export * from "./faucet-fren";
 export * from "./tower";
+export * from "./polymarket";
 export * from "./receipt";
 export * from "./slate";
 export * from "./bell-show";

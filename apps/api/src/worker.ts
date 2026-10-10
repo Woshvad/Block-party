@@ -1,4 +1,4 @@
-import { createPrivyVerifier, mockProvider, openAiModeration, sampleMarkets } from "@bp/core";
+import { createPrivyVerifier, mockProvider, openAiModeration, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb } from "@bp/db";
 import { createApp } from "./app";
 import { runMinute } from "./cron";
@@ -27,7 +27,8 @@ type Env = {
   FEATURE_REAL_MONEY?: string;
 };
 
-const oddsFor = (env: Env) => (env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
+// ODDS_SOURCE: "polymarket" (the live feed, read-only) or "mock" (a sample feed); unset, no odds.
+const oddsFor = (env: Env) => (env.ODDS_SOURCE === "polymarket" ? polymarketProvider() : env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
 
 export default {
   async fetch(req: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
