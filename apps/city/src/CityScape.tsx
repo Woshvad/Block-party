@@ -462,6 +462,67 @@ function TrafficLights() {
 
 // --- The whole city ------------------------------------------------------------------------
 
+// Billboards on the Mempool quay: candle charts, green and red, that tick on.
+function Billboards({ night }: { night: boolean }) {
+  const lagoon = blockRect(0, GRID.blocks - 1);
+  const boards = useMemo(() => [-24, -10, 6, 20].map((x, i) => ({ x, z: lagoon.z - lagoon.d / 2 - 0.4, up: i % 2 === 0 })), [lagoon.z, lagoon.d]);
+  const canvases = useMemo(() => boards.map(() => { const c = document.createElement("canvas"); c.width = 256; c.height = 128; return c; }), [boards]);
+  const textures = useMemo(() => canvases.map((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }), [canvases]);
+  const series = useRef(boards.map((b) => Array.from({ length: 24 }, (_, k) => 64 + (b.up ? -k : k) * 1.4)));
+  useEffect(() => () => textures.forEach((t) => t.dispose()), [textures]);
+  const last = useRef(0);
+  useFrame(({ clock }) => {
+    if (clock.elapsedTime - last.current < 1.2 && last.current) return;
+    last.current = clock.elapsedTime;
+    canvases.forEach((c, i) => {
+      const s = series.current[i]!;
+      const drift = boards[i]!.up ? -0.8 : 0.8;
+      s.push(Math.min(116, Math.max(12, s[s.length - 1]! + drift + (Math.random() - 0.5) * 9)));
+      s.shift();
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#0e1118";
+      g.fillRect(0, 0, 256, 128);
+      g.strokeStyle = "#1e2432";
+      for (let y = 16; y < 128; y += 24) g.strokeRect(0, y, 256, 0);
+      s.forEach((v, k) => {
+        if (!k) return;
+        const up = v < s[k - 1]!;
+        g.fillStyle = up ? "#2bd67b" : "#ff4d5e";
+        const top = Math.min(v, s[k - 1]!);
+        g.fillRect(6 + k * 10, top, 7, Math.max(2, Math.abs(v - s[k - 1]!)));
+        g.fillRect(9 + k * 10, top - 4, 1, Math.abs(v - s[k - 1]!) + 8);
+      });
+      const pct = ((s[0]! - s[s.length - 1]!) / s[0]!) * 100;
+      g.font = "bold 18px sans-serif";
+      g.fillStyle = pct >= 0 ? "#2bd67b" : "#ff4d5e";
+      g.fillText(`${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`, 10, 24);
+      textures[i]!.needsUpdate = true;
+    });
+  });
+  return (
+    <>
+      {boards.map((b, i) => (
+        <group key={b.x} position={[b.x, 0, b.z]}>
+          <mesh position={[0, 1.4, 0]} castShadow>
+            <boxGeometry args={[0.15, 2.8, 0.15]} />
+            <meshStandardMaterial color="#3a3d44" />
+          </mesh>
+          <mesh position={[0, 3.3, 0]} castShadow>
+            <boxGeometry args={[4.2, 2.2, 0.15]} />
+            <meshStandardMaterial color="#2c2c2a" />
+          </mesh>
+          {[0.08, -0.08].map((dz) => (
+            <mesh key={dz} position={[0, 3.3, dz]} rotation={[0, dz > 0 ? 0 : Math.PI, 0]}>
+              <planeGeometry args={[3.9, 1.95]} />
+              <meshBasicMaterial map={textures[i]} toneMapped={false} color={night ? "#ffffff" : "#d8d8d8"} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </>
+  );
+}
+
 export default function CityScape({ night }: { night: boolean }) {
   const built = useMemo(() => {
     const b: Built = { city: [], windows: [], lamps: [], neon: [] };
@@ -513,6 +574,7 @@ export default function CityScape({ night }: { night: boolean }) {
         <meshStandardMaterial color="#fff2b8" emissive="#ffd27a" emissiveIntensity={night ? 1.4 : 0.1} />
       </mesh>
       <Traffic />
+      <Billboards night={night} />
       <Sign text="gm" color="#ef9f27" bg="#fff2c9" position={[LANDMARKS.gm_wall.x, 1.35, LANDMARKS.gm_wall.z - 0.18]} size={[5.4, 1.35]} />
       <Sign text="CITY HALL" color="#5a6b80" bg="#e8e1d4" position={[LANDMARKS.city_hall.x, 3.85, LANDMARKS.city_hall.z + 2.36]} size={[4.2, 0.28]} />
       <Sign text="WATCH PARTY" color="#7ab8ff" bg="#14161f" position={[LANDMARKS.watch_party.x - 3.48, 4.9, LANDMARKS.watch_party.z]} size={[2.9, 1.3]} rotY={Math.PI / 2} />

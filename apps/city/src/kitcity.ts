@@ -71,7 +71,7 @@ export function lotPlacements(lots: Lot[] = fillCity()): Placement[] {
     const k = hash(l.x, l.z);
     if (l.kind === "house") out.push({ url: KIT.suburban(pick(HOUSES, k)), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: 1.75 });
     else if (l.kind === "shop") out.push({ url: KIT.commercial(pick(SHOPS, k)), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: 2.7 + (k % 3) * 0.15 });
-    else if (l.kind === "office") out.push({ url: KIT.commercial(pick(TOWERS, k)), x: l.x, z: l.z, y: 0.16, rotY: (k % 4) * (Math.PI / 2), scale: 2.6 + (k % 4) * 0.25 });
+    else if (l.kind === "office") out.push({ url: KIT.commercial(pick(TOWERS, k)), x: l.x, z: l.z, y: 0.16, rotY: (k % 4) * (Math.PI / 2), scale: l.scale ?? 2.6 + (k % 4) * 0.25 });
     else if (l.kind === "factory") out.push({ url: KIT.industrial(l.model), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: l.scale });
     else if (l.kind === "tree") out.push({ url: KIT.suburban(k % 3 ? "tree-large" : "tree-small"), x: l.x, z: l.z, y: 0.16, rotY: k, scale: 2.2 * l.s });
   }

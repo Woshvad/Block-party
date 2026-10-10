@@ -93,13 +93,22 @@ function xz(r: Rect) {
 export type Lot =
   | { kind: "house"; x: number; z: number; w: number; d: number; h: number; color: string; roof: string; yaw: number }
   | { kind: "shop"; x: number; z: number; w: number; d: number; h: number; color: string; awning: string; yaw: number }
-  | { kind: "office"; x: number; z: number; w: number; d: number; h: number; color: string; glass: string }
+  | { kind: "office"; x: number; z: number; w: number; d: number; h: number; color: string; glass: string; scale?: number }
   | { kind: "tree"; x: number; z: number; s: number }
   | { kind: "parking"; x: number; z: number; w: number; d: number }
   | { kind: "pool"; x: number; z: number; w: number; d: number }
   | { kind: "factory"; x: number; z: number; model: string; yaw: number; scale: number };
 
 // mulberry32
+// Blocks touching Genesis Square (sharing an edge with it).
+export function nearSquare(bx: number, bz: number): boolean {
+  return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => {
+    const x = bx + dx!;
+    const z = bz + dz!;
+    return x >= 0 && z >= 0 && x < GRID.blocks && z < GRID.blocks && zoneOf(x, z) === "square";
+  });
+}
+
 function rng(seed: number) {
   let a = seed >>> 0;
   return () => {
@@ -128,7 +137,7 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
   const cell = GRID.block / 3; // 3×3 lots
   const lotAt = (i: number, j: number) => ({ x: b.x - GRID.block / 2 + cell * (i + 0.5), z: b.z - GRID.block / 2 + cell * (j + 0.5) });
   const facing = (i: number, j: number) => (j === 2 ? 0 : j === 0 ? Math.PI : i === 0 ? -Math.PI / 2 : Math.PI / 2);
-  if (zone === "residential") {
+  if (zone === "residential" && !nearSquare(bx, bz)) {
     for (let i = 0; i < 3; i++)
       for (let j = 0; j < 3; j++) {
         const p = lotAt(i, j);
@@ -150,13 +159,26 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
         if (bx === DINER_BLOCK.bx && bz === DINER_BLOCK.bz && i === 0 && j === 0) continue; // the Diner's lot
         out.push({ kind: "shop", x: p.x, z: p.z, w: cell * 0.9, d: cell * 0.85, h: 1.6 + Math.floor(r() * 3) * 0.9, color: pick(r, SHOP), awning: pick(r, AWNING), yaw: facing(i, j) });
       }
-  } else if (zone === "office") {
+  } else if (zone === "office" || (zone === "residential" && nearSquare(bx, bz))) {
+    // Towers on the quarters, tallest beside the Prediction Tower and falling
+    // away from it (a skyline, not a wall), with one quarter left as a plaza.
+    // Residential blocks beside the square get mid-rise apartments the same way.
     const half = GRID.block / 2;
-    for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+    const t = blockRect(1, 1);
+    const near = Math.max(0, 1 - Math.hypot(b.x - t.x, b.z - t.z) / 40);
+    const flat = zone === "residential" ? 0.55 : 1;
+    const plaza = Math.floor(r() * 4);
+    ([[0, 0], [1, 0], [0, 1], [1, 1]] as const).forEach(([i, j], q) => {
       const x = b.x - half / 2 + i * half;
       const z = b.z - half / 2 + j * half;
-      out.push({ kind: "office", x, z, w: half * 0.72, d: half * 0.72, h: 5 + r() * 9, color: pick(r, OFFICE), glass: pick(r, GLASS) });
-    }
+      if (q === plaza) {
+        out.push({ kind: "pool", x, z, w: 1.4, d: 1.4 });
+        for (const [dx, dz] of [[-1.3, -1.3], [1.3, -1.3], [-1.3, 1.3], [1.3, 1.3]] as const) out.push({ kind: "tree", x: x + dx, z: z + dz, s: 0.8 });
+        return;
+      }
+      const h = (5 + r() * 9) * (0.6 + near * 0.7) * flat;
+      out.push({ kind: "office", x, z, w: half * 0.72, d: half * 0.72, h, color: pick(r, OFFICE), glass: pick(r, GLASS), scale: (1.9 + near * 1.6 + r() * 0.5) * (zone === "residential" ? 0.75 : 1) });
+    });
   } else if (zone === "industrial") {
     // Factories on the four quarters, yard kit (chimneys, tanks, containers, a water tower) between.
     const half = GRID.block / 2;

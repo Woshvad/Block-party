@@ -14,6 +14,10 @@ button.pill { border: 0; cursor: pointer; text-align: left; color: var(--ink); }
 .sheet { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 84px); background: var(--pill); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; z-index: 3; font-size: 14px; }
 .sheet .go { color: var(--green); }
 .pin .ico { width: 26px; height: 26px; border-radius: 50%; background: #f1efe8; display: grid; place-items: center; font-size: 15px; }
+.pin.soon { opacity: 0.82; padding-right: 8px; }
+.pin.soon .ico { filter: grayscale(0.5); }
+.pin .lock { font-size: 11px; }
+.district { font-size: 11px; font-weight: 800; letter-spacing: 0.18em; color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 3px rgba(20, 22, 31, 0.7); white-space: nowrap; user-select: none; }
 .banner { position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 10px; right: 10px; z-index: 2; background: rgba(20, 22, 31, 0.86); color: #e6f1fb; border-radius: 999px; padding: 8px 14px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .banner b { color: #fff; font-weight: 600; }
 .banner .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; margin-right: 4px; vertical-align: middle; }

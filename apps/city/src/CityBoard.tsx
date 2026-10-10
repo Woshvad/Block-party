@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { clampTarget } from "./camera";
-import { GRID, LANDMARKS, type PlaceKey, blockRect, zoneOf } from "./citygen";
+import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, blockRect, zoneOf } from "./citygen";
 import CityScape from "./CityScape";
 import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
@@ -19,6 +19,7 @@ import { haptic, initTelegram } from "./telegram";
 // pin over each. Bright by day; windows and street lights glow at night.
 
 type Place = { key: PlaceKey; name: string; icon: string; info: string };
+type Picked = { name: string; icon: string; info: string; soon?: boolean };
 const PLACES: Place[] = (Object.keys(LANDMARKS) as PlaceKey[]).map((key) => ({ key, name: PLACE_INFO[key]!.name, icon: PLACE_INFO[key]!.icon, info: PLACE_INFO[key]!.info }));
 
 // Pins float over each landmark at a fixed size on screen.
@@ -36,6 +37,42 @@ function Pins({ onTap }: { onTap: (p: Place) => void }) {
           </Html>
         );
       })}
+    </>
+  );
+}
+
+// The launch places: on the map, locked until launch.
+function SoonPins({ onTap }: { onTap: (p: Picked) => void }) {
+  return (
+    <>
+      {Object.values(SOON).map((p) => (
+        <Html key={p.name} position={[p.x, p.pinY, p.z]} center zIndexRange={[1, 0]}>
+          <button className="pin soon" onClick={() => onTap({ name: p.name, icon: p.icon, info: "Opens at launch.", soon: true })} aria-label={`${p.name}, opens at launch`}>
+            <span className="ico">{p.icon}</span>
+            <span className="lock">🔒</span>
+          </button>
+        </Html>
+      ))}
+    </>
+  );
+}
+
+// District names, painted low over each quarter of the city.
+const LABELS: { name: string; x: number; z: number }[] = [
+  { name: DISTRICT_NAMES.oracle, ...blockRect(1, 0) },
+  { name: DISTRICT_NAMES.trenches, ...blockRect(4, 0) },
+  { name: DISTRICT_NAMES.residences, ...blockRect(0, 3) },
+  { name: DISTRICT_NAMES.yard, ...blockRect(4, 3) },
+  { name: DISTRICT_NAMES.lagoon, ...blockRect(1, 5) },
+];
+function DistrictLabels() {
+  return (
+    <>
+      {LABELS.map((l) => (
+        <Html key={l.name} position={[l.x, 0.4, l.z]} center zIndexRange={[0, 0]} style={{ pointerEvents: "none" }}>
+          <span className="district">{l.name}</span>
+        </Html>
+      ))}
     </>
   );
 }
@@ -76,7 +113,7 @@ function IsoRig() {
 
 // People strolling the sidewalks round the blocks: little chibis drawn by the shared crowd renderer.
 const STROLL_SCALE = 0.45;
-const WALKABLE = Array.from({ length: GRID.blocks * GRID.blocks }, (_, k) => ({ bx: k % GRID.blocks, bz: Math.floor(k / GRID.blocks) })).filter((b) => zoneOf(b.bx, b.bz) !== "square");
+const WALKABLE = Array.from({ length: GRID.blocks * GRID.blocks }, (_, k) => ({ bx: k % GRID.blocks, bz: Math.floor(k / GRID.blocks) })).filter((b) => !["square", "water", "locked"].includes(zoneOf(b.bx, b.bz)));
 function Strollers() {
   const loops = useMemo(() => Array.from({ length: 36 }, (_, i) => ({ b: blockRect(WALKABLE[i % WALKABLE.length]!.bx, WALKABLE[i % WALKABLE.length]!.bz), t: (i * 0.618) % 1, dir: i % 2 ? 1 : -1, speed: 0.012 + (i % 5) * 0.002 })), []);
   const people = useRef<ChibiPerson[]>(loops.map((_, i) => ({ id: `stroller-${i}`, look: null, x: 0, z: 0, yaw: 0, moving: true, phase: i, dim: false })));
@@ -119,7 +156,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   const bellAt = s?.bellAt ?? nextBell(now);
   const hour = new Date().getHours();
   const [night, setNight] = useState(hour >= 19 || hour < 6);
-  const [picked, setPicked] = useState<Place | null>(null);
+  const [picked, setPicked] = useState<Picked | null>(null);
   const perf = useRef<HTMLDivElement>(null);
   useEffect(() => {
     initTelegram();
@@ -177,7 +214,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
             {picked.icon} {picked.name}
           </strong>
           <span className="muted">{picked.info}</span>
-          <span className="go">Move in to visit: open Block Party in Telegram.</span>
+          <span className="go">{picked.soon ? "Being built now: the doors open at launch." : "Move in to visit: open Block Party in Telegram."}</span>
         </div>
       )}
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
@@ -208,6 +245,13 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
               else setPicked(p);
             }}
           />
+          <SoonPins
+            onTap={(p) => {
+              haptic("light");
+              setPicked(p);
+            }}
+          />
+          <DistrictLabels />
           <IsoRig />
           <MapControls
             makeDefault
