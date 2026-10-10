@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { clampTarget } from "./camera";
-import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, blockRect, zoneOf } from "./citygen";
+import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, SQUARE, blockRect, zoneOf } from "./citygen";
 import CityScape from "./CityScape";
 import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
@@ -33,6 +33,7 @@ function Pins({ onTap }: { onTap: (p: Place) => void }) {
             {/* Live headcounts arrive with the rooms' presence endpoint; until then, no made-up numbers. */}
             <button className="pin" onClick={() => onTap(p)} aria-label={p.name}>
               <span className="ico">{p.icon}</span>
+              <span className="name">{p.name}</span>
             </button>
           </Html>
         );
@@ -49,6 +50,10 @@ function SoonPins({ onTap }: { onTap: (p: Picked) => void }) {
         <Html key={p.name} position={[p.x, p.pinY, p.z]} center zIndexRange={[1, 0]}>
           <button className="pin soon" onClick={() => onTap({ name: p.name, icon: p.icon, info: "Opens at launch.", soon: true })} aria-label={`${p.name}, opens at launch`}>
             <span className="ico">{p.icon}</span>
+            <span className="name">
+              {p.name}
+              <small>opens at launch</small>
+            </span>
             <span className="lock">🔒</span>
           </button>
         </Html>
@@ -58,23 +63,48 @@ function SoonPins({ onTap }: { onTap: (p: Picked) => void }) {
 }
 
 // District names, painted low over each quarter of the city.
-const LABELS: { name: string; x: number; z: number }[] = [
-  { name: DISTRICT_NAMES.oracle, ...blockRect(1, 0) },
-  { name: DISTRICT_NAMES.trenches, ...blockRect(4, 0) },
-  { name: DISTRICT_NAMES.residences, ...blockRect(0, 3) },
-  { name: DISTRICT_NAMES.yard, ...blockRect(4, 3) },
-  { name: DISTRICT_NAMES.lagoon, ...blockRect(1, 5) },
+// The districts on the map: a badge each, in its own colour, with what's there.
+const DISTRICTS: { key: string; name: string; icon: string; tag: string; color: string; x: number; z: number }[] = [
+  { key: "oracle", name: DISTRICT_NAMES.oracle, icon: "🔮", tag: "Odds, calls and the big screen", color: "#6d4fd8", ...blockRect(1, 0) },
+  { key: "trenches", name: DISTRICT_NAMES.trenches, icon: "🔥", tag: "Diner, club and late nights", color: "#e0457b", ...blockRect(5, 0) },
+  { key: "square", name: DISTRICT_NAMES.square, icon: "🏛️", tag: "gm, the drip and the vote", color: "#378add", x: SQUARE.x, z: SQUARE.z + SQUARE.d / 2 + GRID.road + 1 }, // on the avenue south of the plaza, clear of its pins
+  { key: "residences", name: DISTRICT_NAMES.residences, icon: "🏡", tag: "Homes and Crew Row", color: "#2f9e5b", ...blockRect(0, 3) },
+  { key: "yard", name: DISTRICT_NAMES.yard, icon: "🛠️", tag: "Build, paint and ship", color: "#d98a1c", ...blockRect(5, 3) },
+  { key: "lagoon", name: DISTRICT_NAMES.lagoon, icon: "🌊", tag: "Plots, billboards and the Rollup", color: "#1f8fb8", x: blockRect(0, 5).x + 2, z: blockRect(0, 5).z }, // the west end, clear of the Rollup
 ];
 function DistrictLabels() {
   return (
     <>
-      {LABELS.map((l) => (
-        <Html key={l.name} position={[l.x, 0.4, l.z]} center zIndexRange={[0, 0]} style={{ pointerEvents: "none" }}>
-          <span className="district">{l.name}</span>
+      {DISTRICTS.map((d) => (
+        <Html key={d.key} position={[d.x, 3, d.z]} center zIndexRange={[0, 0]} style={{ pointerEvents: "none" }}>
+          <div className="district" style={{ "--d": d.color } as React.CSSProperties}>
+            <span className="d-ico">{d.icon}</span>
+            <span className="d-text">
+              <b>{d.name}</b>
+              <small>{d.tag}</small>
+            </span>
+          </div>
         </Html>
       ))}
     </>
   );
+}
+
+// How close the camera is: zoomed out the map shows district badges and bare
+// pins; closer in, pins show their names and the badges step back.
+// (Set on the page root: drei's labels render outside the canvas's own box.)
+function ZoomLevel() {
+  const camera = useThree((s) => s.camera);
+  const last = useRef("");
+  useEffect(() => () => document.documentElement.removeAttribute("data-zoom"), []);
+  useFrame(() => {
+    const z = camera.zoom;
+    const level = z < 13 ? "far" : z < 30 ? "mid" : "near";
+    if (level === last.current) return;
+    last.current = level;
+    document.documentElement.setAttribute("data-zoom", level);
+  });
+  return null;
 }
 
 // The bell rings at 00:00 UTC; used until the Slate (which carries it) loads.
@@ -252,6 +282,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
             }}
           />
           <DistrictLabels />
+          <ZoomLevel />
           <IsoRig />
           <MapControls
             makeDefault
