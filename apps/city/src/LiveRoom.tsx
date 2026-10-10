@@ -9,6 +9,7 @@ import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import Interior from "./Interior";
 import { layoutFor, planFor } from "./interiors";
 import { type Plan, type Seat, findPath, makePlan, nearestFree, toTile, toWorld as planWorld } from "./plan";
+import { type Body, step } from "./steer";
 import { HomeRoom } from "./HomeRoom";
 import Person from "./Person";
 import { footprintSize, homeSize, pieceOf } from "./furniture";
@@ -36,37 +37,31 @@ const WALK = 3; // tiles a second
 // Looks, fetched once per handle for the whole visit.
 const looks = new Map<string, Look | "loading" | "none">();
 
-type Drawn = ChibiPerson & { handle: string; tx: number; tz: number; goal: string; path: { x: number; z: number }[]; seat: Seat | null };
+type Drawn = ChibiPerson & Body & { handle: string; tx: number; tz: number; goal: string; seat: Seat | null };
 
-// Walks everyone along their path (around furniture, clear of the walls);
-// on arrival at a seat they sit, facing the way it faces. The crowd draws them.
-function Walk({ drawn }: { drawn: React.MutableRefObject<Drawn[]> }) {
+// Game movement: everyone is a solid body that steers along their path,
+// dodges people ahead, eases in on arrival and slides along furniture (see
+// steer.ts). On reaching a seat they sit, facing the way it faces, and become
+// fixed: others walk round them. NPCs and away residents are fixed too.
+function Walk({ drawn, plan }: { drawn: React.MutableRefObject<Drawn[]>; plan: Plan }) {
   useFrame((_, dtRaw) => {
-    const dt = Math.min(dtRaw, 0.1);
-    for (const p of drawn.current) {
-      const next = p.path[0];
-      if (!next) {
-        p.moving = false;
-        p.sitY = p.seat ? (p.seat.h ?? 0.45) : null;
-        if (p.seat) p.yaw = p.seat.facing;
-        continue;
-      }
-      const dx = next.x - p.x;
-      const dz = next.z - p.z;
-      const dist = Math.hypot(dx, dz);
-      p.moving = true;
-      p.sitY = null;
-      const step = WALK * dt;
-      if (dist <= step) {
-        p.x = next.x;
-        p.z = next.z;
-        p.path.shift();
-      } else {
-        p.x += (dx / dist) * step;
-        p.z += (dz / dist) * step;
-      }
-      p.phase += dt * 9;
-      if (dist > 0.001) p.yaw = Math.atan2(dx, dz);
+    const dt = Math.min(dtRaw, 0.05);
+    const list = drawn.current;
+    for (const p of list) {
+      if (p.dim || p.id.startsWith("npc:")) p.fixed = true;
+      else if (p.seat && !p.path.length && Math.hypot(p.x - p.tx, p.z - p.tz) < 0.2) {
+        p.fixed = true;
+        p.x = p.tx;
+        p.z = p.tz;
+      } else p.fixed = false;
+    }
+    step(list, dt, plan);
+    for (const p of list) {
+      const sp = Math.hypot(p.vx, p.vz);
+      p.moving = sp > 0.15;
+      if (p.moving) p.phase += dt * 3.5 * sp;
+      p.sitY = p.fixed && p.seat ? (p.seat.h ?? 0.45) : null;
+      if (p.sitY !== null && p.seat) p.yaw = p.seat.facing;
     }
   });
   return null;
@@ -217,10 +212,10 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
       const mood = p.userId === me ? myMood : (old?.mood ?? null);
       if (old) {
         // A new destination: a fresh path from wherever they are now.
-        const path = old.goal === goal ? old.path : findPath(plan, here(old), target).map(toWorld);
+        const path = old.goal === goal ? old.path : [...findPath(plan, here(old), target).map(toWorld), w];
         next.push({ ...old, tx: w.x, tz: w.z, goal, path, seat, handle: p.handle, mood, look: lk });
       } else {
-        next.push({ id: p.userId, handle: p.handle, x: w.x, z: w.z, tx: w.x, tz: w.z, goal, path: [], seat, yaw: seat?.facing ?? 0, moving: false, phase: 0, dim: false, mood, look: lk });
+        next.push({ id: p.userId, handle: p.handle, x: w.x, z: w.z, vx: 0, vz: 0, tx: w.x, tz: w.z, goal, path: [], seat, yaw: seat?.facing ?? 0, moving: false, phase: 0, dim: false, mood, look: lk });
       }
       if (!looks.has(p.handle)) {
         looks.set(p.handle, "loading");
@@ -238,12 +233,12 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
     // Away residents (dimmed) along the back, never walking.
     room.away.slice(0, 10).forEach((a, i) => {
       const x = -size.w / 2 + 1 + ((i * 1.7) % (size.w - 2));
-      next.push({ id: `away:${a.userId}`, handle: a.handle, x, z: -size.h / 2 + 1, tx: x, tz: -size.h / 2 + 1, goal: "", path: [], seat: null, yaw: 0, moving: false, phase: 0, dim: true, mood: "rested", look: null });
+      next.push({ id: `away:${a.userId}`, handle: a.handle, x, z: -size.h / 2 + 1, tx: x, tz: -size.h / 2 + 1, goal: "", path: [], seat: null, vx: 0, vz: 0, yaw: 0, moving: false, phase: 0, dim: true, mood: "rested", look: null });
     });
     // The room's NPCs, as chibis with a steady look of their own.
     for (let i = 0; i < Math.min(room.headcount.npc, 4); i++) {
       const { x, z } = npcSpot(i, size.w, size.h);
-      next.push({ id: `npc:${place}:${i}`, handle: "NPC", x, z, tx: x, tz: z, goal: "", path: [], seat: null, yaw: 0, moving: false, phase: 0, look: null });
+      next.push({ id: `npc:${place}:${i}`, handle: "NPC", x, z, tx: x, tz: z, goal: "", path: [], seat: null, vx: 0, vz: 0, yaw: 0, moving: false, phase: 0, look: null });
     }
     drawn.current = next.slice(0, CAP);
   }, [room.people, room.away, room.headcount.npc, myMood, plan]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -322,7 +317,7 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
           )}
           <RoomCamera span={span} />
           <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />
-          <Walk drawn={drawn} />
+          <Walk drawn={drawn} plan={plan} />
           <ChibiCrowd people={drawn} cap={CAP} onPerson={(id) => id !== room.you && !id.startsWith("npc:") && setPerson(id)} />
           <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />
           <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 3} />

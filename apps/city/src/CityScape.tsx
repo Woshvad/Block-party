@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { outlineMaterial, toonRamp } from "./chibi/parts";
-import { CITY_SIZE, GRID, LANDMARKS, type Lot, SQUARE, blockRect, carLoop, fillCity, roads, zoneOf } from "./citygen";
+import { CITY_SIZE, GRID, LANDMARKS, type Lot, SQUARE, blockRect, fillCity, roads, zoneOf } from "./citygen";
+import { type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
 import { type Part, ball, box, colored, cyl, darker, prism } from "./geo";
 
 // The city board, SimCity style: asphalt roads with lane markings and
@@ -75,6 +76,28 @@ function blocks(b: Built) {
         for (let k = 0; k < 6; k++) b.city.push(ball(r.x + 3.2 - (k % 3) * 0.6, 0.6, r.z - 3.4 + Math.floor(k / 3) * 6.6, 0.45, "#5aa05a"));
       } else b.city.push(box(r.x, 0.15, r.z, r.w - 0.2, 0.04, r.d - 0.2, ground));
     }
+  // Street trees along every sidewalk (not too near the corners and crossings).
+  for (let bx = 0; bx < GRID.blocks; bx++)
+    for (let bz = 0; bz < GRID.blocks; bz++) {
+      const zone = zoneOf(bx, bz);
+      if (zone === "square" || zone === "water") continue;
+      const r = blockRect(bx, bz);
+      const e = r.w / 2 + 0.12;
+      for (let k = -r.w / 2 + 1.6; k <= r.w / 2 - 1.6; k += 2.3) {
+        tree(b, r.x + k, r.z + e, 0.5);
+        tree(b, r.x + k, r.z - e, 0.5);
+        tree(b, r.x + e, r.z + k, 0.5);
+        tree(b, r.x - e, r.z + k, 0.5);
+      }
+    }
+  // Bus shelters on the square's edges.
+  for (const [x, z, yaw] of [[SQUARE.x + 4, SQUARE.z + SQUARE.d / 2 + 0.05, 0], [SQUARE.x - SQUARE.w / 2 - 0.05, SQUARE.z - 4, Math.PI / 2]] as const) {
+    const along = yaw === 0;
+    b.city.push(box(x, 1.05, z, along ? 1.6 : 0.06, 0.06, along ? 0.06 : 1.6, "#3a3d44"), box(x, 1.08, z + (along ? -0.25 : 0), along ? 1.7 : 0.6, 0.05, along ? 0.6 : 1.7, "#378add"));
+    b.city.push(box(x - (along ? 0.75 : 0), 0.55, z - (along ? 0 : 0.75), 0.05, 1.05, 0.05, "#3a3d44"), box(x + (along ? 0.75 : 0), 0.55, z + (along ? 0 : 0.75), 0.05, 1.05, 0.05, "#3a3d44"));
+    b.windows.push(box(x, 0.65, z - (along ? 0.28 : 0) - (along ? 0 : 0), along ? 1.4 : 0.03, 0.8, along ? 0.03 : 1.4, WHITE));
+    b.city.push(box(x, 0.35, z - (along ? 0.18 : 0), along ? 1.2 : 0.3, 0.06, along ? 0.3 : 1.2, "#8a5a2b"));
+  }
   // Tower Square: one paved plaza over the middle blocks and their roads.
   b.city.push(box(SQUARE.x, 0.08, SQUARE.z, SQUARE.w + 0.5, 0.16, SQUARE.d + 0.5, PAVING));
   b.city.push(cyl(SQUARE.x, 0.17, SQUARE.z, 7, 7, 0.02, "#d9cdb8", 32), cyl(SQUARE.x, 0.18, SQUARE.z, 5.2, 5.2, 0.02, PAVING, 32));
@@ -225,51 +248,106 @@ function Sign({ text, color, bg, position, size, rotY = 0 }: { text: string; col
 // Shared: a new geometry per render would rebuild the meshes (and lose their colours).
 const CAR_BODY = new THREE.BoxGeometry(0.45, 0.26, 0.95);
 const CAR_CABIN = new THREE.BoxGeometry(0.4, 0.22, 0.5);
+const BRAKE = new THREE.BoxGeometry(0.4, 0.07, 0.03).translate(0, 0, -0.48);
+const LAMP = new THREE.SphereGeometry(0.11, 8, 6);
 const CAR_COLORS = ["#e24b4a", "#f4f1ea", "#378add", "#f2c94c", "#2c2c2a", "#97c459", "#ef9f27", "#8f5bd1"];
+const LIGHT_HEX: Record<Light, string> = { green: "#3ddc6e", amber: "#ffb020", red: "#ff3b3b" };
+
+// Cars in lanes, following each other and stopping for red lights (traffic.ts).
 function Traffic({ night }: { night: boolean }) {
-  const cars = useMemo(() => {
-    const loops: { pts: { x: number; z: number }[]; len: number }[] = [];
-    for (let bx = 0; bx < GRID.blocks; bx++)
-      for (let bz = 0; bz < GRID.blocks; bz++) {
-        if (zoneOf(bx, bz) === "square") continue;
-        const pts = carLoop(bx, bz);
-        loops.push({ pts, len: 4 * (pts[1]!.x - pts[0]!.x) });
-      }
-    return Array.from({ length: 22 }, (_, i) => ({ loop: loops[(i * 5) % loops.length]!, t: (i * 0.37) % 1, speed: 1.6 + (i % 4) * 0.25, color: CAR_COLORS[i % CAR_COLORS.length]! }));
-  }, []);
+  const world = useMemo(() => makeTraffic(44), []);
   const body = useRef<THREE.InstancedMesh>(null);
   const cabin = useRef<THREE.InstancedMesh>(null);
+  const brake = useRef<THREE.InstancedMesh>(null);
   const tmp = useMemo(() => ({ o: new THREE.Object3D(), c: new THREE.Color() }), []);
+  const clock = useRef(0);
   useEffect(() => {
-    cars.forEach((c, i) => body.current!.setColorAt(i, tmp.c.set(c.color)));
+    world.cars.forEach((c, i) => body.current!.setColorAt(i, tmp.c.set(CAR_COLORS[c.color % CAR_COLORS.length]!)));
     if (body.current?.instanceColor) body.current.instanceColor.needsUpdate = true;
-  }, [cars, tmp]);
+  }, [world, tmp]);
   useFrame((_, dtRaw) => {
-    const dt = Math.min(dtRaw, 0.1);
-    cars.forEach((c, i) => {
-      c.t = (c.t + (c.speed * dt) / c.loop.len) % 1;
-      const side = Math.floor(c.t * 4);
-      const f = c.t * 4 - side;
-      const a = c.loop.pts[side]!;
-      const b = c.loop.pts[(side + 1) % 4]!;
-      tmp.o.position.set(a.x + (b.x - a.x) * f, 0.24, a.z + (b.z - a.z) * f);
-      tmp.o.rotation.set(0, Math.atan2(b.x - a.x, b.z - a.z), 0);
+    const dt = Math.min(dtRaw, 0.05);
+    clock.current += dt;
+    stepTraffic(world.lanes, world.cars, clock.current, dt);
+    world.cars.forEach((c, i) => {
+      const p = carPose(world.lanes[c.lane]!, c);
+      const off = Math.abs(p.x) > CITY_SIZE / 2 || Math.abs(p.z) > CITY_SIZE / 2;
+      tmp.o.position.set(p.x, off ? -5 : 0.27, p.z);
+      tmp.o.rotation.set(0, p.yaw, 0);
       tmp.o.updateMatrix();
       body.current!.setMatrixAt(i, tmp.o.matrix);
-      tmp.o.position.y = 0.48;
+      brake.current!.setMatrixAt(i, tmp.o.matrix);
+      // Brake lights glow while a car is slow or stopped.
+      brake.current!.setColorAt(i, tmp.c.set(c.v < 1.2 ? "#ff3030" : "#5a1414"));
+      tmp.o.position.y = off ? -5 : 0.5;
       tmp.o.updateMatrix();
       cabin.current!.setMatrixAt(i, tmp.o.matrix);
     });
-    body.current!.instanceMatrix.needsUpdate = true;
-    cabin.current!.instanceMatrix.needsUpdate = true;
+    for (const m of [body, cabin, brake]) m.current!.instanceMatrix.needsUpdate = true;
+    if (brake.current!.instanceColor) brake.current!.instanceColor.needsUpdate = true;
   });
   return (
     <>
-      <instancedMesh ref={body} args={[CAR_BODY, undefined, cars.length]} frustumCulled={false}>
+      <instancedMesh ref={body} args={[CAR_BODY, undefined, world.cars.length]} frustumCulled={false}>
         <meshToonMaterial />
       </instancedMesh>
-      <instancedMesh ref={cabin} args={[CAR_CABIN, undefined, cars.length]} frustumCulled={false}>
+      <instancedMesh ref={cabin} args={[CAR_CABIN, undefined, world.cars.length]} frustumCulled={false}>
         <meshStandardMaterial color={night ? "#ffe2a0" : "#2a3a4f"} emissive={night ? "#ffcf70" : "#000000"} emissiveIntensity={night ? 0.6 : 0} />
+      </instancedMesh>
+      <instancedMesh ref={brake} args={[BRAKE, undefined, world.cars.length]} frustumCulled={false}>
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <TrafficLights />
+    </>
+  );
+}
+
+// A signal on the corner of every junction: one head for each direction,
+// changing with the same cycle the cars obey.
+function TrafficLights() {
+  const spots = useMemo(() => {
+    const rs = roads();
+    const out: { x: number; z: number }[] = [];
+    for (const a of rs.filter((r) => r.along === "z"))
+      for (const c of rs.filter((r) => r.along === "x")) {
+        const x = a.a - GRID.road / 2 - 0.25;
+        const z = c.a - GRID.road / 2 - 0.25;
+        if (Math.abs(x) < CITY_SIZE / 2 - 0.3 && Math.abs(z) < CITY_SIZE / 2 - 0.3 && !inSquare(a.a, c.a, 0.5)) out.push({ x, z });
+      }
+    return out;
+  }, []);
+  const poles = useMemo(() => mergeGeometries(spots.flatMap((p) => [cyl(p.x, 0.9, p.z, 0.04, 0.05, 1.8, "#2c2c2a", 6), box(p.x + 0.12, 1.75, p.z, 0.18, 0.5, 0.18, "#2c2c2a"), box(p.x, 1.75, p.z + 0.12, 0.18, 0.5, 0.18, "#2c2c2a")]), false)!, [spots]);
+  const xs = useRef<THREE.InstancedMesh>(null);
+  const zs = useRef<THREE.InstancedMesh>(null);
+  const tmp = useMemo(() => new THREE.Object3D(), []);
+  const clock = useRef(0);
+  useEffect(() => {
+    spots.forEach((p, i) => {
+      tmp.position.set(p.x + 0.12, 1.75, p.z + 0.1);
+      tmp.updateMatrix();
+      xs.current!.setMatrixAt(i, tmp.matrix);
+      tmp.position.set(p.x + 0.1, 1.75, p.z + 0.12);
+      tmp.updateMatrix();
+      zs.current!.setMatrixAt(i, tmp.matrix);
+    });
+    xs.current!.instanceMatrix.needsUpdate = zs.current!.instanceMatrix.needsUpdate = true;
+  }, [spots, tmp]);
+  useEffect(() => () => poles.dispose(), [poles]);
+  useFrame((_, dt) => {
+    clock.current += Math.min(dt, 0.05);
+    (xs.current!.material as THREE.MeshBasicMaterial).color.set(LIGHT_HEX[lightFor("x", clock.current)]);
+    (zs.current!.material as THREE.MeshBasicMaterial).color.set(LIGHT_HEX[lightFor("z", clock.current)]);
+  });
+  return (
+    <>
+      <mesh geometry={poles}>
+        <meshToonMaterial vertexColors />
+      </mesh>
+      <instancedMesh ref={xs} args={[LAMP, undefined, spots.length]} frustumCulled={false}>
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={zs} args={[LAMP, undefined, spots.length]} frustumCulled={false}>
+        <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
     </>
   );

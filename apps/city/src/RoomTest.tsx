@@ -6,6 +6,7 @@ import * as THREE from "three";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import { ROOM, type Resident, makeCrowd, rng } from "./crowd";
 import { findPath, makePlan, nearestFree, toTile, toWorld as planWorld } from "./plan";
+import { type Body, step } from "./steer";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
 import { initTelegram } from "./telegram";
 
@@ -39,41 +40,29 @@ const TEST_PLAN = makePlan(
 // the counter), stands a moment, then picks a new free spot.
 function TestCrowd({ crowd }: { crowd: Resident[] }) {
   const r = useMemo(() => rng(42), []);
-  const people = useRef<(ChibiPerson & { path: { x: number; z: number }[]; idle: number; speed: number })[]>(
+  const people = useRef<(ChibiPerson & Body & { idle: number })[]>(
     crowd.map((c) => {
       const start = planWorld(TEST_PLAN, nearestFree(TEST_PLAN, toTile(TEST_PLAN, c.x, c.z))!);
-      return { id: `test-${c.id}`, look: null, x: start.x, z: start.z, yaw: 0, moving: false, phase: c.phase, dim: c.away, path: [], idle: c.idle, speed: c.speed * (c.away ? 0.5 : 1) };
+      return { id: `test-${c.id}`, look: null, x: start.x, z: start.z, vx: 0, vz: 0, yaw: 0, moving: false, phase: c.phase, dim: c.away, path: [], idle: c.idle, speed: 1.2 + c.speed * (c.away ? 0.5 : 1) };
     }),
   );
   useFrame((_, dtRaw) => {
-    const dt = Math.min(dtRaw, 0.1);
+    const dt = Math.min(dtRaw, 0.05);
     for (const p of people.current) {
-      const next = p.path[0];
-      if (!next) {
-        p.moving = false;
-        p.idle -= dt;
-        if (p.idle <= 0) {
-          const to = { x: Math.floor(r() * ROOM.width), y: Math.floor(r() * ROOM.depth) };
-          p.path = findPath(TEST_PLAN, toTile(TEST_PLAN, p.x, p.z), to).map((t) => planWorld(TEST_PLAN, t));
-          p.idle = 1 + r() * 4;
-        }
-        continue;
+      if (p.path.length) continue;
+      p.idle -= dt;
+      if (p.idle <= 0) {
+        const to = { x: Math.floor(r() * ROOM.width), y: Math.floor(r() * ROOM.depth) };
+        p.path = findPath(TEST_PLAN, toTile(TEST_PLAN, p.x, p.z), to).map((t) => planWorld(TEST_PLAN, t));
+        p.idle = 1 + r() * 4;
       }
-      const dx = next.x - p.x;
-      const dz = next.z - p.z;
-      const d = Math.hypot(dx, dz);
-      const step = p.speed * dt;
-      p.moving = true;
-      if (d <= step) {
-        p.x = next.x;
-        p.z = next.z;
-        p.path.shift();
-      } else {
-        p.x += (dx / d) * step;
-        p.z += (dz / d) * step;
-      }
-      if (d > 0.001) p.yaw = Math.atan2(dx, dz);
-      p.phase += dt * p.speed * 6;
+    }
+    // The same game movement as the live rooms: solid, steering, dodging.
+    step(people.current, dt, TEST_PLAN);
+    for (const p of people.current) {
+      const sp = Math.hypot(p.vx, p.vz);
+      p.moving = sp > 0.15;
+      if (p.moving) p.phase += dt * 3.5 * sp;
     }
   });
   return <ChibiCrowd people={people} cap={crowd.length} />;

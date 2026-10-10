@@ -84,7 +84,8 @@ function Strollers() {
     const dt = Math.min(dtRaw, 0.1);
     loops.forEach((l, i) => {
       l.t = (l.t + l.dir * l.speed * dt + 1) % 1;
-      const o = l.b.w / 2 + 0.1; // on the sidewalk, just outside the block
+      // On the sidewalk: walkers keep right, so the two directions use their own lanes.
+      const o = l.b.w / 2 + (l.dir > 0 ? 0.2 : -0.02);
       const side = Math.floor(l.t * 4);
       const f = l.t * 4 - side;
       const pts = [
