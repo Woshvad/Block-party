@@ -57,7 +57,7 @@ export const DINER_BLOCK = { bx: 4, bz: 1 } as const;
 
 export type PlaceKey = "tower" | "roof" | "city_hall" | "watch_party" | "gm_wall" | "faucet" | "diner" | "crew_row";
 // Places that open at launch: on the map now, locked.
-export type SoonKey = "club_liquidity" | "touch_grass_park" | "hackerspace" | "bot_cafe" | "stablecoin_strip" | "rollup";
+export type SoonKey = "club_liquidity" | "touch_grass_park" | "blockspace_canvas" | "bot_cafe" | "stablecoin_strip" | "rollup";
 
 // Genesis Square: the middle 2×2 blocks and the roads between them, paved.
 const sq = (() => {
@@ -80,7 +80,7 @@ export const LANDMARKS: Record<PlaceKey, { x: number; z: number; pinY: number }>
 export const SOON: Record<SoonKey, { x: number; z: number; pinY: number; name: string; icon: string }> = {
   club_liquidity: { ...xz(blockRect(5, 1)), pinY: 6, name: "Club Liquidity", icon: "🪩" },
   touch_grass_park: { x: sq.x, z: sq.z + 7, pinY: 3, name: "Touch Grass Park", icon: "🌳" },
-  hackerspace: { ...xz(blockRect(4, 4)), pinY: 5, name: "Hackerspace", icon: "🛠️" },
+  blockspace_canvas: { ...xz(blockRect(4, 4)), pinY: 6, name: "Blockspace Canvas", icon: "🎨" },
   bot_cafe: { ...xz(blockRect(5, 4)), pinY: 4.5, name: "Bot Café", icon: "🤖" },
   stablecoin_strip: { ...xz(blockRect(5, 5)), pinY: 5, name: "Block 5 · Stablecoin Strip", icon: "🔒" },
   rollup: { x: blockRect(2, 5).x, z: blockRect(2, 5).z - 3, pinY: 3.5, name: "The Rollup", icon: "🚌" },

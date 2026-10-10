@@ -137,11 +137,19 @@ function soonBuildings(b: Built) {
   for (const dx of [-1.4, 1.4]) b.city.push(cyl(C.x + dx, 0.45, C.z + 3.2, 0.06, 0.08, 0.6, "#d4a017", 6));
   b.city.push(box(C.x, 0.68, C.z + 3.2, 2.8, 0.06, 0.06, "#b23a3a"));
 
-  const H = SOON.hackerspace;
-  // The Hackerspace: a long shed with a sawtooth roof and a terminal-green glow.
-  b.city.push(box(H.x, 1.2, H.z, 6.5, 2.4, 4.5, "#4a5560"));
-  for (let k = 0; k < 4; k++) b.city.push(prism(H.x - 2.4 + k * 1.6, 2.4, H.z, 4.5, 0.8, 1.6, "#3a434c", Math.PI / 2));
-  b.neon.push(box(H.x, 1.3, H.z + 2.27, 5, 0.5, 0.03, "#1dff8a"));
+  const V = SOON.blockspace_canvas;
+  // The Blockspace Canvas: one big shared pixel wall on a plaza, crews' corners
+  // in their colours, scaffolding for the painters, sealed at every bell.
+  b.city.push(box(V.x, 0.2, V.z, 7.4, 0.08, 5.4, "#d9d4c8"));
+  b.city.push(box(V.x, 2.6, V.z - 1.2, 6.6, 4.6, 0.3, "#2c2c2a"));
+  const CREWS = ["#ff3fb4", "#3ff0ff", "#ffe23f", "#7a3cff", "#3dff7a", "#ff7a3f", "#f4f1ea"];
+  for (let i = 0; i < 12; i++)
+    for (let j = 0; j < 8; j++) {
+      const c = CREWS[(Math.floor(i / 4) * 3 + Math.floor(j / 3) + ((i * 7 + j * 3) % 5 === 0 ? 2 : 0)) % CREWS.length]!;
+      b.neon.push(box(V.x - 2.75 + i * 0.5, 0.75 + j * 0.5, V.z - 1.03, 0.46, 0.46, 0.03, c));
+    }
+  for (const dx of [-3.1, 3.1]) b.city.push(box(V.x + dx, 2.6, V.z - 0.7, 0.08, 4.8, 0.08, "#8a8f98"), box(V.x + dx, 2.6, V.z - 0.3, 0.08, 4.8, 0.08, "#8a8f98"));
+  for (const y of [1.4, 2.9]) b.city.push(box(V.x, y, V.z - 0.5, 6.4, 0.06, 0.5, "#8a5a2b"));
 
   const B = SOON.bot_cafe;
   // The Bot Café: a little café with a striped awning and outdoor tables.
@@ -462,10 +470,11 @@ function TrafficLights() {
 
 // --- The whole city ------------------------------------------------------------------------
 
-// Billboards on the Mempool quay: candle charts, green and red, that tick on.
+// Billboards on the Mempool quay: candle charts, green and red, that tick on,
+// between Mempool Plots (ad space rented in $PARTY from launch) that read "pending" until paid.
 function Billboards({ night }: { night: boolean }) {
   const lagoon = blockRect(0, GRID.blocks - 1);
-  const boards = useMemo(() => [-24, -10, 6, 20].map((x, i) => ({ x, z: lagoon.z - lagoon.d / 2 - 0.4, up: i % 2 === 0 })), [lagoon.z, lagoon.d]);
+  const boards = useMemo(() => [-28, -12, 6, 22].map((x, i) => ({ x, z: lagoon.z - lagoon.d / 2 - 0.4, up: i === 0, plot: i % 2 === 1 })), [lagoon.z, lagoon.d]);
   const canvases = useMemo(() => boards.map(() => { const c = document.createElement("canvas"); c.width = 256; c.height = 128; return c; }), [boards]);
   const textures = useMemo(() => canvases.map((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }), [canvases]);
   const series = useRef(boards.map((b) => Array.from({ length: 24 }, (_, k) => 64 + (b.up ? -k : k) * 1.4)));
@@ -475,6 +484,23 @@ function Billboards({ night }: { night: boolean }) {
     if (clock.elapsedTime - last.current < 1.2 && last.current) return;
     last.current = clock.elapsedTime;
     canvases.forEach((c, i) => {
+      const g0 = c.getContext("2d")!;
+      if (boards[i]!.plot) {
+        g0.fillStyle = "#14171f";
+        g0.fillRect(0, 0, 256, 128);
+        g0.setLineDash([8, 6]);
+        g0.strokeStyle = "#5b6475";
+        g0.lineWidth = 3;
+        g0.strokeRect(8, 8, 240, 112);
+        g0.fillStyle = "#c8cfdb";
+        g0.font = "bold 22px sans-serif";
+        g0.fillText("MEMPOOL PLOT", 46, 58);
+        g0.fillStyle = "#f2c94c";
+        g0.font = "16px sans-serif";
+        g0.fillText(`pending${".".repeat(1 + (Math.floor(clock.elapsedTime / 1.2) % 3))}`, 92, 88);
+        textures[i]!.needsUpdate = true;
+        return;
+      }
       const s = series.current[i]!;
       const drift = boards[i]!.up ? -0.8 : 0.8;
       s.push(Math.min(116, Math.max(12, s[s.length - 1]! + drift + (Math.random() - 0.5) * 9)));

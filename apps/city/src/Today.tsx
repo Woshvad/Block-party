@@ -107,6 +107,7 @@ export default function Today({ api, onGm, onBunker }: { api: Api; onGm: (balanc
           <Card key={c.marketId} c={c} now={now} onCall={() => setCalling(c.marketId)} />
         ))}
         {s && <p className="muted">Free calls, scored by Aura. Your grid is sealed until the bell in {until(s.bellAt, now)}.</p>}
+        {s && <p className="credit">Odds via Polymarket · Not affiliated</p>}
       </section>
 
       {calling && (

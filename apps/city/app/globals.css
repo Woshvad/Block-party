@@ -187,3 +187,4 @@ select.ask { background: #fff; }
 .facesheet { width: 100%; max-width: 512px; display: block; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 50% / 24px 24px; border-radius: 12px; margin-bottom: 10px; }
 .sw { width: 28px; height: 28px; border-radius: 8px; display: inline-block; border: 1px solid rgba(0, 0, 0, 0.1); }
 a.btn { display: inline-block; text-decoration: none; }
+.credit { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; margin: 0; }
