@@ -51,8 +51,8 @@ function TowerTop({ night }: { night: boolean }) {
     if (m) m.color.setHSL(Math.sin(clock.elapsedTime * 0.4) > 0 ? 0.42 : 0.0, 0.75, night ? 0.55 : 0.47);
   });
   return (
-    <mesh ref={ref} position={[LANDMARKS.tower.x, 18.6, LANDMARKS.tower.z]}>
-      <boxGeometry args={[3.15, 0.5, 3.15]} />
+    <mesh ref={ref} position={[LANDMARKS.tower.x, 17.05, LANDMARKS.tower.z]}>
+      <boxGeometry args={[2.6, 0.32, 2.6]} />
       <meshBasicMaterial toneMapped={false} />
     </mesh>
   );

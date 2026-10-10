@@ -5,9 +5,9 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { outlineMaterial, toonRamp } from "./chibi/parts";
 import { CITY_SIZE, GRID, LANDMARKS, type Lot, SQUARE, blockRect, fillCity, roads, zoneOf } from "./citygen";
-import Kit from "./Kit";
-import { cityPlacements } from "./kitcity";
-import { type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
+import Kit, { useBaked } from "./Kit";
+import { KIT, cityPlacements } from "./kitcity";
+import { type Car, type Lane, type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
 import { type Part, ball, box, colored, cyl, darker, prism } from "./geo";
 
 // The city board, SimCity style: asphalt roads with lane markings and
@@ -157,11 +157,29 @@ function lot(b: Built, l: Lot) {
 
 function landmarks(b: Built) {
   const T = LANDMARKS.tower;
-  // The Prediction Tower: podium, glass shaft, setback crown (the LED crown on top is animated separately).
-  b.city.push(box(T.x, 0.45, T.z, 6, 0.6, 6, "#d8d3c8"), box(T.x, 0.85 + 7.5, T.z, 3.6, 15, 3.6, "#4e44a8"), box(T.x, 16.35 + 1, T.z, 3, 2, 3, "#3d3590"));
-  for (let y = 1.4; y < 15.8; y += 0.75) b.windows.push(box(T.x, y, T.z, 3.64, 0.38, 3.64, WHITE));
-  b.city.push(cyl(T.x, 20.3, T.z, 0.05, 0.1, 3.4, "#d0d4da", 6));
-  b.lamps.push(ball(T.x, 22.05, T.z, 0.14, "#ff4d4d"));
+  // The Prediction Tower: a stone podium with a glass lobby, then three glass
+  // tiers stepping back as they rise, bright fins and floor lines, a crown
+  // (the LED band is animated separately) and a spire.
+  b.city.push(box(T.x, 0.75, T.z, 6.4, 1.2, 6.4, "#cfc9bc"), box(T.x, 1.38, T.z, 6.6, 0.08, 6.6, "#b8b2a5"));
+  b.windows.push(box(T.x, 0.75, T.z, 5.6, 0.9, 5.62, WHITE));
+  const tiers = [
+    { w: 3.9, y0: 1.4, h: 8.6 },
+    { w: 3.2, y0: 10, h: 4.4 },
+    { w: 2.5, y0: 14.4, h: 2.4 },
+  ];
+  for (const t of tiers) {
+    b.windows.push(box(T.x, t.y0 + t.h / 2, T.z, t.w, t.h, t.w, WHITE)); // the glass itself
+    b.city.push(box(T.x, t.y0 + t.h + 0.06, T.z, t.w + 0.2, 0.12, t.w + 0.2, "#d9dee6")); // setback ledge
+    for (let y = t.y0 + 0.7; y < t.y0 + t.h; y += 0.7) b.city.push(box(T.x, y, T.z, t.w + 0.03, 0.04, t.w + 0.03, "#c3cad6")); // floor lines
+    const fins = Math.round(t.w / 0.55);
+    for (let k = 0; k <= fins; k++) {
+      const o = -t.w / 2 + (k * t.w) / fins;
+      b.city.push(box(T.x + o, t.y0 + t.h / 2, T.z + t.w / 2 + 0.03, 0.06, t.h, 0.06, "#e6ebf2"), box(T.x + t.w / 2 + 0.03, t.y0 + t.h / 2, T.z + o, 0.06, t.h, 0.06, "#e6ebf2"));
+    }
+  }
+  b.city.push(box(T.x, 17.35, T.z, 2.0, 0.5, 2.0, "#2a2f4a"));
+  b.city.push(cyl(T.x, 19.4, T.z, 0.04, 0.14, 3.6, "#d0d4da", 8));
+  b.lamps.push(ball(T.x, 21.25, T.z, 0.13, "#ff4d4d"));
 
   const C = LANDMARKS.city_hall;
   // City Hall: steps, a pale hall, six columns under a pediment, and a dome.
@@ -173,9 +191,22 @@ function landmarks(b: Built) {
   for (let k = 0; k < 3; k++) b.windows.push(box(C.x - 2.4 + k * 2.4, 2.4, C.z - 2.21, 0.8, 1.2, 0.04, WHITE));
 
   const W = LANDMARKS.watch_party;
-  // The Watch Party Hall: a stadium bowl round a pitch, with a big screen.
-  b.city.push(cyl(W.x, 1.2, W.z, 4.1, 4.3, 2.4, "#8f7cc0", 28), cyl(W.x, 1.6, W.z, 3.5, 3.2, 1.62, "#6d5ea0", 28), cyl(W.x, 2.42, W.z, 3.25, 3.25, 0.02, "#5fae55", 28));
-  b.city.push(box(W.x, 2.44, W.z, 0.05, 0.01, 4.4, WHITE), cyl(W.x, 2.44, W.z, 0.8, 0.8, 0.01, "#6fbe62", 18));
+  // The Watch Party Hall: a stadium bowl with stepped seating round a striped
+  // pitch, four floodlight masts and a big screen.
+  // The bowl's outer wall (open at the top).
+  b.city.push(colored(new THREE.CylinderGeometry(4.15, 4.35, 2.6, 32, 1, true).translate(W.x, 1.3, W.z), "#7d6bb3"), colored(new THREE.CylinderGeometry(3.05, 3.05, 0.9, 32, 1, true).translate(W.x, 2.15, W.z), "#6b5aa0"));
+  // Seating: flat rings stepping down toward the pitch (rings, not discs, or the top one lids the bowl).
+  for (let k = 0; k < 4; k++) {
+    const outer = 4.15 - k * 0.27;
+    b.city.push(colored(new THREE.RingGeometry(outer - 0.27, outer, 40).rotateX(-Math.PI / 2).translate(W.x, 2.61 - k * 0.2, W.z), k % 2 ? "#e24b4a" : "#f4f1ea"));
+  }
+  b.city.push(cyl(W.x, 1.75, W.z, 3.05, 3.05, 0.02, "#4f9d4a", 32));
+  for (let k = -2; k <= 2; k++) b.city.push(box(W.x + k * 1.1, 1.77, W.z, 0.55, 0.01, 4.6, "#5fae55"));
+  b.city.push(box(W.x, 1.78, W.z, 0.04, 0.01, 4.8, WHITE), cyl(W.x, 1.78, W.z, 0.7, 0.7, 0.01, "#6fbe62", 20));
+  for (const [dx, dz] of [[3.4, 3.4], [-3.4, 3.4], [3.4, -3.4], [-3.4, -3.4]] as const) {
+    b.city.push(cyl(W.x + dx, 2.6, W.z + dz, 0.06, 0.09, 5.2, "#3a3d44", 6), box(W.x + dx, 5.25, W.z + dz, 0.7, 0.35, 0.12, "#3a3d44"));
+    b.lamps.push(box(W.x + dx - Math.sign(dx) * 0.02, 5.25, W.z + dz - Math.sign(dz) * 0.07, 0.6, 0.25, 0.03, "#fff8d8"));
+  }
   b.city.push(box(W.x - 3.6, 3.6, W.z, 0.15, 2.4, 0.15, "#3a3d44"), box(W.x - 3.6, 4.9, W.z, 0.2, 1.4, 3, "#14161f"));
 
   const G = LANDMARKS.gm_wall;
@@ -236,52 +267,68 @@ function Sign({ text, color, bg, position, size, rotY = 0 }: { text: string; col
 // Shared: a new geometry per render would rebuild the meshes (and lose their colours).
 const CAR_BODY = new THREE.BoxGeometry(0.45, 0.26, 0.95);
 const CAR_CABIN = new THREE.BoxGeometry(0.4, 0.22, 0.5);
-const BRAKE = new THREE.BoxGeometry(0.4, 0.07, 0.03).translate(0, 0, -0.48);
+const BRAKE = new THREE.BoxGeometry(0.42, 0.06, 0.03).translate(0, 0, -0.47);
 const LAMP = new THREE.SphereGeometry(0.11, 8, 6);
 const CAR_COLORS = ["#e24b4a", "#f4f1ea", "#378add", "#f2c94c", "#2c2c2a", "#97c459", "#ef9f27", "#8f5bd1"];
 const LIGHT_HEX: Record<Light, string> = { green: "#3ddc6e", amber: "#ffb020", red: "#ff3b3b" };
 
-// Cars in lanes, following each other and stopping for red lights (traffic.ts).
-function Traffic({ night }: { night: boolean }) {
+// Cars in lanes, following each other and stopping for red lights (traffic.ts),
+// drawn with Kenney's Car Kit: one instanced mesh per model.
+const CAR_MODELS = ["sedan", "taxi", "suv", "van", "police", "truck", "delivery", "hatchback-sports", "suv-luxury", "sedan-sports", "ambulance", "garbage-truck"];
+const CAR_SCALE = 0.34;
+
+function CarModel({ model, cars, lanes, brakes }: { model: string; cars: Car[]; lanes: Lane[]; brakes: React.MutableRefObject<THREE.InstancedMesh | null>; }) {
+  const baked = useBaked(KIT.cars(model));
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const o = useMemo(() => new THREE.Object3D(), []);
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    cars.forEach((c, i) => {
+      const p = carPose(lanes[c.lane]!, c);
+      const off = Math.abs(p.x) > CITY_SIZE / 2 || Math.abs(p.z) > CITY_SIZE / 2;
+      o.position.set(p.x, off ? -5 : 0.04, p.z);
+      o.rotation.set(0, p.yaw, 0);
+      o.scale.setScalar(CAR_SCALE);
+      o.updateMatrix();
+      m.setMatrixAt(i, o.matrix);
+    });
+    m.instanceMatrix.needsUpdate = true;
+  });
+  if (!baked) return null;
+  return <instancedMesh ref={ref} args={[baked.geometry, baked.material, cars.length]} castShadow frustumCulled={false} />;
+}
+
+function Traffic() {
   const world = useMemo(() => makeTraffic(44), []);
-  const body = useRef<THREE.InstancedMesh>(null);
-  const cabin = useRef<THREE.InstancedMesh>(null);
+  const byModel = useMemo(() => CAR_MODELS.map((m, k) => ({ model: m, cars: world.cars.filter((_, i) => i % CAR_MODELS.length === k) })).filter((g) => g.cars.length), [world]);
   const brake = useRef<THREE.InstancedMesh>(null);
   const tmp = useMemo(() => ({ o: new THREE.Object3D(), c: new THREE.Color() }), []);
   const clock = useRef(0);
-  useEffect(() => {
-    world.cars.forEach((c, i) => body.current!.setColorAt(i, tmp.c.set(CAR_COLORS[c.color % CAR_COLORS.length]!)));
-    if (body.current?.instanceColor) body.current.instanceColor.needsUpdate = true;
-  }, [world, tmp]);
   useFrame((_, dtRaw) => {
     const dt = Math.min(dtRaw, 0.05);
     clock.current += dt;
     stepTraffic(world.lanes, world.cars, clock.current, dt);
+    // Brake lights glow while a car is slow or stopped.
     world.cars.forEach((c, i) => {
       const p = carPose(world.lanes[c.lane]!, c);
       const off = Math.abs(p.x) > CITY_SIZE / 2 || Math.abs(p.z) > CITY_SIZE / 2;
-      tmp.o.position.set(p.x, off ? -5 : 0.27, p.z);
+      tmp.o.position.set(p.x, off ? -5 : 0.24, p.z);
       tmp.o.rotation.set(0, p.yaw, 0);
       tmp.o.updateMatrix();
-      body.current!.setMatrixAt(i, tmp.o.matrix);
       brake.current!.setMatrixAt(i, tmp.o.matrix);
-      // Brake lights glow while a car is slow or stopped.
-      brake.current!.setColorAt(i, tmp.c.set(c.v < 1.2 ? "#ff3030" : "#5a1414"));
-      tmp.o.position.y = off ? -5 : 0.5;
-      tmp.o.updateMatrix();
-      cabin.current!.setMatrixAt(i, tmp.o.matrix);
+      brake.current!.setColorAt(i, tmp.c.set(c.v < 1.2 ? "#ff2a2a" : "#4a1010"));
     });
-    for (const m of [body, cabin, brake]) m.current!.instanceMatrix.needsUpdate = true;
+    brake.current!.instanceMatrix.needsUpdate = true;
     if (brake.current!.instanceColor) brake.current!.instanceColor.needsUpdate = true;
   });
   return (
     <>
-      <instancedMesh ref={body} args={[CAR_BODY, undefined, world.cars.length]} frustumCulled={false}>
-        <meshToonMaterial />
-      </instancedMesh>
-      <instancedMesh ref={cabin} args={[CAR_CABIN, undefined, world.cars.length]} frustumCulled={false}>
-        <meshStandardMaterial color={night ? "#ffe2a0" : "#2a3a4f"} emissive={night ? "#ffcf70" : "#000000"} emissiveIntensity={night ? 0.6 : 0} />
-      </instancedMesh>
+      <Suspense fallback={null}>
+        {byModel.map((g) => (
+          <CarModel key={g.model} model={g.model} cars={g.cars} lanes={world.lanes} brakes={brake} />
+        ))}
+      </Suspense>
       <instancedMesh ref={brake} args={[BRAKE, undefined, world.cars.length]} frustumCulled={false}>
         <meshBasicMaterial toneMapped={false} />
       </instancedMesh>
@@ -376,7 +423,7 @@ export default function CityScape({ night }: { night: boolean }) {
         <meshStandardMaterial color={night ? "#2c3a2a" : "#8fbf6f"} />
       </mesh>
       <Suspense fallback={null}>
-        <Kit placements={placements} />
+        <Kit placements={placements} night={night} />
       </Suspense>
       <mesh geometry={built.city} material={mat} castShadow receiveShadow />
       <mesh geometry={built.city} material={ink} />
@@ -386,7 +433,7 @@ export default function CityScape({ night }: { night: boolean }) {
       <mesh geometry={built.lamps}>
         <meshStandardMaterial color="#fff2b8" emissive="#ffd27a" emissiveIntensity={night ? 1.4 : 0.1} />
       </mesh>
-      <Traffic night={night} />
+      <Traffic />
       <Sign text="gm" color="#ef9f27" bg="#fff2c9" position={[LANDMARKS.gm_wall.x, 1.35, LANDMARKS.gm_wall.z - 0.18]} size={[5.4, 1.35]} />
       <Sign text="CITY HALL" color="#5a6b80" bg="#e8e1d4" position={[LANDMARKS.city_hall.x, 3.85, LANDMARKS.city_hall.z + 2.36]} size={[4.2, 0.28]} />
       <Sign text="WATCH PARTY" color="#7ab8ff" bg="#14161f" position={[LANDMARKS.watch_party.x - 3.48, 4.9, LANDMARKS.watch_party.z]} size={[2.9, 1.3]} rotY={Math.PI / 2} />

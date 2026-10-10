@@ -6,7 +6,7 @@
 export const GRID = { blocks: 4, block: 9, road: 2 } as const;
 export const CITY_SIZE = GRID.blocks * GRID.block + (GRID.blocks + 1) * GRID.road; // 46
 
-export type Zone = "residential" | "commercial" | "office" | "park" | "water" | "landmark" | "square";
+export type Zone = "residential" | "commercial" | "office" | "industrial" | "park" | "water" | "landmark" | "square";
 export type Rect = { x: number; z: number; w: number; d: number }; // centre and size, world units
 
 // A block's rectangle (without the roads around it).
@@ -35,7 +35,7 @@ export const ZONING: Zone[][] = [
   ["water", "landmark", "office", "office"],
   ["residential", "square", "square", "landmark"],
   ["residential", "square", "square", "commercial"],
-  ["residential", "residential", "park", "commercial"],
+  ["residential", "residential", "park", "industrial"],
 ].map((row) => row as Zone[]);
 export const zoneOf = (bx: number, bz: number): Zone => ZONING[bz]![bx]!;
 
@@ -73,7 +73,8 @@ export type Lot =
   | { kind: "office"; x: number; z: number; w: number; d: number; h: number; color: string; glass: string }
   | { kind: "tree"; x: number; z: number; s: number }
   | { kind: "parking"; x: number; z: number; w: number; d: number }
-  | { kind: "pool"; x: number; z: number; w: number; d: number };
+  | { kind: "pool"; x: number; z: number; w: number; d: number }
+  | { kind: "factory"; x: number; z: number; model: string; yaw: number; scale: number };
 
 // mulberry32
 function rng(seed: number) {
@@ -133,6 +134,20 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
       const z = b.z - half / 2 + j * half;
       out.push({ kind: "office", x, z, w: half * 0.72, d: half * 0.72, h: 5 + r() * 9, color: pick(r, OFFICE), glass: pick(r, GLASS) });
     }
+  } else if (zone === "industrial") {
+    // Factories on the four quarters, yard kit (chimneys, tanks, containers, a water tower) between.
+    const half = GRID.block / 2;
+    const sheds = ["building-a", "building-b", "building-c", "building-d", "building-e", "building-f", "building-g", "building-h", "building-i", "building-j"];
+    for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+      const x = b.x - half / 2 + i * half;
+      const z = b.z - half / 2 + j * half;
+      out.push({ kind: "factory", x, z: z - 0.5, model: pick(r, sheds), yaw: j === 1 ? 0 : Math.PI, scale: 1.7 });
+    }
+    out.push({ kind: "factory", x: b.x, z: b.z, model: "water-tower", yaw: 0, scale: 1.6 });
+    out.push({ kind: "factory", x: b.x + 2.9, z: b.z + 0.6, model: "chimney-large", yaw: 0, scale: 1.8 });
+    out.push({ kind: "factory", x: b.x - 2.9, z: b.z + 0.6, model: "detail-tank-large", yaw: 0, scale: 1.2 });
+    out.push({ kind: "factory", x: b.x + 1.4, z: b.z + 3.6, model: "shipping-container-a", yaw: Math.PI / 2, scale: 1.1 });
+    out.push({ kind: "factory", x: b.x - 1.4, z: b.z + 3.6, model: "shipping-container-b", yaw: Math.PI / 2, scale: 1.1 });
   } else if (zone === "park") {
     for (let k = 0; k < 14; k++) out.push({ kind: "tree", x: b.x + (r() - 0.5) * (GRID.block - 1.5), z: b.z + (r() - 0.5) * (GRID.block - 1.5), s: 0.7 + r() * 0.7 });
     out.push({ kind: "pool", x: b.x, z: b.z, w: 3, d: 2 });
