@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { BOARD, clampTarget, fitCamera } from "./camera";
 import type { Api, Me } from "./api";
+import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
@@ -135,29 +136,23 @@ function CameraRig() {
   return null;
 }
 const VIEW = new THREE.Vector3(18, 20, 22).normalize();
-const STROLLER = new THREE.CapsuleGeometry(0.18, 0.35, 2, 6); // shared: a new geometry per render would rebuild the mesh
+const STROLL_SCALE = 0.55;
 
 function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) {
-  const residents = useMemo(() => Array.from({ length: 40 }, (_, i) => ({ a: (i / 40) * Math.PI * 2, r: 5 + (i % 5) * 1.6, s: 0.05 + (i % 7) * 0.01, c: new THREE.Color().setHSL((i * 0.137) % 1, 0.6, 0.55) })), []);
-  const dots = useRef<THREE.InstancedMesh>(null);
-  const tmp = useMemo(() => new THREE.Object3D(), []);
-  // Colours go on in the frame loop's first pass, so a rebuilt mesh never shows up white.
-  const coloured = useRef<THREE.InstancedMesh | null>(null);
-  // Residents strolling the streets: one draw call for all of them.
-  useFrame(({ clock }) => {
-    const m = dots.current;
-    if (m && coloured.current !== m) {
-      residents.forEach((r, i) => m.setColorAt(i, r.c));
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
-      coloured.current = m;
-    }
-    residents.forEach((r, i) => {
+  // Residents strolling the streets: little chibis (half size, to suit the
+  // buildings) walking slow loops, all drawn by the shared crowd renderer.
+  const loops = useMemo(() => Array.from({ length: 40 }, (_, i) => ({ a: (i / 40) * Math.PI * 2, r: 5 + (i % 5) * 1.6, s: 0.05 + (i % 7) * 0.01 })), []);
+  const strollers = useRef<ChibiPerson[]>(loops.map((_, i) => ({ id: `stroller-${i}`, look: null, x: 0, z: 0, yaw: 0, moving: true, phase: i, dim: false })));
+  useFrame(({ clock }, dt) => {
+    loops.forEach((r, i) => {
       const a = r.a + clock.elapsedTime * r.s;
-      tmp.position.set(Math.cos(a) * r.r, 0.35, Math.sin(a) * r.r * 0.8);
-      tmp.updateMatrix();
-      dots.current!.setMatrixAt(i, tmp.matrix);
+      const p = strollers.current[i]!;
+      // Positions in the half-size group's own units.
+      p.x = (Math.cos(a) * r.r) / STROLL_SCALE;
+      p.z = (Math.sin(a) * r.r * 0.8) / STROLL_SCALE;
+      p.yaw = Math.atan2(-Math.sin(a), Math.cos(a) * 0.8); // along the loop
+      p.phase += Math.min(dt, 0.1) * 7;
     });
-    if (dots.current) dots.current.instanceMatrix.needsUpdate = true;
   });
   return (
     <group>
@@ -207,9 +202,9 @@ function Board({ night, onTap }: { night: boolean; onTap: (p: Place) => void }) 
           <span className="ico">🏠</span>
         </button>
       </Html>
-      <instancedMesh ref={dots} args={[STROLLER, undefined, residents.length]}>
-        <meshStandardMaterial />
-      </instancedMesh>
+      <group scale={STROLL_SCALE}>
+        <ChibiCrowd people={strollers} cap={40} />
+      </group>
     </group>
   );
 }

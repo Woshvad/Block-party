@@ -3,7 +3,8 @@ import { OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { ROOM, type Resident, animatedThisFrame, makeCrowd, rng, stepCrowd, walking } from "./crowd";
+import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
+import { ROOM, type Resident, makeCrowd, rng, stepCrowd, walking } from "./crowd";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
 import { initTelegram } from "./telegram";
 
@@ -11,91 +12,22 @@ import { initTelegram } from "./telegram";
 // residents, all animated. Every body part is one instanced draw call for the
 // whole crowd, so the room stays far inside the 100 to 150 draw-call budget.
 
-const SKIN = ["#f1c7a5", "#d9a47c", "#b97a52", "#8d5a3b", "#5e3a26"].map((c) => new THREE.Color(c));
-const PANTS = ["#1f2433", "#2d3b5a", "#3a3a3a", "#4a3324"].map((c) => new THREE.Color(c));
-
-const geo = {
-  leg: new THREE.BoxGeometry(0.14, 0.45, 0.14).translate(0, -0.225, 0), // pivot at the hip
-  arm: new THREE.BoxGeometry(0.1, 0.42, 0.1).translate(0, -0.21, 0), // pivot at the shoulder
-  body: new THREE.BoxGeometry(0.38, 0.5, 0.22),
-  head: new THREE.IcosahedronGeometry(0.16, 1),
-  hair: new THREE.SphereGeometry(0.17, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-  blob: new THREE.CircleGeometry(0.32, 16).rotateX(-Math.PI / 2),
-};
-
-function Crowd({ crowd, away }: { crowd: Resident[]; away: boolean }) {
-  const people = useMemo(() => crowd.filter((c) => c.away === away), [crowd, away]);
-  const n = people.length;
-  const refs = {
-    legs: useRef<THREE.InstancedMesh>(null),
-    arms: useRef<THREE.InstancedMesh>(null),
-    body: useRef<THREE.InstancedMesh>(null),
-    head: useRef<THREE.InstancedMesh>(null),
-    hair: useRef<THREE.InstancedMesh>(null),
-    blob: useRef<THREE.InstancedMesh>(null),
-  };
-  // Reused every frame: no allocation in the loop (garbage collection stutters on phones).
-  const tmp = useMemo(() => ({ base: new THREE.Matrix4(), local: new THREE.Matrix4(), out: new THREE.Matrix4(), q: new THREE.Quaternion(), e: new THREE.Euler(), v: new THREE.Vector3(), one: new THREE.Vector3(1, 1, 1), yaw: new THREE.Quaternion(), up: new THREE.Vector3(0, 1, 0) }), []);
-  const frame = useRef(0);
-  const r = useMemo(() => rng(away ? 99 : 42), [away]);
-
-  // Colours once: outfit by hue, skin and trousers from small palettes.
-  useEffect(() => {
-    const c = new THREE.Color();
-    people.forEach((p, i) => {
-      refs.body.current!.setColorAt(i, c.setHSL(p.hue, 0.55, away ? 0.75 : 0.55));
-      refs.head.current!.setColorAt(i, SKIN[p.id % SKIN.length]!);
-      refs.hair.current!.setColorAt(i, c.setHSL((p.hue + 0.5) % 1, 0.3, 0.2 + (p.id % 3) * 0.15));
-      for (const k of [0, 1]) {
-        refs.legs.current!.setColorAt(i * 2 + k, PANTS[p.id % PANTS.length]!);
-        refs.arms.current!.setColorAt(i * 2 + k, SKIN[p.id % SKIN.length]!);
-      }
+// The crowd sim from crowd.ts moves everyone; the chibi renderer draws them.
+function TestCrowd({ crowd }: { crowd: Resident[] }) {
+  const r = useMemo(() => rng(42), []);
+  const people = useRef<ChibiPerson[]>(crowd.map((c) => ({ id: `test-${c.id}`, look: null, x: c.x, z: c.z, yaw: 0, moving: false, phase: 0, dim: c.away })));
+  useFrame((_, dt) => {
+    stepCrowd(crowd, Math.min(dt, 0.1), r);
+    crowd.forEach((c, i) => {
+      const p = people.current[i]!;
+      p.x = c.x;
+      p.z = c.z;
+      p.moving = walking(c);
+      p.phase = c.phase;
+      if (p.moving) p.yaw = Math.atan2(c.tx - c.x, c.tz - c.z);
     });
-    for (const m of Object.values(refs)) if (m.current?.instanceColor) m.current.instanceColor.needsUpdate = true;
-  }, [people, away]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useFrame(({ camera }, dt) => {
-    const step = Math.min(dt, 0.1);
-    stepCrowd(people, step, r);
-    const animate = animatedThisFrame(people, { x: camera.position.x, z: camera.position.z }, frame.current++);
-    people.forEach((p, i) => {
-      if (!animate.has(p.id) && frame.current > 2) return;
-      const moving = walking(p);
-      const swing = moving ? Math.sin(p.phase) * 0.6 : 0;
-      const bob = moving ? Math.abs(Math.sin(p.phase)) * 0.04 : 0;
-      const face = Math.atan2(p.tx - p.x, p.tz - p.z);
-      tmp.yaw.setFromAxisAngle(tmp.up, face);
-      tmp.base.compose(tmp.v.set(p.x, 0, p.z), tmp.yaw, tmp.one);
-      const place = (m: THREE.InstancedMesh, idx: number, lx: number, ly: number, rx: number) => {
-        tmp.local.compose(tmp.v.set(lx, ly + bob, 0), tmp.q.setFromEuler(tmp.e.set(rx, 0, 0)), tmp.one);
-        m.setMatrixAt(idx, tmp.out.multiplyMatrices(tmp.base, tmp.local));
-      };
-      place(refs.legs.current!, i * 2, -0.09, 0.45, swing);
-      place(refs.legs.current!, i * 2 + 1, 0.09, 0.45, -swing);
-      place(refs.arms.current!, i * 2, -0.25, 0.92, -swing * 0.8);
-      place(refs.arms.current!, i * 2 + 1, 0.25, 0.92, swing * 0.8);
-      place(refs.body.current!, i, 0, 0.7, 0);
-      place(refs.head.current!, i, 0, 1.13, 0);
-      place(refs.hair.current!, i, 0, 1.16, 0);
-      place(refs.blob.current!, i, 0, 0.01 - bob, 0);
-    });
-    for (const m of Object.values(refs)) if (m.current) m.current.instanceMatrix.needsUpdate = true;
   });
-
-  const mat = (extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
-    away ? <meshStandardMaterial transparent opacity={0.38} depthWrite={false} {...extra} /> : <meshStandardMaterial {...extra} />;
-  return (
-    <group>
-      <instancedMesh ref={refs.legs} args={[geo.leg, undefined, n * 2]}>{mat()}</instancedMesh>
-      <instancedMesh ref={refs.arms} args={[geo.arm, undefined, n * 2]}>{mat()}</instancedMesh>
-      <instancedMesh ref={refs.body} args={[geo.body, undefined, n]}>{mat()}</instancedMesh>
-      <instancedMesh ref={refs.head} args={[geo.head, undefined, n]}>{mat({ flatShading: true })}</instancedMesh>
-      <instancedMesh ref={refs.hair} args={[geo.hair, undefined, n]}>{mat()}</instancedMesh>
-      <instancedMesh ref={refs.blob} args={[geo.blob, undefined, n]}>
-        <meshBasicMaterial color="#000000" transparent opacity={away ? 0.08 : 0.18} depthWrite={false} />
-      </instancedMesh>
-    </group>
-  );
+  return <ChibiCrowd people={people} cap={crowd.length} />;
 }
 
 // A dark tiled floor, like a real flat, from a tiny generated texture.
@@ -177,8 +109,7 @@ export default function RoomTest() {
           <hemisphereLight args={["#ffffff", "#b9c7d6", 1.1]} />
           <directionalLight position={[8, 14, 6]} intensity={1.4} />
           <Room />
-          <Crowd crowd={crowd} away={false} />
-          <Crowd crowd={crowd} away />
+          <TestCrowd crowd={crowd} />
           <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={12} maxDistance={34} target={[0, 0, 0]} />
           {SHOW_PERF && <PerfProbe target={perf} />}
         </Canvas>

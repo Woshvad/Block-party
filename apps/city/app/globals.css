@@ -175,3 +175,11 @@ pre.grid { font-size: 22px; line-height: 1.2; margin: 6px 0; white-space: pre-wr
 .banner8.small i { width: 3px; height: 3px; cursor: default; }
 .code { font-family: ui-monospace, monospace; letter-spacing: 0.05em; }
 select.ask { background: #fff; }
+.sheetpage { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; overflow-y: auto; height: 100%; }
+.sheetpage h1 { font-size: 26px; margin: 0 0 6px; }
+.sheetpage h2 { font-size: 17px; margin: 22px 0 8px; }
+.lineup { width: 100%; border-radius: 16px; overflow: hidden; background: #f4efe6; }
+.caption { font-size: 12px; color: var(--muted); text-align: center; margin: 6px 0 0; }
+.facesheet { width: 100%; max-width: 512px; display: block; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 50% / 24px 24px; border-radius: 12px; margin-bottom: 10px; }
+.sw { width: 28px; height: 28px; border-radius: 8px; display: inline-block; border: 1px solid rgba(0, 0, 0, 0.1); }
+a.btn { display: inline-block; text-decoration: none; }
