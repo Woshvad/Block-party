@@ -1,10 +1,12 @@
 "use client";
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { outlineMaterial, toonRamp } from "./chibi/parts";
 import { CITY_SIZE, GRID, LANDMARKS, type Lot, SQUARE, blockRect, fillCity, roads, zoneOf } from "./citygen";
+import Kit from "./Kit";
+import { cityPlacements } from "./kitcity";
 import { type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
 import { type Part, ball, box, colored, cyl, darker, prism } from "./geo";
 
@@ -75,20 +77,6 @@ function blocks(b: Built) {
         b.city.push(box(r.x, 0.1, r.z, r.w - 0.4, 0.06, r.d - 0.4, "#4f9bd0"), box(r.x - 1, 0.18, r.z + 2.6, 0.9, 0.12, 3.6, "#8a5a2b"));
         for (let k = 0; k < 6; k++) b.city.push(ball(r.x + 3.2 - (k % 3) * 0.6, 0.6, r.z - 3.4 + Math.floor(k / 3) * 6.6, 0.45, "#5aa05a"));
       } else b.city.push(box(r.x, 0.15, r.z, r.w - 0.2, 0.04, r.d - 0.2, ground));
-    }
-  // Street trees along every sidewalk (not too near the corners and crossings).
-  for (let bx = 0; bx < GRID.blocks; bx++)
-    for (let bz = 0; bz < GRID.blocks; bz++) {
-      const zone = zoneOf(bx, bz);
-      if (zone === "square" || zone === "water") continue;
-      const r = blockRect(bx, bz);
-      const e = r.w / 2 + 0.12;
-      for (let k = -r.w / 2 + 1.6; k <= r.w / 2 - 1.6; k += 2.3) {
-        tree(b, r.x + k, r.z + e, 0.5);
-        tree(b, r.x + k, r.z - e, 0.5);
-        tree(b, r.x + e, r.z + k, 0.5);
-        tree(b, r.x - e, r.z + k, 0.5);
-      }
     }
   // Bus shelters on the square's edges.
   for (const [x, z, yaw] of [[SQUARE.x + 4, SQUARE.z + SQUARE.d / 2 + 0.05, 0], [SQUARE.x - SQUARE.w / 2 - 0.05, SQUARE.z - 4, Math.PI / 2]] as const) {
@@ -359,11 +347,13 @@ export default function CityScape({ night }: { night: boolean }) {
   const built = useMemo(() => {
     const b: Built = { city: [], windows: [], lamps: [] };
     blocks(b);
-    streets(b);
-    for (const l of fillCity()) lot(b, l);
+    // Roads, street lights, houses, shops, towers and trees come from Kenney's
+    // City Kit (see Kit.tsx); our own code keeps pools, parking and landmarks.
+    for (const l of fillCity()) if (l.kind === "pool" || l.kind === "parking") lot(b, l);
     landmarks(b);
     return { city: mergeGeometries(b.city, false)!, windows: mergeGeometries(b.windows, false)!, lamps: mergeGeometries(b.lamps, false)! };
   }, []);
+  const placements = useMemo(() => cityPlacements(), []);
   const ramp = useMemo(() => toonRamp(), []);
   const mat = useMemo(() => new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: ramp }), [ramp]);
   const ink = useMemo(() => outlineMaterial(0.02), []);
@@ -381,11 +371,14 @@ export default function CityScape({ night }: { night: boolean }) {
   return (
     <group>
       {/* The land beyond the grid. */}
-      <mesh rotation-x={-Math.PI / 2} position-y={-0.01}>
+      <mesh rotation-x={-Math.PI / 2} position-y={-0.01} receiveShadow>
         <planeGeometry args={[CITY_SIZE + 30, CITY_SIZE + 30]} />
         <meshStandardMaterial color={night ? "#2c3a2a" : "#8fbf6f"} />
       </mesh>
-      <mesh geometry={built.city} material={mat} />
+      <Suspense fallback={null}>
+        <Kit placements={placements} />
+      </Suspense>
+      <mesh geometry={built.city} material={mat} castShadow receiveShadow />
       <mesh geometry={built.city} material={ink} />
       <mesh geometry={built.windows}>
         <meshStandardMaterial color={night ? "#ffdd8a" : "#6f93ba"} emissive={night ? "#ffb84d" : "#000000"} emissiveIntensity={night ? 0.9 : 0} roughness={0.25} metalness={0.2} />

@@ -180,11 +180,23 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
           <span className="go">Move in to visit: open Block Party in Telegram.</span>
         </div>
       )}
-      <div className="stage" style={{ background: night ? "#0b1020" : "#dfeaf5" }}>
-        <Canvas orthographic dpr={[1, 2]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
-          <color attach="background" args={[night ? "#0b1020" : "#dfeaf5"]} />
+      <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
+        <Canvas shadows orthographic dpr={[1, 2]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
           <hemisphereLight args={[night ? "#6b7cff" : "#ffffff", night ? "#0b1020" : "#b9c79d", night ? 0.9 : 1.15]} />
-          <directionalLight position={[18, 30, 10]} intensity={night ? 0.45 : 1.55} />
+          {/* The sun, casting real shadows over the whole city. */}
+          <directionalLight
+            position={[22, 34, 12]}
+            intensity={night ? 0.45 : 1.7}
+            castShadow
+            shadow-mapSize={[2048, 2048]}
+            shadow-camera-left={-34}
+            shadow-camera-right={34}
+            shadow-camera-top={34}
+            shadow-camera-bottom={-34}
+            shadow-camera-far={120}
+            shadow-bias={-0.0004}
+            shadow-normalBias={0.03}
+          />
           <CityScape night={night} />
           <TowerTop night={night} />
           <Strollers />
