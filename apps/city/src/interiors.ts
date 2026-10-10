@@ -1,5 +1,6 @@
 import { type Plan, type Seat, makePlan } from "./plan";
 import { ROOM_SIZE } from "./places";
+import type { FeedKey } from "./roomfeeds";
 
 // What's inside each public place: a layout in tiles (x across, y from the
 // back wall forward), what blocks walking, and which tiles are seats. Pure
@@ -17,6 +18,7 @@ export type Decor = {
   d?: number; // tiles deep (default 1)
   color?: string;
   label?: string; // signs, screens, murals
+  feed?: FeedKey; // screens: a live board (see roomfeeds.ts), the label until it loads
   blocks?: boolean; // default: true, except seats, rugs and wall pieces
   seat?: string; // a seat id: you can sit here
   facing?: number; // seats: which way you face (yaw)
@@ -41,6 +43,7 @@ export const LAYOUTS: Record<string, Layout> = {
     look: { wall: "#f3dccb", wall2: "#d4473f", floor: "#f4f1ea", floor2: "#2c2c2a" },
     decor: [
       { kind: "sign", x: 4, y: 0, w: 6, label: "GWEI DINER", color: "#ff5d73" },
+      { kind: "screen", x: 0, y: 0, w: 4, label: "ALPHA", color: "#f4f1ea", feed: "diner" },
       { kind: "counter", x: 3, y: 1, w: 8, color: "#d4473f" },
       ...[3, 5, 7, 9].map((x, i): Decor => ({ kind: "stool", x, y: 2, seat: `stool${i + 1}`, facing: N, color: "#d4473f" })),
       // Booths: bench, table, bench; along both side walls.
@@ -53,13 +56,13 @@ export const LAYOUTS: Record<string, Layout> = {
         { kind: "booth_bench", x: 13, y, seat: `booth${i + 4}b`, facing: W, color: "#d4473f" },
       ]),
       { kind: "jukebox", x: 13, y: 0, color: "#ef9f27" },
-      { kind: "plant", x: 0, y: 0 },
+      { kind: "plant", x: 11, y: 0 }, // the chalkboard has the corner
     ],
   },
   tower: {
     look: { wall: "#2b2357", wall2: "#534ab7", floor: "#3a3270", floor2: "#30295e" },
     decor: [
-      { kind: "screen", x: 2, y: 0, w: 12, label: "THE ODDS WALL", color: "#1d9e75" },
+      { kind: "screen", x: 2, y: 0, w: 12, label: "THE ODDS WALL", color: "#1d9e75", feed: "odds" },
       { kind: "sign", x: 0, y: 0, w: 2, label: "TOWER", color: "#8f7cff" },
       ...[[3, 5], [8, 5], [12, 5], [5, 9], [10, 9]].flatMap(([x, y], i): Decor[] => [
         { kind: "round_table", x: x!, y: y!, color: "#e8e1d4" },
@@ -91,9 +94,10 @@ export const LAYOUTS: Record<string, Layout> = {
     look: { wall: "#e8e1d4", wall2: "#8fb1e0", floor: "#b08355", floor2: "#9c7148" },
     decor: [
       { kind: "sign", x: 5, y: 0, w: 6, label: "CITY HALL", color: "#378add" },
+      { kind: "screen", x: 11, y: 0, w: 5, label: "NOTICEBOARD", color: "#378add", feed: "hall" },
       { kind: "podium", x: 7, y: 1, w: 2, color: "#7a4a2a" },
       { kind: "flag", x: 4, y: 1, color: "#378add" },
-      { kind: "flag", x: 11, y: 1, color: "#e24b4a" },
+      { kind: "flag", x: 10, y: 1, color: "#e24b4a" }, // clear of the noticeboard
       { kind: "ballot", x: 13, y: 3, color: "#f4f1ea" },
       { kind: "rug", x: 6, y: 3, w: 4, d: 7, color: "#b23a3a" },
       ...benchRow(5, [2, 3, 4, 11, 12, 13], "row1-", N, "#7a4a2a"),
@@ -106,7 +110,7 @@ export const LAYOUTS: Record<string, Layout> = {
   watch_party: {
     look: { wall: "#1f2433", wall2: "#33264f", floor: "#2d3b5a", floor2: "#263250" },
     decor: [
-      { kind: "screen", x: 3, y: 0, w: 14, label: "WATCH PARTY", color: "#378add" },
+      { kind: "screen", x: 3, y: 0, w: 14, label: "WATCH PARTY", color: "#378add", feed: "match" },
       ...[3, 7, 12, 16].map((x, i): Decor => ({ kind: "sofa", x, y: 5, w: 2, seat: `sofa${i + 1}`, facing: N, color: ["#8f5bd1", "#d4537e", "#3ab5c9", "#ef9f27"][i] })),
       ...[2, 5, 8, 11, 14, 17].map((x, i): Decor => ({ kind: "beanbag", x, y: 9, seat: `bean${i + 1}`, facing: N, color: ["#e24b4a", "#97c459", "#f2d04b", "#378add", "#d4537e", "#1d9e75"][i] })),
       { kind: "counter", x: 0, y: 12, w: 4, color: "#e8e1d4" },

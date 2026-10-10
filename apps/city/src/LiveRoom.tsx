@@ -4,7 +4,7 @@ import { Html, OrbitControls } from "@react-three/drei";
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
-import { ApiError, type Api, type Home, type Look } from "./api";
+import { ApiError, type Api, type CityHall, type Home, type Look, type MarketRow } from "./api";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import Interior from "./Interior";
 import { layoutFor, planFor } from "./interiors";
@@ -20,6 +20,7 @@ import { type RoomState, applyEvent, bubbles, emptyRoom, showingEmote } from "./
 import { type SocketStatus, openRoomSocket } from "./roomSocket";
 import { haptic } from "./telegram";
 import { useToast } from "./useToast";
+import { type Board, type FeedKey, dinerBoard, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
 
 // A live room: everyone here walking where they tapped, chat bubbles over
 // heads, emotes, and the dimmed away residents. Every body part is one
@@ -138,6 +139,31 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
   );
 }
 
+// The live boards for this room's screens: fetched on entry and every minute.
+function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<FeedKey, Board>> {
+  const [odds, setOdds] = useState<MarketRow[] | null>(null);
+  const [hall, setHall] = useState<CityHall | null>(null);
+  useEffect(() => {
+    const wantsOdds = place === "tower" || place === "watch_party";
+    const load = () => {
+      if (wantsOdds) void api.oddsWall().then(setOdds).catch(() => {});
+      if (place === "city_hall") void api.cityHall().then(setHall).catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [api, place]);
+  const minute = Math.floor(now / 60_000);
+  return useMemo(() => {
+    const at = minute * 60_000;
+    return {
+      ...(odds ? { odds: oddsBoard(odds, at), match: matchBoard(odds, at) } : {}),
+      ...(hall ? { hall: hallBoard(hall, at) } : {}),
+      diner: dinerBoard(new Date(at).toISOString().slice(0, 10)),
+    };
+  }, [odds, hall, minute]);
+}
+
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
   // Your own home or your crew's house: draw the furniture (the API shares a
   // layout only with its owner, or the crew's members).
@@ -174,6 +200,7 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   const now = useNow(1000);
 
   const layout = useMemo(() => layoutFor(place), [place]);
+  const feeds = useRoomFeeds(api, place, now);
   // What blocks walking here: the place's layout, or a home's floor furniture.
   const plan = useMemo<Plan>(() => {
     const p = planFor(place);
@@ -298,7 +325,7 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
               onCell={(x, y) => goTo(x - size.w / 2 + 0.5, y - size.h / 2 + 0.5)}
             />
           ) : layout ? (
-            <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} />
+            <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} feeds={feeds} />
           ) : (
             <>
               <mesh rotation-x={-Math.PI / 2} onPointerDown={onFloor}>

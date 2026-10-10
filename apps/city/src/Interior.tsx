@@ -5,6 +5,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { outlineMaterial, toonRamp } from "./chibi/parts";
 import { type Part, ball, box, colored, cyl, darker } from "./geo";
 import type { Decor, Layout } from "./interiors";
+import type { Board, FeedKey } from "./roomfeeds";
 
 // A public room's interior: walls, a two-tone floor and every piece of decor,
 // merged into ONE shape with per-vertex colours (one draw call, plus one for
@@ -123,6 +124,70 @@ function useLabel(text: string, color: string, kind: Decor["kind"]) {
   return tex;
 }
 
+// A live board: title, rows (green up, red down) and a credit line, repainted when the data changes.
+function useBoard(board: Board, color: string, w: number) {
+  const key = JSON.stringify(board);
+  const tex = useMemo(() => {
+    const c = document.createElement("canvas");
+    // The canvas has the screen's shape (w - 0.25 by 1.75), so text isn't stretched.
+    c.height = 360;
+    c.width = Math.min(2400, Math.round((c.height * (w - 0.25)) / 1.75));
+    const g = c.getContext("2d")!;
+    g.fillStyle = "#0b111a";
+    g.fillRect(0, 0, c.width, c.height);
+    g.fillStyle = color;
+    g.fillRect(0, 0, c.width, 58);
+    g.fillStyle = "#0b111a";
+    g.font = "900 34px ui-sans-serif, system-ui, sans-serif";
+    g.textBaseline = "middle";
+    g.fillText(board.title, 22, 30);
+    const rowH = Math.min(46, 250 / Math.max(1, board.rows.length));
+    g.font = `600 ${Math.round(rowH * 0.56)}px ui-sans-serif, system-ui, sans-serif`;
+    board.rows.forEach((r, i) => {
+      const y = 58 + rowH * (i + 0.5) + 6;
+      if (i % 2) {
+        g.fillStyle = "rgba(255,255,255,0.04)";
+        g.fillRect(0, y - rowH / 2, c.width, rowH);
+      }
+      g.fillStyle = "#e6edf5";
+      g.textAlign = "left";
+      const right = r.right ?? "";
+      const room = c.width - 44 - (right ? g.measureText(right).width + 24 : 0);
+      let left = r.left;
+      while (left.length > 4 && g.measureText(left).width > room) left = `${left.slice(0, -2)}…`;
+      g.fillText(left, 22, y);
+      if (right) {
+        g.textAlign = "right";
+        g.fillStyle = r.tone === "up" ? "#2bd67b" : r.tone === "down" ? "#ff4d5e" : "#9fb3c8";
+        g.fillText(right, c.width - 22, y);
+      }
+    });
+    if (board.foot) {
+      g.textAlign = "left";
+      g.fillStyle = "#7d8a9c";
+      g.font = "500 20px ui-sans-serif, system-ui, sans-serif";
+      g.fillText(board.foot, 22, c.height - 20);
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
+  }, [key, color, w]); // key: the board's contents, so equal data reuses the texture
+  useEffect(() => () => tex.dispose(), [tex]);
+  return tex;
+}
+
+function BoardScreen({ d, W, H, board }: { d: Decor; W: number; H: number; board: Board }) {
+  const w = d.w ?? 1;
+  const tex = useBoard(board, d.color ?? "#1d9e75", w);
+  return (
+    <mesh position={[d.x + w / 2 - W / 2, 1.55, -H / 2 + 0.2]}>
+      <planeGeometry args={[w - 0.25, 1.75]} />
+      <meshBasicMaterial map={tex} toneMapped={false} />
+    </mesh>
+  );
+}
+
 function Label({ d, W, H }: { d: Decor; W: number; H: number }) {
   const w = d.w ?? 1;
   const tex = useLabel(d.label ?? "", d.color ?? "#ffffff", d.kind);
@@ -152,7 +217,7 @@ function checker(a: string, b: string, w: number, h: number) {
   return t;
 }
 
-export default function Interior({ layout, w, h, low = false, onFloor }: { layout: Layout; w: number; h: number; low?: boolean; onFloor?: (x: number, z: number) => void }) {
+export default function Interior({ layout, w, h, low = false, onFloor, feeds = {} }: { layout: Layout; w: number; h: number; low?: boolean; onFloor?: (x: number, z: number) => void; feeds?: Partial<Record<FeedKey, Board>> }) {
   const { look, decor } = layout;
   const wallH = low ? 1.1 : 2.8;
   const built = useMemo(() => {
@@ -202,9 +267,10 @@ export default function Interior({ layout, w, h, low = false, onFloor }: { layou
       <mesh geometry={built} material={ink} />
       {decor
         .filter((d) => d.label && (d.kind === "sign" || d.kind === "screen" || d.kind === "mural"))
-        .map((d, i) => (
-          <Label key={i} d={d} W={w} H={h} />
-        ))}
+        .map((d, i) => {
+          const board = d.feed ? feeds[d.feed] : undefined;
+          return board ? <BoardScreen key={i} d={d} W={w} H={h} board={board} /> : <Label key={i} d={d} W={w} H={h} />;
+        })}
     </group>
   );
 }
