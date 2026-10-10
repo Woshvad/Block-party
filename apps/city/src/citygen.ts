@@ -3,8 +3,9 @@
 // lots (houses, shops, offices, parks). Pure and seeded: the same city on
 // every phone, and testable without a GPU.
 
-export const GRID = { blocks: 6, block: 9, road: 2 } as const;
-export const CITY_SIZE = GRID.blocks * GRID.block + (GRID.blocks + 1) * GRID.road; // 68
+// Wide avenues and a green setback round every block: buildings get air, roads read clearly.
+export const GRID = { blocks: 6, block: 10, road: 3, setback: 1 } as const;
+export const CITY_SIZE = GRID.blocks * GRID.block + (GRID.blocks + 1) * GRID.road; // 81
 
 export type Zone = "residential" | "commercial" | "office" | "industrial" | "park" | "water" | "landmark" | "square" | "locked";
 export type Rect = { x: number; z: number; w: number; d: number }; // centre and size, world units
@@ -134,8 +135,9 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
   const b = blockRect(bx, bz);
   const zone = zoneOf(bx, bz);
   const out: Lot[] = [];
-  const cell = GRID.block / 3; // 3×3 lots
-  const lotAt = (i: number, j: number) => ({ x: b.x - GRID.block / 2 + cell * (i + 0.5), z: b.z - GRID.block / 2 + cell * (j + 0.5) });
+  const inner = GRID.block - 2 * GRID.setback; // lots sit inside the setback
+  const cell = inner / 3; // 3×3 lots
+  const lotAt = (i: number, j: number) => ({ x: b.x - inner / 2 + cell * (i + 0.5), z: b.z - inner / 2 + cell * (j + 0.5) });
   const facing = (i: number, j: number) => (j === 2 ? 0 : j === 0 ? Math.PI : i === 0 ? -Math.PI / 2 : Math.PI / 2);
   if (zone === "residential" && !nearSquare(bx, bz)) {
     for (let i = 0; i < 3; i++)
@@ -168,7 +170,7 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
     // Towers on the quarters, tallest beside the Prediction Tower and falling
     // away from it (a skyline, not a wall), with one quarter left as a plaza.
     // Residential blocks beside the square get mid-rise apartments the same way.
-    const half = GRID.block / 2;
+    const half = (GRID.block - 2 * GRID.setback) / 2;
     const t = blockRect(1, 1);
     const near = Math.max(0, 1 - Math.hypot(b.x - t.x, b.z - t.z) / 40);
     const flat = zone === "residential" ? 0.55 : 1;
@@ -182,11 +184,11 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
         return;
       }
       const h = (5 + r() * 9) * (0.6 + near * 0.7) * flat;
-      out.push({ kind: "office", x, z, w: half * 0.72, d: half * 0.72, h, color: pick(r, OFFICE), glass: pick(r, GLASS), tall: (0.75 + near * 1.3 + r() * 0.35) * (zone === "residential" ? 0.6 : 1) });
+      out.push({ kind: "office", x, z, w: half * 0.72, d: half * 0.72, h, color: pick(r, OFFICE), glass: pick(r, GLASS), tall: (0.7 + near * 0.95 + r() * 0.3) * (zone === "residential" ? 0.6 : 1) });
     });
   } else if (zone === "industrial") {
     // Factories on the four quarters, yard kit (chimneys, tanks, containers, a water tower) between.
-    const half = GRID.block / 2;
+    const half = (GRID.block - 2 * GRID.setback) / 2;
     const sheds = ["building-a", "building-b", "building-c", "building-d", "building-e", "building-f", "building-g", "building-h", "building-i", "building-j"];
     for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
       const x = b.x - half / 2 + i * half;

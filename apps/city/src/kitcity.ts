@@ -19,7 +19,7 @@ export const KIT = {
 // junction), street lights, and the zoned lots turned into real buildings,
 // houses and trees. Pure: same city every time, and testable.
 
-const ROAD_TILE = GRID.road; // kit road tiles are 1×1; ours are 2 wide
+const ROAD_TILE = GRID.road; // kit road tiles are 1×1, scaled to our road width
 const SHOPS = "abcdefghijklmn".split("").map((c) => `building-${c}`);
 const TOWERS = "abcde".split("").map((c) => `building-skyscraper-${c}`);
 const HOUSES = "abcdefghijklmnopqrstu".split("").map((c) => `building-type-${c}`);
@@ -72,8 +72,8 @@ export function lotPlacements(lots: Lot[] = fillCity()): Placement[] {
   for (const l of lots) {
     const k = hash(l.x, l.z);
     if (l.kind === "house") out.push({ url: KIT.suburban(pick(HOUSES, k)), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: 1.75 });
-    else if (l.kind === "shop") out.push({ url: KIT.commercial(pick(SHOPS, k)), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: [2.15, 2.15 * (1 + (k % 3) * 0.25), 2.15] });
-    else if (l.kind === "office") out.push({ url: KIT.commercial(pick(TOWERS, k)), x: l.x, z: l.z, y: 0.16, rotY: (k % 4) * (Math.PI / 2), scale: [2.1, 2.1 * (l.tall ?? 1), 2.1] });
+    else if (l.kind === "shop") out.push({ url: KIT.commercial(pick(SHOPS, k)), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: [2.0, 2.0 * (1 + (k % 3) * 0.25), 2.0] });
+    else if (l.kind === "office") out.push({ url: KIT.commercial(pick(TOWERS, k)), x: l.x, z: l.z, y: 0.16, rotY: (k % 4) * (Math.PI / 2), scale: [1.9, 1.9 * (l.tall ?? 1), 1.9] });
     else if (l.kind === "factory") out.push({ url: KIT.industrial(l.model), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: l.scale });
     else if (l.kind === "tree") out.push({ url: KIT.suburban(k % 3 ? "tree-large" : "tree-small"), x: l.x, z: l.z, y: 0.16, rotY: k, scale: 2.2 * l.s });
   }

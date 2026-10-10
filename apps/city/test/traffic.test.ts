@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CITY_SIZE } from "../src/citygen";
 import { CAR, CYCLE, carPose, lightFor, makeTraffic, stepTraffic } from "../src/traffic";
 
 describe("traffic lights", () => {
@@ -13,7 +14,7 @@ describe("traffic lights", () => {
       if (z === "green") zGreen++;
     }
     expect(xGreen).toBeGreaterThan(0);
-    expect(Math.abs(zGreen - xGreen)).toBeLessThanOrEqual(1); // sampling rounding
+    expect(Math.abs(zGreen - xGreen)).toBeLessThanOrEqual(3); // sampling rounding: up to one sample per cycle
   });
 });
 
@@ -36,7 +37,7 @@ describe("cars", () => {
         for (let i = 1; i < ss.length; i++) {
           const gap = ss[i]! - ss[i - 1]!;
           // A car wrapping round the map edge is the only way two can be close: they're off the board.
-          if (Math.abs(ss[i]!) < 34 && Math.abs(ss[i - 1]!) < 34) expect(gap).toBeGreaterThan(CAR.len * 0.9);
+          if (Math.abs(ss[i]!) < CITY_SIZE / 2 && Math.abs(ss[i - 1]!) < CITY_SIZE / 2) expect(gap).toBeGreaterThan(CAR.len * 0.9);
         }
       }
     });

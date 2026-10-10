@@ -1,4 +1,4 @@
-import { CITY_SIZE, SQUARE, roads } from "./citygen";
+import { CITY_SIZE, GRID, SQUARE, roads } from "./citygen";
 
 // Traffic, the game way: cars drive in lanes (keep right), hold a following
 // distance behind the car ahead, and obey traffic lights at every junction.
@@ -6,10 +6,10 @@ import { CITY_SIZE, SQUARE, roads } from "./citygen";
 // cars are never in a junction together. Pure and seeded: tested headless.
 
 // The all-red gap must outlast the slowest clear: a car crossing the line at the
-// end of amber needs (stopBack + half a road + a car length) / vmax ≈ 1.3 s.
-export const LIGHTS = { green: 5, amber: 1, allRed: 1.5 } as const;
+// end of amber needs (stopBack + half a road + a car length) / vmax ≈ 1.6 s.
+export const LIGHTS = { green: 5, amber: 1, allRed: 2 } as const;
 export const CYCLE = 2 * (LIGHTS.green + LIGHTS.amber + LIGHTS.allRed);
-export const CAR = { len: 0.95, gap: 0.6, vmax: 2.6, accel: 3, brake: 6, lane: 0.45, stopBack: 1.35 } as const;
+export const CAR = { len: 0.95, gap: 0.6, vmax: 2.6, accel: 3, brake: 6, lane: GRID.road * 0.22, stopBack: GRID.road / 2 + 0.65 } as const;
 
 export type Light = "green" | "amber" | "red";
 // x-roads run first, then z-roads; each gets green, amber, then an all-red gap.

@@ -8,7 +8,7 @@ const onRoad = (x: number, z: number) =>
 
 describe("the city plan", () => {
   it("blocks and roads tile the city exactly", () => {
-    expect(CITY_SIZE).toBe(68);
+    expect(CITY_SIZE).toBe(81);
     const last = blockRect(GRID.blocks - 1, GRID.blocks - 1);
     expect(last.x + last.w / 2 + GRID.road).toBeCloseTo(CITY_SIZE / 2);
     for (let i = 0; i < GRID.blocks; i++) for (let j = 0; j < GRID.blocks; j++) expect(onRoad(blockRect(i, j).x, blockRect(i, j).z)).toBe(false);

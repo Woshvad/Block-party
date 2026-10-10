@@ -226,10 +226,10 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
             intensity={night ? 0.45 : 1.7}
             castShadow
             shadow-mapSize={[2048, 2048]}
-            shadow-camera-left={-34}
-            shadow-camera-right={34}
-            shadow-camera-top={34}
-            shadow-camera-bottom={-34}
+            shadow-camera-left={-44}
+            shadow-camera-right={44}
+            shadow-camera-top={44}
+            shadow-camera-bottom={-44}
             shadow-camera-far={120}
             shadow-bias={-0.0004}
             shadow-normalBias={0.03}
