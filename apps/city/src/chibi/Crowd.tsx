@@ -23,6 +23,7 @@ export type ChibiPerson = {
   phase: number; // walk cycle
   mood?: string | null;
   dim?: boolean; // away residents
+  sitY?: number | null; // seated, on a seat this high
 };
 
 const n = (id: string) => Number(/(\d+)$/.exec(id)?.[1] ?? 0);
@@ -131,10 +132,12 @@ export class CrowdRig {
       const seed = hashOf(p.id) % 1000;
       const dim = !!p.dim;
       const bw = BODY_W[L.bodyType] ?? 1;
+      const sitting = p.sitY !== undefined && p.sitY !== null && !p.moving;
       const bob = p.moving ? Math.abs(Math.sin(p.phase)) * 0.035 : Math.sin(time * 2 + seed) * 0.006;
       const swing = p.moving ? Math.sin(p.phase) * 0.7 : 0;
       t.q.setFromAxisAngle(t.up, p.yaw);
-      t.base.compose(t.v.set(p.x, 0, p.z), t.q, t.s.set(1, 1, 1));
+      // Seated: the hips rest on the seat, legs out in front.
+      t.base.compose(t.v.set(p.x, sitting ? p.sitY! - BODY.hipY + 0.03 : 0, p.z), t.q, t.s.set(1, 1, 1));
 
       const skin = SKIN[L.skinTone] ?? SKIN[3]!;
       const top = OUTFIT[L.outfitColor] ?? OUTFIT[0]!;
@@ -144,12 +147,12 @@ export class CrowdRig {
 
       for (const k of [0, 1] as const) {
         const side = k === 0 ? -1 : 1;
-        const a = side * swing;
+        const a = sitting ? -1.45 : side * swing;
         place(this.parts.legs, i * 2 + k, side * BODY.hipX * bw, BODY.hipY + bob * 0.5, 0, a);
         tint(this.parts.legs, i * 2 + k, legC, dim);
-        place(this.parts.shoes, i * 2 + k, side * BODY.hipX * bw, Math.max(0, BODY.hipY + bob * 0.5 - LEG * Math.cos(a) - 0.0), -LEG * Math.sin(a) * 0.9);
+        place(this.parts.shoes, i * 2 + k, side * BODY.hipX * bw, sitting ? BODY.hipY - 0.03 : Math.max(0, BODY.hipY + bob * 0.5 - LEG * Math.cos(a)), sitting ? LEG * 0.95 : -LEG * Math.sin(a) * 0.9);
         tint(this.parts.shoes, i * 2 + k, SHOES[(n(L.shoes) || 1) - 1] ?? SHOES[0]!, dim);
-        place(this.parts.arms, i * 2 + k, side * BODY.shoulderX * bw, BODY.shoulderY + bob, 0, -a * 0.8, side * 0.12);
+        place(this.parts.arms, i * 2 + k, side * BODY.shoulderX * bw, BODY.shoulderY + bob, 0, sitting ? -0.35 : -a * 0.8, side * 0.12);
         tint(this.parts.arms, i * 2 + k, armC, dim);
       }
       place(this.body, i, 0, 0.44 + bob, 0, 0, 0, bw);
@@ -159,7 +162,8 @@ export class CrowdRig {
       place(this.parts.face, i, 0, BODY.headY + bob, 0);
       const blinking = !dim && (time + seed * 0.37) % 4.2 < 0.13;
       this.cells.setX(i, cellFor(L.face, p.mood ?? null, blinking));
-      place(this.parts.blob, i, 0, 0.01, 0);
+      if (sitting) place(this.parts.blob, i, 0, -9, 0); // no floor shadow up on a seat
+      else place(this.parts.blob, i, 0, 0.01, 0);
 
       const h = L.hair === "none" ? -1 : (n(L.hair) || 1) - 1;
       if (h >= 0 && this.hair[h]) {

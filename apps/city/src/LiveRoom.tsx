@@ -6,9 +6,12 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
 import { ApiError, type Api, type Home, type Look } from "./api";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
+import Interior from "./Interior";
+import { layoutFor, planFor } from "./interiors";
+import { type Plan, type Seat, findPath, makePlan, nearestFree, toTile, toWorld as planWorld } from "./plan";
 import { HomeRoom } from "./HomeRoom";
 import Person from "./Person";
-import { homeSize, pieceOf } from "./furniture";
+import { footprintSize, homeSize, pieceOf } from "./furniture";
 import { fitCamera } from "./camera";
 import { useNow } from "./clock";
 import { placeName, roomSize } from "./places";
@@ -33,23 +36,37 @@ const WALK = 3; // tiles a second
 // Looks, fetched once per handle for the whole visit.
 const looks = new Map<string, Look | "loading" | "none">();
 
-type Drawn = ChibiPerson & { handle: string; tx: number; tz: number };
+type Drawn = ChibiPerson & { handle: string; tx: number; tz: number; goal: string; path: { x: number; z: number }[]; seat: Seat | null };
 
-// Walks everyone toward where they tapped; the chibi crowd draws them.
+// Walks everyone along their path (around furniture, clear of the walls);
+// on arrival at a seat they sit, facing the way it faces. The crowd draws them.
 function Walk({ drawn }: { drawn: React.MutableRefObject<Drawn[]> }) {
   useFrame((_, dtRaw) => {
     const dt = Math.min(dtRaw, 0.1);
     for (const p of drawn.current) {
-      const dx = p.tx - p.x;
-      const dz = p.tz - p.z;
+      const next = p.path[0];
+      if (!next) {
+        p.moving = false;
+        p.sitY = p.seat ? (p.seat.h ?? 0.45) : null;
+        if (p.seat) p.yaw = p.seat.facing;
+        continue;
+      }
+      const dx = next.x - p.x;
+      const dz = next.z - p.z;
       const dist = Math.hypot(dx, dz);
-      p.moving = dist > 0.02;
-      if (!p.moving) continue;
-      const step = Math.min(dist, WALK * dt);
-      p.x += (dx / dist) * step;
-      p.z += (dz / dist) * step;
+      p.moving = true;
+      p.sitY = null;
+      const step = WALK * dt;
+      if (dist <= step) {
+        p.x = next.x;
+        p.z = next.z;
+        p.path.shift();
+      } else {
+        p.x += (dx / dist) * step;
+        p.z += (dz / dist) * step;
+      }
       p.phase += dt * 9;
-      p.yaw = Math.atan2(dx, dz);
+      if (dist > 0.001) p.yaw = Math.atan2(dx, dz);
     }
   });
   return null;
@@ -161,7 +178,23 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   const drawn = useRef<Drawn[]>([]);
   const now = useNow(1000);
 
-  const toWorld = (p: { x: number; y: number }) => ({ x: p.x - size.w / 2 + 0.5, z: p.y - size.h / 2 + 0.5 });
+  const layout = useMemo(() => layoutFor(place), [place]);
+  // What blocks walking here: the place's layout, or a home's floor furniture.
+  const plan = useMemo<Plan>(() => {
+    const p = planFor(place);
+    if (p) return p;
+    const blocks = (home?.placed ?? [])
+      .filter((it) => it.placement.layer === "floor")
+      .map((it) => {
+        const pl = it.placement as { x: number; y: number; rot: number };
+        const f = footprintSize(it.pieceId, pl.rot);
+        return { x: pl.x, y: pl.y, w: f.w, d: f.d };
+      });
+    return makePlan(size.w, size.h, blocks);
+  }, [place, home, size.w, size.h]);
+  const toWorld = (t: { x: number; y: number }) => planWorld(plan, t);
+  // Where someone is now, in tiles, for pathing from there.
+  const here = (d: Drawn) => toTile(plan, d.x, d.z);
 
   useEffect(() => {
     const c = openRoomSocket({ ticket: () => api.roomTicket(place) }, { event: (ev) => dispatch({ ev, now: Date.now() }), status: setStatus });
@@ -174,10 +207,21 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
     const prev = new Map(drawn.current.map((d) => [d.id, d]));
     const next: Drawn[] = [];
     for (const p of Object.values(room.people)) {
-      const w = toWorld(p.pos);
+      const seat = p.seat ? (plan.seats.find((x) => x.id === p.seat) ?? null) : null;
+      const target = seat ? { x: seat.x, y: seat.y } : p.pos;
+      const goal = `${target.x},${target.y}`;
+      const w = toWorld(target);
       const old = prev.get(p.userId);
       const look = looks.get(p.handle);
-      next.push(old ? { ...old, tx: w.x, tz: w.z, handle: p.handle, mood: p.userId === me ? myMood : old.mood, look: typeof look === "object" ? look : old.look } : { id: p.userId, handle: p.handle, x: w.x, z: w.z, tx: w.x, tz: w.z, yaw: 0, moving: false, phase: 0, dim: false, mood: p.userId === me ? myMood : null, look: typeof look === "object" ? look : null });
+      const lk = typeof look === "object" ? look : (old?.look ?? null);
+      const mood = p.userId === me ? myMood : (old?.mood ?? null);
+      if (old) {
+        // A new destination: a fresh path from wherever they are now.
+        const path = old.goal === goal ? old.path : findPath(plan, here(old), target).map(toWorld);
+        next.push({ ...old, tx: w.x, tz: w.z, goal, path, seat, handle: p.handle, mood, look: lk });
+      } else {
+        next.push({ id: p.userId, handle: p.handle, x: w.x, z: w.z, tx: w.x, tz: w.z, goal, path: [], seat, yaw: seat?.facing ?? 0, moving: false, phase: 0, dim: false, mood, look: lk });
+      }
       if (!looks.has(p.handle)) {
         looks.set(p.handle, "loading");
         api
@@ -194,25 +238,34 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
     // Away residents (dimmed) along the back, never walking.
     room.away.slice(0, 10).forEach((a, i) => {
       const x = -size.w / 2 + 1 + ((i * 1.7) % (size.w - 2));
-      next.push({ id: `away:${a.userId}`, handle: a.handle, x, z: -size.h / 2 + 1, tx: x, tz: -size.h / 2 + 1, yaw: 0, moving: false, phase: 0, dim: true, mood: "rested", look: null });
+      next.push({ id: `away:${a.userId}`, handle: a.handle, x, z: -size.h / 2 + 1, tx: x, tz: -size.h / 2 + 1, goal: "", path: [], seat: null, yaw: 0, moving: false, phase: 0, dim: true, mood: "rested", look: null });
     });
     // The room's NPCs, as chibis with a steady look of their own.
     for (let i = 0; i < Math.min(room.headcount.npc, 4); i++) {
       const { x, z } = npcSpot(i, size.w, size.h);
-      next.push({ id: `npc:${place}:${i}`, handle: "NPC", x, z, tx: x, tz: z, yaw: 0, moving: false, phase: 0, look: null });
+      next.push({ id: `npc:${place}:${i}`, handle: "NPC", x, z, tx: x, tz: z, goal: "", path: [], seat: null, yaw: 0, moving: false, phase: 0, look: null });
     }
     drawn.current = next.slice(0, CAP);
-  }, [room.people, room.away, room.headcount.npc, myMood]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [room.people, room.away, room.headcount.npc, myMood, plan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = (msg: unknown) => {
     if (!conn.current?.send(msg)) return false;
     return true;
   };
+  const goTo = (wx: number, wz: number) => {
+    const t = toTile(plan, wx, wz);
+    const seat = plan.seats.find((s) => s.x === t.x && s.y === t.y);
+    if (seat) {
+      // Walk over, then sit: the room keeps the seat; everyone sees you take it.
+      if (send({ t: "move", to: { x: seat.x, y: seat.y } }) && send({ t: "sit", seat: seat.id })) haptic("light");
+      return;
+    }
+    const to = nearestFree(plan, t);
+    if (to && send({ t: "move", to })) haptic("light");
+  };
   const onFloor = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
-    const x = Math.floor(e.point.x + size.w / 2);
-    const y = Math.floor(e.point.z + size.h / 2);
-    if (send({ t: "move", to: { x, y } })) haptic("light");
+    goTo(e.point.x, e.point.z);
   };
   const say = () => {
     const t = text.trim();
@@ -247,8 +300,10 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
               wallFinish={home.wallFinish}
               floorFinish={home.floorFinish}
               placed={home.placed}
-              onCell={(x, y) => send({ t: "move", to: { x, y } }) && haptic("light")}
+              onCell={(x, y) => goTo(x - size.w / 2 + 0.5, y - size.h / 2 + 0.5)}
             />
+          ) : layout ? (
+            <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} />
           ) : (
             <>
               <mesh rotation-x={-Math.PI / 2} onPointerDown={onFloor}>

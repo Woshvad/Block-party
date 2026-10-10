@@ -4,7 +4,8 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
-import { ROOM, type Resident, makeCrowd, rng, stepCrowd, walking } from "./crowd";
+import { ROOM, type Resident, makeCrowd, rng } from "./crowd";
+import { findPath, makePlan, nearestFree, toTile, toWorld as planWorld } from "./plan";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
 import { initTelegram } from "./telegram";
 
@@ -12,20 +13,68 @@ import { initTelegram } from "./telegram";
 // residents, all animated. Every body part is one instanced draw call for the
 // whole crowd, so the room stays far inside the 100 to 150 draw-call budget.
 
-// The crowd sim from crowd.ts moves everyone; the chibi renderer draws them.
+// What blocks walking in the test room (world boxes, centre and size).
+const SOLID: { c: [number, number]; s: [number, number] }[] = [
+  { c: [-4, 4.3], s: [5, 1.1] }, // sofa
+  { c: [-4, 4.75], s: [5, 0.3] },
+  { c: [-4.8, 1.6], s: [1.6, 1] }, // tables
+  { c: [-2.6, 1.4], s: [1.4, 1] },
+  { c: [3, -ROOM.depth / 2 + 0.4], s: [3, 0.6] }, // shelf
+  { c: [6.5, -2], s: [3.6, 1.2] }, // counter
+  { c: [5.8, -0.9], s: [0.4, 0.4] }, // stools
+  { c: [7.2, -0.9], s: [0.4, 0.4] },
+  { c: [-ROOM.width / 2 + 0.6, -ROOM.depth / 2 + 0.6], s: [0.4, 0.4] }, // plant
+];
+const TEST_PLAN = makePlan(
+  ROOM.width,
+  ROOM.depth,
+  SOLID.map(({ c, s }) => {
+    const x0 = Math.floor(c[0] - s[0] / 2 + ROOM.width / 2);
+    const y0 = Math.floor(c[1] - s[1] / 2 + ROOM.depth / 2);
+    return { x: x0, y: y0, w: Math.ceil(c[0] + s[0] / 2 + ROOM.width / 2) - x0, d: Math.ceil(c[1] + s[1] / 2 + ROOM.depth / 2) - y0 };
+  }),
+);
+
+// The crowd wanders the room on real paths (around the sofa, never through
+// the counter), stands a moment, then picks a new free spot.
 function TestCrowd({ crowd }: { crowd: Resident[] }) {
   const r = useMemo(() => rng(42), []);
-  const people = useRef<ChibiPerson[]>(crowd.map((c) => ({ id: `test-${c.id}`, look: null, x: c.x, z: c.z, yaw: 0, moving: false, phase: 0, dim: c.away })));
-  useFrame((_, dt) => {
-    stepCrowd(crowd, Math.min(dt, 0.1), r);
-    crowd.forEach((c, i) => {
-      const p = people.current[i]!;
-      p.x = c.x;
-      p.z = c.z;
-      p.moving = walking(c);
-      p.phase = c.phase;
-      if (p.moving) p.yaw = Math.atan2(c.tx - c.x, c.tz - c.z);
-    });
+  const people = useRef<(ChibiPerson & { path: { x: number; z: number }[]; idle: number; speed: number })[]>(
+    crowd.map((c) => {
+      const start = planWorld(TEST_PLAN, nearestFree(TEST_PLAN, toTile(TEST_PLAN, c.x, c.z))!);
+      return { id: `test-${c.id}`, look: null, x: start.x, z: start.z, yaw: 0, moving: false, phase: c.phase, dim: c.away, path: [], idle: c.idle, speed: c.speed * (c.away ? 0.5 : 1) };
+    }),
+  );
+  useFrame((_, dtRaw) => {
+    const dt = Math.min(dtRaw, 0.1);
+    for (const p of people.current) {
+      const next = p.path[0];
+      if (!next) {
+        p.moving = false;
+        p.idle -= dt;
+        if (p.idle <= 0) {
+          const to = { x: Math.floor(r() * ROOM.width), y: Math.floor(r() * ROOM.depth) };
+          p.path = findPath(TEST_PLAN, toTile(TEST_PLAN, p.x, p.z), to).map((t) => planWorld(TEST_PLAN, t));
+          p.idle = 1 + r() * 4;
+        }
+        continue;
+      }
+      const dx = next.x - p.x;
+      const dz = next.z - p.z;
+      const d = Math.hypot(dx, dz);
+      const step = p.speed * dt;
+      p.moving = true;
+      if (d <= step) {
+        p.x = next.x;
+        p.z = next.z;
+        p.path.shift();
+      } else {
+        p.x += (dx / d) * step;
+        p.z += (dz / d) * step;
+      }
+      if (d > 0.001) p.yaw = Math.atan2(dx, dz);
+      p.phase += dt * p.speed * 6;
+    }
   });
   return <ChibiCrowd people={people} cap={crowd.length} />;
 }

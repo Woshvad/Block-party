@@ -1,6 +1,7 @@
 // Camera maths for the city board, kept pure so it can be tested without WebGL.
 
-export const BOARD = { width: 34, depth: 26 } as const;
+// The city board (see citygen.ts: 4 blocks of 9 plus 5 roads of 2 each way).
+export const BOARD = { width: 46, depth: 46 } as const;
 
 // A phone held upright sees far less width than a laptop. Widen the lens and
 // pull back on tall screens so about `seeWidth` world units fit across, then
