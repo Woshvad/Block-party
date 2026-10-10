@@ -1,5 +1,9 @@
 import { CITY_SIZE, GRID, type Lot, SQUARE, blockRect, fillCity, roads, zoneOf } from "./citygen";
 
+// The lagoon row: roads crossing it become bridges.
+const LAGOON = blockRect(0, GRID.blocks - 1);
+const overLagoon = (z: number) => Math.abs(z - LAGOON.z) < LAGOON.d / 2;
+
 
 export type Placement = { url: string; x: number; y?: number; z: number; rotY?: number; scale?: number | [number, number, number] };
 
@@ -37,7 +41,7 @@ export function roadPlacements(): Placement[] {
         if (r.along === "x") out.push({ url: KIT.roads("road-crossroad"), x, z, y: 0.02, scale: ROAD_TILE }); // once per junction
         continue;
       }
-      const name = nearJunction(s, r.along) ? "road-crossing" : "road-straight";
+      const name = r.along === "z" && overLagoon(z) ? "road-bridge" : nearJunction(s, r.along) ? "road-crossing" : "road-straight";
       out.push({ url: KIT.roads(name), x, z, y: 0.02, scale: ROAD_TILE, rotY: r.along === "x" ? Math.PI / 2 : 0 });
     }
   }
@@ -52,7 +56,7 @@ export function lightPlacements(): Placement[] {
     for (let s = -half + 3; s < half - 1; s += 5.5) {
       const off = GRID.road / 2 + 0.35;
       const [x, z] = r.along === "x" ? [s, r.a + off] : [r.a + off, s];
-      if (inSquare(x, z) || Math.abs(x) > half - 0.5 || Math.abs(z) > half - 0.5) continue;
+      if (inSquare(x, z) || overLagoon(z) || Math.abs(x) > half - 0.5 || Math.abs(z) > half - 0.5) continue;
       if (roads().some((o) => o.along !== r.along && Math.abs(o.a - s) < GRID.road)) continue;
       out.push({ url: KIT.roads("light-square"), x, z, y: 0.14, scale: 2.4, rotY: r.along === "x" ? Math.PI : -Math.PI / 2 });
     }
@@ -80,7 +84,7 @@ export function streetTreePlacements(): Placement[] {
   for (let bx = 0; bx < GRID.blocks; bx++)
     for (let bz = 0; bz < GRID.blocks; bz++) {
       const zone = zoneOf(bx, bz);
-      if (zone === "square" || zone === "water") continue;
+      if (zone === "square" || zone === "water" || zone === "locked") continue;
       const r = blockRect(bx, bz);
       const e = r.w / 2 + 0.12;
       for (let k = -r.w / 2 + 1.6; k <= r.w / 2 - 1.6; k += 2.3)

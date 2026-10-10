@@ -36,7 +36,7 @@ describe("cars", () => {
         for (let i = 1; i < ss.length; i++) {
           const gap = ss[i]! - ss[i - 1]!;
           // A car wrapping round the map edge is the only way two can be close: they're off the board.
-          if (Math.abs(ss[i]!) < 23 && Math.abs(ss[i - 1]!) < 23) expect(gap).toBeGreaterThan(CAR.len * 0.9);
+          if (Math.abs(ss[i]!) < 34 && Math.abs(ss[i - 1]!) < 34) expect(gap).toBeGreaterThan(CAR.len * 0.9);
         }
       }
     });

@@ -3,10 +3,10 @@
 // lots (houses, shops, offices, parks). Pure and seeded: the same city on
 // every phone, and testable without a GPU.
 
-export const GRID = { blocks: 4, block: 9, road: 2 } as const;
-export const CITY_SIZE = GRID.blocks * GRID.block + (GRID.blocks + 1) * GRID.road; // 46
+export const GRID = { blocks: 6, block: 9, road: 2 } as const;
+export const CITY_SIZE = GRID.blocks * GRID.block + (GRID.blocks + 1) * GRID.road; // 68
 
-export type Zone = "residential" | "commercial" | "office" | "industrial" | "park" | "water" | "landmark" | "square";
+export type Zone = "residential" | "commercial" | "office" | "industrial" | "park" | "water" | "landmark" | "square" | "locked";
 export type Rect = { x: number; z: number; w: number; d: number }; // centre and size, world units
 
 // A block's rectangle (without the roads around it).
@@ -28,38 +28,61 @@ export function roads(): { a: number; along: "x" | "z" }[] {
   return out;
 }
 
-// Which block is what. Tower Square takes the four middle blocks (and the
-// roads between them); the rest are landmarks or zoned for filler.
+// The map from the plan: four districts around Genesis Square, on the
+// Mempool Lagoon. Oracle Quarter (north-west: offices, the Tower, the Watch
+// Party Hall), the Trenches (north-east: shops, the Diner, Club Liquidity),
+// the Residences (south-west: homes, Crew Row), Builder's Yard (south-east:
+// industry, the Hackerspace, the Bot Café), and Block 5 locked on the lagoon.
 export const ZONING: Zone[][] = [
-  // bz = 0 (north)
-  ["water", "landmark", "office", "office"],
-  ["residential", "square", "square", "landmark"],
-  ["residential", "square", "square", "commercial"],
-  ["residential", "residential", "park", "industrial"],
+  ["office", "office", "office", "commercial", "commercial", "commercial"],
+  ["office", "landmark", "office", "commercial", "commercial", "landmark"],
+  ["park", "landmark", "square", "square", "commercial", "commercial"],
+  ["residential", "residential", "square", "square", "industrial", "industrial"],
+  ["residential", "residential", "residential", "industrial", "landmark", "landmark"],
+  ["water", "water", "water", "water", "water", "locked"],
 ].map((row) => row as Zone[]);
 export const zoneOf = (bx: number, bz: number): Zone => ZONING[bz]![bx]!;
 
-export const DINER_BLOCK = { bx: 3, bz: 2 } as const;
+export type District = "oracle" | "trenches" | "residences" | "yard" | "square" | "lagoon";
+export function districtOf(bx: number, bz: number): District {
+  if (bz === GRID.blocks - 1) return "lagoon";
+  if (zoneOf(bx, bz) === "square") return "square";
+  if (bz <= 2) return bx <= 2 ? "oracle" : "trenches";
+  return bx <= 2 ? "residences" : "yard";
+}
+export const DISTRICT_NAMES: Record<District, string> = { oracle: "ORACLE QUARTER", trenches: "THE TRENCHES", residences: "RESIDENCES", yard: "BUILDER'S YARD", square: "GENESIS SQUARE", lagoon: "MEMPOOL LAGOON" };
+
+export const DINER_BLOCK = { bx: 4, bz: 1 } as const;
 
 export type PlaceKey = "tower" | "roof" | "city_hall" | "watch_party" | "gm_wall" | "faucet" | "diner" | "crew_row";
+// Places that open at launch: on the map now, locked.
+export type SoonKey = "club_liquidity" | "touch_grass_park" | "hackerspace" | "bot_cafe" | "stablecoin_strip" | "rollup";
 
-// Where our places stand (the pin goes above).
+// Genesis Square: the middle 2×2 blocks and the roads between them, paved.
 const sq = (() => {
-  const a = blockRect(1, 1);
-  const b = blockRect(2, 2);
+  const a = blockRect(2, 2);
+  const b = blockRect(3, 3);
   return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
 })();
 export const SQUARE: Rect = { x: sq.x, z: sq.z, w: GRID.block * 2 + GRID.road, d: GRID.block * 2 + GRID.road };
 export const LANDMARKS: Record<PlaceKey, { x: number; z: number; pinY: number }> = {
-  tower: { x: sq.x, z: sq.z, pinY: 19.5 },
-  roof: { x: sq.x, z: sq.z, pinY: 22 },
-  city_hall: { ...xz(blockRect(1, 0)), pinY: 7 },
-  watch_party: { ...xz(blockRect(3, 1)), pinY: 6 },
-  gm_wall: { x: sq.x - 6, z: sq.z + 6.5, pinY: 4 },
-  faucet: { x: sq.x + 6, z: sq.z + 6, pinY: 3.5 },
+  tower: { ...xz(blockRect(1, 1)), pinY: 19.5 },
+  roof: { ...xz(blockRect(1, 1)), pinY: 22 },
+  city_hall: { x: sq.x, z: sq.z - 5.5, pinY: 7 },
+  watch_party: { ...xz(blockRect(1, 2)), pinY: 6 },
+  gm_wall: { x: sq.x - 6, z: sq.z + 3.5, pinY: 4 },
+  faucet: { x: sq.x + 6, z: sq.z + 3.5, pinY: 3.5 },
   // The Diner takes the commercial block's corner lot (the generator leaves it empty).
-  diner: { x: blockRect(3, 2).x - GRID.block / 3, z: blockRect(3, 2).z - GRID.block / 3, pinY: 4 },
-  crew_row: { ...xz(blockRect(0, 2)), pinY: 5 },
+  diner: { x: blockRect(DINER_BLOCK.bx, DINER_BLOCK.bz).x - GRID.block / 3, z: blockRect(DINER_BLOCK.bx, DINER_BLOCK.bz).z - GRID.block / 3, pinY: 4 },
+  crew_row: { ...xz(blockRect(1, 4)), pinY: 5 },
+};
+export const SOON: Record<SoonKey, { x: number; z: number; pinY: number; name: string; icon: string }> = {
+  club_liquidity: { ...xz(blockRect(5, 1)), pinY: 6, name: "Club Liquidity", icon: "🪩" },
+  touch_grass_park: { x: sq.x, z: sq.z + 7, pinY: 3, name: "Touch Grass Park", icon: "🌳" },
+  hackerspace: { ...xz(blockRect(4, 4)), pinY: 5, name: "Hackerspace", icon: "🛠️" },
+  bot_cafe: { ...xz(blockRect(5, 4)), pinY: 4.5, name: "Bot Café", icon: "🤖" },
+  stablecoin_strip: { ...xz(blockRect(5, 5)), pinY: 5, name: "Block 5 · Stablecoin Strip", icon: "🔒" },
+  rollup: { x: blockRect(2, 5).x, z: blockRect(2, 5).z - 3, pinY: 3.5, name: "The Rollup", icon: "🚌" },
 };
 function xz(r: Rect) {
   return { x: r.x, z: r.z };

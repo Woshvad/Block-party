@@ -8,7 +8,7 @@ const onRoad = (x: number, z: number) =>
 
 describe("the city plan", () => {
   it("blocks and roads tile the city exactly", () => {
-    expect(CITY_SIZE).toBe(46);
+    expect(CITY_SIZE).toBe(68);
     const last = blockRect(GRID.blocks - 1, GRID.blocks - 1);
     expect(last.x + last.w / 2 + GRID.road).toBeCloseTo(CITY_SIZE / 2);
     for (let i = 0; i < GRID.blocks; i++) for (let j = 0; j < GRID.blocks; j++) expect(onRoad(blockRect(i, j).x, blockRect(i, j).z)).toBe(false);
@@ -35,7 +35,7 @@ describe("the city plan", () => {
     for (let i = 0; i < GRID.blocks; i++)
       for (let j = 0; j < GRID.blocks; j++) {
         const z = zoneOf(i, j);
-        if (z === "landmark" || z === "square" || z === "water") {
+        if (z === "landmark" || z === "square" || z === "water" || z === "locked") {
           const b = blockRect(i, j);
           expect(fillCity().filter((l) => Math.abs(l.x - b.x) < b.w / 2 && Math.abs(l.z - b.z) < b.d / 2)).toEqual([]);
         }
@@ -50,5 +50,18 @@ describe("the city plan", () => {
   it("cars drive on the road, not through blocks", () => {
     const loop = carLoop(0, 0);
     for (const p of loop) expect(onRoad(p.x, p.z) || Math.abs(p.x) >= CITY_SIZE / 2 - GRID.road).toBe(true);
+  });
+});
+
+describe("the plan's map", () => {
+  it("has the four districts around Genesis Square, the lagoon along the south, and Block 5 locked", async () => {
+    const { districtOf, zoneOf: zone, SOON } = await import("../src/citygen");
+    const seen = new Set<string>();
+    for (let i = 0; i < GRID.blocks; i++) for (let j = 0; j < GRID.blocks; j++) seen.add(districtOf(i, j));
+    expect([...seen].sort()).toEqual(["lagoon", "oracle", "residences", "square", "trenches", "yard"]);
+    expect(zone(GRID.blocks - 1, GRID.blocks - 1)).toBe("locked");
+    expect(districtOf(1, 1)).toBe("oracle"); // the Prediction Tower is in Oracle Quarter
+    expect(districtOf(4, 1)).toBe("trenches"); // the Gwei Diner is in the Trenches
+    expect(Object.keys(SOON)).toContain("stablecoin_strip");
   });
 });

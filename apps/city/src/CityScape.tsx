@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { outlineMaterial, toonRamp } from "./chibi/parts";
-import { CITY_SIZE, GRID, LANDMARKS, type Lot, SQUARE, blockRect, fillCity, roads, zoneOf } from "./citygen";
+import { CITY_SIZE, GRID, LANDMARKS, type Lot, SOON, SQUARE, blockRect, districtOf, fillCity, roads, zoneOf } from "./citygen";
 import Kit, { useBaked } from "./Kit";
 import { KIT, cityPlacements } from "./kitcity";
 import { type Car, type Lane, type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
@@ -24,7 +24,7 @@ const PAVING = "#e6dccb";
 const WHITE = "#f4f1ea";
 const YELLOW = "#f2c94c";
 
-type Built = { city: Part[]; windows: Part[]; lamps: Part[] };
+type Built = { city: Part[]; windows: Part[]; lamps: Part[]; neon: Part[] };
 const inSquare = (x: number, z: number, pad = 0) => Math.abs(x - SQUARE.x) < SQUARE.w / 2 + pad && Math.abs(z - SQUARE.z) < SQUARE.d / 2 + pad;
 const front = (yaw: number) => ({ fx: Math.sin(yaw), fz: Math.cos(yaw) });
 
@@ -66,33 +66,105 @@ function streets(b: Built) {
 
 // Raised sidewalks and the ground of each block by zone.
 function blocks(b: Built) {
+  const lagoon = blockRect(0, GRID.blocks - 1);
   for (let bx = 0; bx < GRID.blocks; bx++)
     for (let bz = 0; bz < GRID.blocks; bz++) {
       const r = blockRect(bx, bz);
       const zone = zoneOf(bx, bz);
-      if (zone === "square") continue;
+      if (zone === "square" || zone === "water") continue;
       b.city.push(box(r.x, 0.07, r.z, r.w + 0.5, 0.14, r.d + 0.5, SIDEWALK));
-      const ground = zone === "water" ? "#5aa9d6" : zone === "commercial" || zone === "office" ? PAVING : zone === "landmark" ? "#a9d28c" : GRASS;
-      if (zone === "water") {
-        b.city.push(box(r.x, 0.1, r.z, r.w - 0.4, 0.06, r.d - 0.4, "#4f9bd0"), box(r.x - 1, 0.18, r.z + 2.6, 0.9, 0.12, 3.6, "#8a5a2b"));
-        for (let k = 0; k < 6; k++) b.city.push(ball(r.x + 3.2 - (k % 3) * 0.6, 0.6, r.z - 3.4 + Math.floor(k / 3) * 6.6, 0.45, "#5aa05a"));
-      } else b.city.push(box(r.x, 0.15, r.z, r.w - 0.2, 0.04, r.d - 0.2, ground));
+      if (zone === "locked") {
+        // Block 5, the Stablecoin Strip: an island behind a fence until the crowd unlocks it.
+        b.city.push(box(r.x, 0.15, r.z, r.w - 0.2, 0.04, r.d - 0.2, "#c9c2b0"));
+        for (let k = 0; k < 18; k++) {
+          const t = (k / 18) * 4;
+          const side = Math.floor(t);
+          const f = t - side;
+          const h = r.w / 2 - 0.3;
+          const [px, pz] = side === 0 ? [-h + 2 * h * f, -h] : side === 1 ? [h, -h + 2 * h * f] : side === 2 ? [h - 2 * h * f, h] : [-h, h - 2 * h * f];
+          b.city.push(box(r.x + px, 0.55, r.z + pz, 0.08, 0.8, 0.08, "#8a8f98"));
+        }
+        b.city.push(box(r.x, 0.8, r.z - r.w / 2 + 0.3, r.w - 0.6, 0.05, 0.03, "#f2c94c"), box(r.x, 0.5, r.z - r.w / 2 + 0.3, r.w - 0.6, 0.05, 0.03, "#2c2c2a"));
+        // The mining bar: how close the crowd is to opening it.
+        b.city.push(box(r.x, 1.9, r.z, 5.2, 0.5, 0.25, "#2c2c2a"));
+        b.lamps.push(box(r.x - 2.5 + 0.9, 1.9, r.z + 0.13, 1.8, 0.36, 0.02, "#3ddc6e"));
+        continue;
+      }
+      const ground = zone === "commercial" || zone === "office" ? PAVING : zone === "landmark" ? "#a9d28c" : zone === "industrial" ? "#b9b4a8" : GRASS;
+      b.city.push(box(r.x, 0.15, r.z, r.w - 0.2, 0.04, r.d - 0.2, ground));
     }
+  // The Mempool Lagoon: one stretch of water along the south, with quays and reeds.
+  b.city.push(box(0, 0.04, lagoon.z, CITY_SIZE - 0.2, 0.06, lagoon.d + GRID.road * 0.9, "#4f9bd0"), box(0, 0.06, lagoon.z, CITY_SIZE - 0.6, 0.02, lagoon.d, "#5aa9d6"));
+  b.city.push(box(0, 0.1, lagoon.z - lagoon.d / 2 - 0.05, CITY_SIZE, 0.2, 0.15, "#b8b2a5"));
+  for (let k = 0; k < 14; k++) b.city.push(ball(-CITY_SIZE / 2 + 3 + k * 4.4, 0.25, lagoon.z + lagoon.d / 2 - 0.6, 0.35, "#5aa05a", 0.7, 6));
+  // The Rollup: a pier and a shelter where the bus batches its riders.
+  const R = SOON.rollup;
+  b.city.push(box(R.x, 0.22, R.z + 1.4, 1.6, 0.1, 3.6, "#8a5a2b"));
+  for (const dx of [-0.7, 0.7]) for (const dz of [0, 1.4, 2.8]) b.city.push(cyl(R.x + dx, 0.1, R.z + dz, 0.07, 0.07, 0.5, "#6b4423", 6));
+  b.city.push(box(R.x, 1.1, R.z, 2.2, 0.08, 0.9, "#378add"), box(R.x - 1, 0.6, R.z - 0.35, 0.06, 1, 0.06, "#3a3d44"), box(R.x + 1, 0.6, R.z - 0.35, 0.06, 1, 0.06, "#3a3d44"), box(R.x, 0.35, R.z - 0.2, 1.8, 0.06, 0.35, "#8a5a2b"));
+
+  // Genesis Square: the plaza at the heart of the city, City Hall at its head.
+  b.city.push(box(SQUARE.x, 0.08, SQUARE.z, SQUARE.w + 0.5, 0.16, SQUARE.d + 0.5, PAVING));
+  b.city.push(cyl(SQUARE.x, 0.17, SQUARE.z + 0.5, 5.5, 5.5, 0.02, "#d9cdb8", 32), cyl(SQUARE.x, 0.18, SQUARE.z + 0.5, 4, 4, 0.02, PAVING, 32));
+  for (let k = 0; k < 18; k++) {
+    const a = (k / 18) * Math.PI * 2;
+    const x = SQUARE.x + Math.cos(a) * 9.3;
+    const z = SQUARE.z + Math.sin(a) * 9.3;
+    if (z < SQUARE.z - 2 && Math.abs(x - SQUARE.x) < 5) continue; // City Hall stands there
+    tree(b, x, z, 0.8);
+  }
+  // Touch Grass Park (opens at launch): a lawn at the square's south edge.
+  const P = SOON.touch_grass_park;
+  b.city.push(box(P.x, 0.18, P.z, 7, 0.04, 3.4, GRASS));
+  for (const [dx, dz] of [[-2.8, -0.9], [-1.6, 1], [2.6, 0.8], [3, -1], [0.4, 1.2]] as const) tree(b, P.x + dx, P.z + dz, 0.7);
   // Bus shelters on the square's edges.
   for (const [x, z, yaw] of [[SQUARE.x + 4, SQUARE.z + SQUARE.d / 2 + 0.05, 0], [SQUARE.x - SQUARE.w / 2 - 0.05, SQUARE.z - 4, Math.PI / 2]] as const) {
     const along = yaw === 0;
     b.city.push(box(x, 1.05, z, along ? 1.6 : 0.06, 0.06, along ? 0.06 : 1.6, "#3a3d44"), box(x, 1.08, z + (along ? -0.25 : 0), along ? 1.7 : 0.6, 0.05, along ? 0.6 : 1.7, "#378add"));
     b.city.push(box(x - (along ? 0.75 : 0), 0.55, z - (along ? 0 : 0.75), 0.05, 1.05, 0.05, "#3a3d44"), box(x + (along ? 0.75 : 0), 0.55, z + (along ? 0 : 0.75), 0.05, 1.05, 0.05, "#3a3d44"));
-    b.windows.push(box(x, 0.65, z - (along ? 0.28 : 0) - (along ? 0 : 0), along ? 1.4 : 0.03, 0.8, along ? 0.03 : 1.4, WHITE));
+    b.windows.push(box(x, 0.65, z - (along ? 0.28 : 0), along ? 1.4 : 0.03, 0.8, along ? 0.03 : 1.4, WHITE));
     b.city.push(box(x, 0.35, z - (along ? 0.18 : 0), along ? 1.2 : 0.3, 0.06, along ? 0.3 : 1.2, "#8a5a2b"));
   }
-  // Tower Square: one paved plaza over the middle blocks and their roads.
-  b.city.push(box(SQUARE.x, 0.08, SQUARE.z, SQUARE.w + 0.5, 0.16, SQUARE.d + 0.5, PAVING));
-  b.city.push(cyl(SQUARE.x, 0.17, SQUARE.z, 7, 7, 0.02, "#d9cdb8", 32), cyl(SQUARE.x, 0.18, SQUARE.z, 5.2, 5.2, 0.02, PAVING, 32));
-  for (let k = 0; k < 16; k++) {
-    const a = (k / 16) * Math.PI * 2;
-    tree(b, SQUARE.x + Math.cos(a) * 9.3, SQUARE.z + Math.sin(a) * 9.3, 0.8);
-  }
+}
+
+// The launch places, on the map now: built, lit, and marked "opens at launch".
+function soonBuildings(b: Built) {
+  const C = SOON.club_liquidity;
+  // Club Liquidity: a black box with neon edges, a velvet rope and a queue spot.
+  b.city.push(box(C.x, 1.9, C.z, 6, 3.6, 5, "#1b1530"), box(C.x, 3.8, C.z, 6.2, 0.2, 5.2, "#2a2145"));
+  for (const [dx, dz, w, d] of [[0, 2.52, 6, 0.06], [0, -2.52, 6, 0.06], [3.02, 0, 0.06, 5], [-3.02, 0, 0.06, 5]] as const) b.neon.push(box(C.x + dx, 3.65, C.z + dz, w, 0.1, d, "#ff3fb4"));
+  b.neon.push(box(C.x, 0.6, C.z + 2.55, 1.6, 1.2, 0.04, "#7a3cff"));
+  for (const dx of [-1.4, 1.4]) b.city.push(cyl(C.x + dx, 0.45, C.z + 3.2, 0.06, 0.08, 0.6, "#d4a017", 6));
+  b.city.push(box(C.x, 0.68, C.z + 3.2, 2.8, 0.06, 0.06, "#b23a3a"));
+
+  const H = SOON.hackerspace;
+  // The Hackerspace: a long shed with a sawtooth roof and a terminal-green glow.
+  b.city.push(box(H.x, 1.2, H.z, 6.5, 2.4, 4.5, "#4a5560"));
+  for (let k = 0; k < 4; k++) b.city.push(prism(H.x - 2.4 + k * 1.6, 2.4, H.z, 4.5, 0.8, 1.6, "#3a434c", Math.PI / 2));
+  b.neon.push(box(H.x, 1.3, H.z + 2.27, 5, 0.5, 0.03, "#1dff8a"));
+
+  const B = SOON.bot_cafe;
+  // The Bot Café: a little café with a striped awning and outdoor tables.
+  b.city.push(box(B.x, 1, B.z, 4.5, 2, 3.5, "#e8e1d4"), box(B.x, 2.08, B.z, 4.7, 0.16, 3.7, "#c46a5a"));
+  for (let k = 0; k < 6; k++) b.city.push(box(B.x - 1.9 + k * 0.76, 1.6, B.z + 2.05, 0.76, 0.06, 0.6, k % 2 ? "#f4f1ea" : "#3ab5c9"));
+  for (const dx of [-1.4, 0, 1.4]) b.city.push(cyl(B.x + dx, 0.38, B.z + 3, 0.35, 0.35, 0.05, WHITE, 10), cyl(B.x + dx, 0.2, B.z + 3, 0.04, 0.04, 0.38, "#3a3d44", 5));
+  b.windows.push(box(B.x, 0.9, B.z + 1.77, 3.6, 0.9, 0.03, WHITE));
+}
+
+// Neon on the Trenches' shopfronts: bars of colour that blaze at night.
+const NEON = ["#ff3fb4", "#3ff0ff", "#ffe23f", "#7a3cff", "#3dff7a", "#ff7a3f"];
+function trenchesNeon(b: Built) {
+  for (const l of fillCity())
+    if (l.kind === "shop") {
+      const bx = Math.floor((l.x + CITY_SIZE / 2 - GRID.road) / (GRID.block + GRID.road));
+      const bz = Math.floor((l.z + CITY_SIZE / 2 - GRID.road) / (GRID.block + GRID.road));
+      if (districtOf(bx, bz) !== "trenches") continue;
+      const fx = Math.sin(l.yaw);
+      const fz = Math.cos(l.yaw);
+      const along = Math.abs(fz) > 0.5;
+      const c = NEON[Math.abs(Math.floor(l.x * 7 + l.z * 3)) % NEON.length]!;
+      b.neon.push(box(l.x + fx * 1.32, 1.9, l.z + fz * 1.32, along ? 1.4 : 0.05, 0.16, along ? 0.05 : 1.4, c));
+    }
 }
 
 // --- Lots ---------------------------------------------------------------------
@@ -392,13 +464,15 @@ function TrafficLights() {
 
 export default function CityScape({ night }: { night: boolean }) {
   const built = useMemo(() => {
-    const b: Built = { city: [], windows: [], lamps: [] };
+    const b: Built = { city: [], windows: [], lamps: [], neon: [] };
     blocks(b);
+    soonBuildings(b);
+    trenchesNeon(b);
     // Roads, street lights, houses, shops, towers and trees come from Kenney's
     // City Kit (see Kit.tsx); our own code keeps pools, parking and landmarks.
     for (const l of fillCity()) if (l.kind === "pool" || l.kind === "parking") lot(b, l);
     landmarks(b);
-    return { city: mergeGeometries(b.city, false)!, windows: mergeGeometries(b.windows, false)!, lamps: mergeGeometries(b.lamps, false)! };
+    return { city: mergeGeometries(b.city, false)!, windows: mergeGeometries(b.windows, false)!, lamps: mergeGeometries(b.lamps, false)!, neon: mergeGeometries(b.neon, false)! };
   }, []);
   const placements = useMemo(() => cityPlacements(), []);
   const ramp = useMemo(() => toonRamp(), []);
@@ -409,6 +483,7 @@ export default function CityScape({ night }: { night: boolean }) {
       built.city.dispose();
       built.windows.dispose();
       built.lamps.dispose();
+      built.neon.dispose();
       mat.dispose();
       ink.dispose();
       ramp.dispose();
@@ -429,6 +504,10 @@ export default function CityScape({ night }: { night: boolean }) {
       <mesh geometry={built.city} material={ink} />
       <mesh geometry={built.windows}>
         <meshStandardMaterial color={night ? "#ffdd8a" : "#6f93ba"} emissive={night ? "#ffb84d" : "#000000"} emissiveIntensity={night ? 0.9 : 0} roughness={0.25} metalness={0.2} />
+      </mesh>
+      {/* Neon: always coloured, blazing at night. */}
+      <mesh geometry={built.neon}>
+        <meshBasicMaterial vertexColors toneMapped={false} color={night ? "#ffffff" : "#b8b8b8"} />
       </mesh>
       <mesh geometry={built.lamps}>
         <meshStandardMaterial color="#fff2b8" emissive="#ffd27a" emissiveIntensity={night ? 1.4 : 0.1} />
