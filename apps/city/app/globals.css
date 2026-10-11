@@ -31,6 +31,12 @@ button.pill { border: 0; cursor: pointer; text-align: left; color: var(--ink); }
 .pin .name small { font-size: 10px; font-weight: 600; color: var(--muted); }
 [data-zoom="far"] .pin .name { display: none; }
 [data-zoom="far"] .pin { padding-right: 5px; }
+/* A place's live headcount: its own badge on the pin, shown at every zoom. No badge means unknown, never zero. */
+.pin { position: relative; }
+.pin .here { position: absolute; top: -7px; right: -7px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; gap: 3px; background: #234b3f; color: #fffef4; border: 1.5px solid #fffefa; font-size: 11px; font-weight: 750; line-height: 1; font-variant-numeric: tabular-nums; }
+.pin .here::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #8fe0a8; }
+.pin .here.none { background: #fffefa; color: var(--muted); border-color: #cfd6c8; }
+.pin .here.none::before { background: #b7bcc6; }
 .banner { position: fixed; top: calc(env(safe-area-inset-top) + 10px); left: 10px; right: 10px; z-index: 2; background: rgba(20, 22, 31, 0.86); color: #e6f1fb; border-radius: 999px; padding: 8px 14px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .banner b { color: #fff; font-weight: 600; }
 .banner .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; margin-right: 4px; vertical-align: middle; }
@@ -272,7 +278,7 @@ button:disabled { cursor: default; }
 .preview-switch { position: fixed; bottom: 20px; left: 20px; z-index: 4; background: #fffefaed; color: var(--ink); border: 1px solid white; padding: 12px 16px; border-radius: 16px; font-size: 12px; text-decoration: none; box-shadow: 0 3px 12px #17342b18; }
 .banner:disabled { cursor: default; }
 @media (max-width: 600px) {
-  [data-zoom="mid"] .pin .name, .pin.soon .name, .district { display: none; }
+  .pin.soon .name, .district { display: none; }
   .pin { min-width: 42px; min-height: 42px; justify-content: center; padding: 5px; }
   .pin.soon { opacity: 0.65; }
   .map-tools { bottom: calc(env(safe-area-inset-bottom) + 96px); }
