@@ -58,8 +58,8 @@ export function openRoomSocket(deps: RoomSocketDeps, on: { event: (ev: unknown) 
 
   const keepAlive = () => {
     ping = setT(() => {
-      if (stopped || !ws) return;
-      if (ws.readyState === 1) ws.send(JSON.stringify({ t: "ping" }));
+      if (stopped) return;
+      if (ws?.readyState === 1) ws.send(JSON.stringify({ t: "ping" }));
       keepAlive();
     }, PING_MS);
   };

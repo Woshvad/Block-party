@@ -3,7 +3,12 @@ import { useFrame } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { outlineMaterial, toonRamp } from "./chibi/parts";
+import DinerQuarter from "./DinerQuarter";
+import { isDinerShop } from "./dinerArchitecture";
+import CityWater from "./CityWater";
+import CityStreetGlow from "./CityStreetGlow";
+import { citySurface } from "./citySurface";
+import { cityDetails } from "./cityDetails";
 import { CITY_SIZE, GRID, LANDMARKS, type Lot, SOON, SQUARE, blockRect, districtOf, fillCity, roads, zoneOf } from "./citygen";
 import Kit, { useBaked } from "./Kit";
 import { KIT, cityPlacements } from "./kitcity";
@@ -14,12 +19,12 @@ import { type Part, ball, box, colored, cyl, darker, prism } from "./geo";
 // crosswalks, raised sidewalks, zoned blocks full of houses, shops and
 // offices, parks and the lagoon, our landmarks on their own blocks, street
 // lights, and traffic. Everything static is merged into a handful of meshes:
-// the toon-shaded city (plus its ink outline), its windows (they glow at
+// the textured stone city, its windows (they glow at
 // night) and the street-light heads.
 
 const ASPHALT = "#3d4148";
 const SIDEWALK = "#d6d1c4";
-const GRASS = "#9fcf7f";
+const GRASS = "#91aa76";
 const PAVING = "#e6dccb";
 const WHITE = "#f4f1ea";
 const YELLOW = "#f2c94c";
@@ -163,7 +168,7 @@ function soonBuildings(b: Built) {
 const NEON = ["#ff3fb4", "#3ff0ff", "#ffe23f", "#7a3cff", "#3dff7a", "#ff7a3f"];
 function trenchesNeon(b: Built) {
   for (const l of fillCity())
-    if (l.kind === "shop") {
+    if (l.kind === "shop" && !isDinerShop(l)) {
       const bx = Math.floor((l.x + CITY_SIZE / 2 - GRID.road) / (GRID.block + GRID.road));
       const bz = Math.floor((l.z + CITY_SIZE / 2 - GRID.road) / (GRID.block + GRID.road));
       if (districtOf(bx, bz) !== "trenches") continue;
@@ -456,7 +461,7 @@ function TrafficLights() {
   return (
     <>
       <mesh geometry={poles}>
-        <meshToonMaterial vertexColors />
+        <meshStandardMaterial vertexColors roughness={0.72} />
       </mesh>
       <instancedMesh ref={xs} args={[LAMP, undefined, spots.length]} frustumCulled={false}>
         <meshBasicMaterial toneMapped={false} />
@@ -518,10 +523,11 @@ function Billboards({ night }: { night: boolean }) {
         g.fillRect(6 + k * 10, top, 7, Math.max(2, Math.abs(v - s[k - 1]!)));
         g.fillRect(9 + k * 10, top - 4, 1, Math.abs(v - s[k - 1]!) + 8);
       });
-      const pct = ((s[0]! - s[s.length - 1]!) / s[0]!) * 100;
-      g.font = "bold 18px sans-serif";
-      g.fillStyle = pct >= 0 ? "#2bd67b" : "#ff4d5e";
-      g.fillText(`${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct).toFixed(1)}%`, 10, 24);
+      g.fillStyle = "#0e1118";
+      g.fillRect(0, 0, 256, 29);
+      g.font = "bold 17px sans-serif";
+      g.fillStyle = "#f0e8d6";
+      g.fillText("CITY ART · NOT LIVE DATA", 8, 21);
       textures[i]!.needsUpdate = true;
     });
   });
@@ -559,12 +565,13 @@ export default function CityScape({ night }: { night: boolean }) {
     // City Kit (see Kit.tsx); our own code keeps pools, parking and landmarks.
     for (const l of fillCity()) if (l.kind === "pool" || l.kind === "parking") lot(b, l);
     landmarks(b);
-    return { city: mergeGeometries(b.city, false)!, windows: mergeGeometries(b.windows, false)!, lamps: mergeGeometries(b.lamps, false)!, neon: mergeGeometries(b.neon, false)! };
+    const merged = { city: mergeGeometries(b.city, false)!, windows: mergeGeometries(b.windows, false)!, lamps: mergeGeometries(b.lamps, false)!, neon: mergeGeometries(b.neon, false)! };
+    Object.values(b).forEach((parts) => parts.forEach((part) => part.dispose()));
+    return merged;
   }, []);
   const placements = useMemo(() => cityPlacements(), []);
-  const ramp = useMemo(() => toonRamp(), []);
-  const mat = useMemo(() => new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: ramp }), [ramp]);
-  const ink = useMemo(() => outlineMaterial(0.02), []);
+  const mat = useMemo(() => citySurface(), []);
+  const details = useMemo(() => cityDetails(), []);
   useEffect(
     () => () => {
       built.city.dispose();
@@ -572,25 +579,27 @@ export default function CityScape({ night }: { night: boolean }) {
       built.lamps.dispose();
       built.neon.dispose();
       mat.dispose();
-      ink.dispose();
-      ramp.dispose();
+      details.dispose();
     },
-    [built, mat, ink, ramp],
+    [built, mat, details],
   );
   return (
     <group>
       {/* The land beyond the grid. */}
       <mesh rotation-x={-Math.PI / 2} position-y={-0.01} receiveShadow>
         <planeGeometry args={[CITY_SIZE + 30, CITY_SIZE + 30]} />
-        <meshStandardMaterial color={night ? "#2c3a2a" : "#8fbf6f"} />
+        <meshStandardMaterial color="#81956a" roughness={1} />
       </mesh>
       <Suspense fallback={null}>
         <Kit placements={placements} night={night} />
       </Suspense>
       <mesh geometry={built.city} material={mat} castShadow receiveShadow />
-      <mesh geometry={built.city} material={ink} />
+      <mesh geometry={details} material={mat} castShadow receiveShadow />
+      <DinerQuarter night={night} />
+      <CityWater night={night} />
+      <CityStreetGlow night={night} />
       <mesh geometry={built.windows}>
-        <meshStandardMaterial color={night ? "#ffdd8a" : "#6f93ba"} emissive={night ? "#ffb84d" : "#000000"} emissiveIntensity={night ? 0.9 : 0} roughness={0.25} metalness={0.2} />
+        <meshStandardMaterial color={night ? "#bd9d68" : "#688995"} emissive={night ? "#ffb84d" : "#000000"} emissiveIntensity={night ? 0.9 : 0} roughness={0.19} metalness={0.48} envMapIntensity={1.3} />
       </mesh>
       {/* Neon: always coloured, blazing at night. */}
       <mesh geometry={built.neon}>

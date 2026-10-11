@@ -4,6 +4,7 @@ import { Canvas } from "@react-three/fiber";
 import { useRef, useState } from "react";
 import { ApiError, type Api, type Home, type Placement, newKey } from "./api";
 import { countdown, useNow } from "./clock";
+import { RoomCamera, RoomLighting } from "./RoomLighting";
 import { HomeRoom } from "./HomeRoom";
 import { FLOOR_COLORS, WALL_COLORS, checkPlacement, firstFreeSpot, homeSize, nextRot, pieceOf } from "./furniture";
 import { itemLabel, label } from "./palette";
@@ -83,11 +84,11 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   return (
     <>
       <div className="stage">
-        <Canvas dpr={[1, 2]} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: true }}>
-          <color attach="background" args={["#dfeaf5"]} />
-          <hemisphereLight args={["#ffffff", "#b9c7d6", 1.15]} />
-          <directionalLight position={[5, 10, 6]} intensity={1.3} />
+        <Canvas shadows dpr={[1, 1.5]} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: true }}>
+          <RoomLighting span={Math.max(size.w, size.d)} />
+          <RoomCamera w={size.w} h={size.d} />
           <HomeRoom
+            editing
             w={size.w}
             d={size.d}
             wallFinish={h.wallFinish}
@@ -102,7 +103,7 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
             // While placing, taps go through furniture to the floor (to aim, even at a taken spot).
             onPiece={mode.kind === "placing" ? undefined : (id) => setMode({ kind: "selected", itemId: id })}
           />
-          <OrbitControls enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={22} />
+          <OrbitControls enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={Math.max(size.w, size.d) * 8} />
         </Canvas>
       </div>
 

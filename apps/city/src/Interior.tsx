@@ -2,7 +2,7 @@
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { outlineMaterial, toonRamp } from "./chibi/parts";
+import { outlineMaterial } from "./chibi/parts";
 import { type Part, ball, box, colored, cyl, darker } from "./geo";
 import type { Decor, Layout } from "./interiors";
 import type { Board, FeedKey } from "./roomfeeds";
@@ -36,7 +36,7 @@ function piece(d: Decor, W: number, H: number): Part[] {
     case "booth_bench":
       return [box(x, 0.24, z, 0.8, 0.48, 0.85, c), box(x + bx * 1.05, 0.62, z + bz * 1.05, Math.abs(bx) > 0.01 ? 0.16 : 0.8, 0.9, Math.abs(bz) > 0.01 ? 0.16 : 0.85, darker(c, 0.8))];
     case "table":
-      return [cyl(x, 0.37, z, 0.06, 0.12, 0.74, METAL, 6), box(x, 0.76, z, 0.85, 0.05, 0.9, c)];
+      return [cyl(x, 0.37, z, 0.06, 0.12, 0.74, METAL, 6), box(x, 0.76, z, 0.85, 0.05, 0.9, c), cyl(x + 0.2, 0.8, z + 0.18, 0.12, 0.12, 0.025, "#eee4d3", 10), cyl(x + 0.2, 0.88, z + 0.18, 0.07, 0.06, 0.14, "#f8f3e8", 10), cyl(x + 0.2, 0.952, z + 0.18, 0.052, 0.052, 0.005, "#4b2f21", 10)];
     case "round_table":
       return [cyl(x, 0.37, z, 0.06, 0.15, 0.74, METAL, 6), cyl(x, 0.76, z, 0.45, 0.45, 0.05, c, 14)];
     case "screen":
@@ -204,16 +204,26 @@ function Label({ d, W, H }: { d: Decor; W: number; H: number }) {
 }
 
 function checker(a: string, b: string, w: number, h: number) {
-  const ca = new THREE.Color(a);
-  const cb = new THREE.Color(b);
-  const data = new Uint8Array(16);
-  [ca, cb, cb, ca].forEach((c, i) => data.set([c.r * 255, c.g * 255, c.b * 255, 255], i * 4));
-  const t = new THREE.DataTexture(data, 2, 2);
-  t.magFilter = THREE.NearestFilter;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) {
+    ctx.fillStyle = (x + y) % 2 ? b : a;
+    ctx.fillRect(x * 128, y * 128, 128, 128);
+    ctx.strokeStyle = "rgba(40,30,20,0.12)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x * 128 + 1, y * 128 + 1, 126, 126);
+  }
+  // Fine, deterministic surface variation. No external texture downloads.
+  for (let i = 0; i < 3000; i++) {
+    ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.035)" : "rgba(25,20,15,0.025)";
+    ctx.fillRect((i * 73) % 256, (i * 37 + Math.floor(i / 256) * 19) % 256, 1, 2);
+  }
+  const t = new THREE.CanvasTexture(canvas);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(w / 2, h / 2);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.needsUpdate = true;
+  t.anisotropy = 4;
   return t;
 }
 
@@ -223,6 +233,11 @@ export default function Interior({ layout, w, h, low = false, onFloor, feeds = {
   const built = useMemo(() => {
     const parts: Part[] = [
       // Walls: back and left full height with a darker band below, low trims at the front.
+      box(0, -0.16, 0, w + 0.5, 0.3, h + 0.5, "#a89e8e"),
+      box(0, 0.08, -h / 2 + 0.03, w, 0.16, 0.08, "#eee4d3"),
+      box(-w / 2 + 0.03, 0.08, 0, 0.08, 0.16, h, "#eee4d3"),
+      box(0, 0.94, -h / 2 + 0.025, w, 0.06, 0.08, "#eee4d3"),
+      box(-w / 2 + 0.025, 0.94, 0, 0.08, 0.06, h, "#eee4d3"),
       box(0, wallH / 2, -h / 2 - 0.08, w + 0.32, wallH, 0.16, look.wall),
       box(0, 0.45, -h / 2 + 0.005, w + 0.02, 0.9, 0.02, look.wall2),
       box(-w / 2 - 0.08, wallH / 2, 0, 0.16, wallH, h, look.wall),
@@ -231,25 +246,26 @@ export default function Interior({ layout, w, h, low = false, onFloor, feeds = {
       box(w / 2 + 0.08, 0.12, 0, 0.16, 0.24, h, look.wall2),
       ...decor.flatMap((d) => piece(d, w, h)),
     ];
-    return mergeGeometries(parts, false)!;
+    const merged = mergeGeometries(parts, false)!;
+    parts.forEach((p) => p.dispose());
+    return merged;
   }, [decor, look, w, h, wallH]);
-  const ramp = useMemo(() => toonRamp(), []);
-  const mat = useMemo(() => new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: ramp }), [ramp]);
-  const ink = useMemo(() => outlineMaterial(0.012), []);
+  const mat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.03 }), []);
+  const ink = useMemo(() => outlineMaterial(0.005), []);
   const floor = useMemo(() => checker(look.floor, look.floor2, w, h), [look.floor, look.floor2, w, h]);
   useEffect(
     () => () => {
       built.dispose();
       mat.dispose();
       ink.dispose();
-      ramp.dispose();
       floor.dispose();
     },
-    [built, mat, ink, ramp, floor],
+    [built, mat, ink, floor],
   );
   return (
     <group>
       <mesh
+        receiveShadow
         rotation-x={-Math.PI / 2}
         onPointerDown={
           onFloor
@@ -261,9 +277,9 @@ export default function Interior({ layout, w, h, low = false, onFloor, feeds = {
         }
       >
         <planeGeometry args={[w, h]} />
-        <meshStandardMaterial map={floor} />
+        <meshStandardMaterial map={floor} roughness={0.72} metalness={0.03} />
       </mesh>
-      <mesh geometry={built} material={mat} />
+      <mesh geometry={built} material={mat} castShadow receiveShadow />
       <mesh geometry={built} material={ink} />
       {decor
         .filter((d) => d.label && (d.kind === "sign" || d.kind === "screen" || d.kind === "mural"))

@@ -6,7 +6,7 @@ import * as THREE from "three";
 import type { Look } from "../api";
 import { HAIR, OUTFIT, SKIN } from "../palette";
 import { cellFor, faceSheet } from "./faces";
-import { BODY, faceMaterial, geo, glassesGeo, hairGeo, hatGeo, outlineMaterial, toonRamp } from "./parts";
+import { BODY, faceMaterial, geo, glassesGeo, hairGeo, hatGeo, outlineMaterial } from "./parts";
 
 // Every resident in a scene, drawn as chibis with one instanced mesh per part
 // (and one per hair style, hat and glasses that's in use). One person or
@@ -56,16 +56,15 @@ export function lookFor(p: Pick<ChibiPerson, "id" | "look">): Look {
 
 export class CrowdRig {
   readonly group = new THREE.Group();
-  private ramp = toonRamp();
-  private toon = new THREE.MeshToonMaterial({ gradientMap: this.ramp });
-  private ink = outlineMaterial();
+  private toon = new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0 });
+  private ink = outlineMaterial(0.009);
   private sheet: THREE.CanvasTexture;
   private faceMat: THREE.MeshBasicMaterial;
   private faceGeo = geo.face.clone();
   private cells: THREE.InstancedBufferAttribute;
   readonly body: THREE.InstancedMesh;
   readonly head: THREE.InstancedMesh;
-  private parts: Record<"legs" | "arms" | "shoes" | "face" | "blob", THREE.InstancedMesh>;
+  private parts: Record<"legs" | "arms" | "hands" | "shoes" | "face" | "blob", THREE.InstancedMesh>;
   private hair: THREE.InstancedMesh[];
   private hats: THREE.InstancedMesh[];
   private glasses: THREE.InstancedMesh[];
@@ -81,6 +80,8 @@ export class CrowdRig {
     this.faceGeo.setAttribute("faceCell", this.cells);
     const mesh = (g: THREE.BufferGeometry, count: number, mat: THREE.Material = this.toon, outline = true) => {
       const m = new THREE.InstancedMesh(g, mat, count);
+      m.castShadow = mat === this.toon;
+      m.receiveShadow = mat === this.toon;
       m.frustumCulled = false;
       m.count = 0;
       if (mat === this.toon) for (let i = 0; i < count; i++) m.setColorAt(i, this.t.c.set("#ffffff"));
@@ -99,6 +100,7 @@ export class CrowdRig {
       // Small parts go without an outline: it costs triangles nobody can see at room scale.
       legs: mesh(geo.leg, cap * 2, this.toon, false),
       arms: mesh(geo.arm, cap * 2, this.toon, false),
+      hands: mesh(geo.hand, cap * 2, this.toon, false),
       shoes: mesh(geo.shoe, cap * 2, this.toon, false),
       face: mesh(this.faceGeo, cap, this.faceMat, false),
       blob: mesh(geo.blob, cap, new THREE.MeshBasicMaterial({ color: "#000000", transparent: true, opacity: 0.16, depthWrite: false }), false),
@@ -154,6 +156,9 @@ export class CrowdRig {
         tint(this.parts.shoes, i * 2 + k, SHOES[(n(L.shoes) || 1) - 1] ?? SHOES[0]!, dim);
         place(this.parts.arms, i * 2 + k, side * BODY.shoulderX * bw, BODY.shoulderY + bob, 0, sitting ? -0.35 : -a * 0.8, side * 0.12);
         tint(this.parts.arms, i * 2 + k, armC, dim);
+        const armAngle = sitting ? -0.35 : -a * 0.8;
+        place(this.parts.hands, i * 2 + k, side * (BODY.shoulderX * bw + 0.029), BODY.shoulderY + bob - 0.245 * Math.cos(armAngle), -0.245 * Math.sin(armAngle));
+        tint(this.parts.hands, i * 2 + k, skin, dim);
       }
       place(this.body, i, 0, 0.44 + bob, 0, 0, 0, bw);
       tint(this.body, i, top, dim);
@@ -162,7 +167,7 @@ export class CrowdRig {
       place(this.parts.face, i, 0, BODY.headY + bob, 0);
       const blinking = !dim && (time + seed * 0.37) % 4.2 < 0.13;
       this.cells.setX(i, cellFor(L.face, p.mood ?? null, blinking));
-      if (sitting) place(this.parts.blob, i, 0, -9, 0); // no floor shadow up on a seat
+      if (sitting) place(this.parts.blob, i, 0, 0.01, 0, 0, 0, 0); // collapse the seated shadow instead of drawing it below the room
       else place(this.parts.blob, i, 0, 0.01, 0);
 
       const h = L.hair === "none" ? -1 : (n(L.hair) || 1) - 1;
@@ -197,6 +202,7 @@ export class CrowdRig {
     set(this.parts.legs, n0 * 2);
     set(this.parts.arms, n0 * 2);
     set(this.parts.shoes, n0 * 2);
+    set(this.parts.hands, n0 * 2);
     set(this.parts.face, n0);
     set(this.parts.blob, n0);
     set(this.body, n0);
@@ -213,11 +219,11 @@ export class CrowdRig {
 
   dispose() {
     this.sheet.dispose();
-    this.ramp.dispose();
     this.toon.dispose();
     this.ink.dispose();
     this.faceMat.dispose();
     this.faceGeo.dispose();
+    (this.parts.blob.material as THREE.Material).dispose();
     this.group.traverse((o) => (o as THREE.InstancedMesh).isInstancedMesh && (o as THREE.InstancedMesh).dispose());
   }
 }

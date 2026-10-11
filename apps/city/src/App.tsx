@@ -1,5 +1,6 @@
 "use client";
 import dynamic from "next/dynamic";
+import AppNavigation, { type AppTab } from "./AppNavigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { type Screen, boot, screenFor } from "./boot";
@@ -125,7 +126,7 @@ export default function App() {
   }
 }
 
-type Tab = "city" | "home" | "today" | "tower" | "more";
+type Tab = AppTab;
 
 // A resident's home screen: the city board and Today, with the tab bar.
 function Home({ api, me: first }: { api: Api; me: Me }) {
@@ -217,23 +218,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       {!pageView && tab === "home" && <HomeEditor api={api} gm={me.gm} onGm={refreshGm} onGoInside={() => setTrip({ place: `home:${me.userId}`, ridesFree: false })} />}
       {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
       {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
-      <nav className="tabs">
-        <button className={tab === "city" ? "on" : ""} onClick={() => go("city")}>
-          City
-        </button>
-        <button className={tab === "home" ? "on" : ""} onClick={() => go("home")}>
-          Home
-        </button>
-        <button className={tab === "today" ? "on" : ""} onClick={() => go("today")}>
-          Today
-        </button>
-        <button className={tab === "tower" ? "on" : ""} onClick={() => go("tower")}>
-          Tower
-        </button>
-        <button className={tab === "more" ? "on" : ""} onClick={() => go("more")}>
-          More
-        </button>
-      </nav>
+      <AppNavigation active={page ? "more" : tab} onSelect={go} />
     </>
   );
 }

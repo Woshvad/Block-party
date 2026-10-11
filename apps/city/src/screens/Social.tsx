@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Api, Me } from "../api";
 import { PLACE_INFO } from "../places";
 import Thread from "../Thread";
-import { Loading, Page, useAction } from "../ui";
+import { EmptyState, Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 import { handleOf, useWho } from "../who";
 
@@ -31,11 +31,12 @@ export default function Social({ api, me, onBack, startWith }: { api: Api; me: M
     return (
       <Page title={handleOf(view.userId)} onBack={() => setView({ kind: "list" })}>
         <Thread
+          key={`dm:${view.userId}`}
           api={api}
           me={me.userId}
           notice="No one from Block Party will ever ask for your seed phrase or your funds. Not the Mayor. Not your crew."
           load={async () => {
-            const thread = (dms.data ?? []).find((t) => other(t) === view.userId);
+            const thread = (await api.dms()).find((t) => other(t) === view.userId);
             if (!thread) return [];
             return (await api.dmThread(thread.id)).messages;
           }}
@@ -68,25 +69,27 @@ export default function Social({ api, me, onBack, startWith }: { api: Api; me: M
         }
       >
         {act.toast}
-        <Thread api={api} me={me.userId} load={() => api.board(view.place)} send={(t) => api.postBoard(view.place, t)} placeholder="Post to the board…" onAuthor={setPerson} />
+        <Thread key={`board:${view.place}`} api={api} me={me.userId} load={() => api.board(view.place)} send={(t) => api.postBoard(view.place, t)} placeholder="Post to the board…" onAuthor={setPerson} />
         {person && <Person api={api} userId={person} onClose={() => setPerson(null)} />}
       </Page>
     );
   }
 
   return (
-    <Page title="Frens and messages" onBack={onBack}>
+    <Page title="Your people, your places." onBack={onBack} className="community-page">
+      <p className="page-intro">A familiar face. A little conversation. A city that feels like yours.</p>
       {act.toast}
-      <div className="chips">
+      <nav className="community-tabs" aria-label="Social sections">
         {(["frens", "dms", "boards"] as const).map((t) => (
-          <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
-            {t === "frens" ? "Frens" : t === "dms" ? "Messages" : "Boards"}
+          <button key={t} aria-pressed={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
+            {t === "frens" ? "Frens" : t === "dms" ? "Messages" : "Boards"}<span>{t === "frens" ? r?.frens.length ?? "—" : t === "dms" ? dms.data?.length ?? "—" : BOARDS.length}</span>
           </button>
         ))}
-      </div>
+      </nav>
 
       {tab === "frens" && (
-        <section className="card">
+        <section className="card community-list">
+          <div className="section-heading"><div><span className="eyebrow">GOOD COMPANY</span><h2>Your frens</h2></div></div>
           {!r ? (
             <Loading error={rel.error} retry={rel.reload} />
           ) : (
@@ -94,22 +97,19 @@ export default function Social({ api, me, onBack, startWith }: { api: Api; me: M
               {r.rivalRequests.incoming.map((id) => (
                 <div className="listrow" key={`in-${id}`}>
                   <span>⚔️ {handleOf(id)} wants a rivalry</span>
-                  <button onClick={() => act.run(() => api.acceptRival(id), "Rivalry on").then(() => rel.reload())}>Accept</button>
+                  <button disabled={act.pending} onClick={() => act.run(() => api.acceptRival(id), "Rivalry on").then(() => rel.reload())}>Accept</button>
                 </div>
               ))}
-              {r.frens.length === 0 && <p className="muted">No frens yet. Tap someone in a room to fren them; crewmates are frens already.</p>}
+              {r.frens.length === 0 && <EmptyState icon="♡" title="Every fren starts with a hello" description="Meet someone in a room and tap their character to become frens. Your crewmates are already part of your circle." />}
               {r.frens.map((f) => {
                 const bond = r.crewBonds.find((b) => b.userId === f.userId);
                 return (
-                  <div className="listrow" key={f.userId}>
-                    <button className="link" onClick={() => setPerson(f.userId)}>
-                      {r.bestFrens.includes(f.userId) ? "⭐ " : ""}
-                      {handleOf(f.userId)}
-                    </button>
-                    <small className="muted">
-                      {f.crewmate ? `crewmate${bond ? ` · bond ${bond.level}` : ""}` : "fren"}
-                    </small>
-                    <button onClick={() => setView({ kind: "dm", userId: f.userId })}>Message</button>
+                  <div className="listrow neighbour-row" key={f.userId}>
+                    <span className="neighbour-avatar" aria-hidden="true">{handleOf(f.userId).replace(/^@/, "").slice(0, 1).toUpperCase()}</span>
+                    <div className="neighbour-info"><button className="link" onClick={() => setPerson(f.userId)}>
+                      {handleOf(f.userId)}{r.bestFrens.includes(f.userId) && <span aria-label="Best fren"> ★</span>}
+                    </button><small>{f.crewmate ? `Crewmate${bond ? ` · Bond ${bond.level}` : ""}` : "Fren"}</small></div>
+                    <button className="btn light" aria-label={`Message ${handleOf(f.userId)}`} onClick={() => setView({ kind: "dm", userId: f.userId })}>Message</button>
                   </div>
                 );
               })}
@@ -128,32 +128,33 @@ export default function Social({ api, me, onBack, startWith }: { api: Api; me: M
       )}
 
       {tab === "dms" && (
-        <section className="card">
+        <section className="card community-list">
+          <div className="section-heading"><div><span className="eyebrow">KEEP IN TOUCH</span><h2>Conversations</h2></div></div>
           {!dms.data ? (
             <Loading error={dms.error} retry={dms.reload} />
           ) : dms.data.length === 0 ? (
-            <p className="muted">No messages yet. Message a fren from the Frens tab.</p>
+            <EmptyState icon="↗" title="Start a conversation" description="Send a little hello to a fren. Your conversations will live here." action={<button className="btn light" onClick={() => setTab("frens")}>Find your frens</button>} />
           ) : (
             dms.data.map((t) => (
-              <div className="listrow" key={t.id}>
-                <span>{handleOf(other(t))}</span>
-                <button onClick={() => setView({ kind: "dm", userId: other(t) })}>Open</button>
-              </div>
+              <button className="conversation-row" key={t.id} onClick={() => setView({ kind: "dm", userId: other(t) })}>
+                <span className="neighbour-avatar" aria-hidden="true">{handleOf(other(t)).replace(/^@/, "").slice(0, 1).toUpperCase()}</span>
+                <span className="neighbour-info"><b>{handleOf(other(t))}</b><small>Open your conversation</small></span><span aria-hidden="true">↗</span>
+              </button>
             ))
           )}
         </section>
       )}
 
       {tab === "boards" && (
-        <section className="card">
-          {BOARDS.map((p) => (
-            <div className="listrow" key={p}>
-              <span>
-                {PLACE_INFO[p]?.icon} {PLACE_INFO[p]?.name}
-              </span>
-              <button onClick={() => setView({ kind: "board", place: p })}>Read</button>
-            </div>
-          ))}
+        <section className="card community-list">
+          <div className="section-heading"><div><span className="eyebrow">AROUND THE NEIGHBOURHOOD</span><h2>City boards</h2></div></div>
+          <p className="muted">Find the conversation at your favourite corner of the city.</p>
+          <div className="board-grid">{BOARDS.map((p) => (
+            <button className="board-tile" key={p} onClick={() => setView({ kind: "board", place: p })}>
+              <span className="board-icon" aria-hidden="true">{PLACE_INFO[p]?.icon}</span>
+              <b>{PLACE_INFO[p]?.name}</b><span>Read the board <span aria-hidden="true">↗</span></span>
+            </button>
+          ))}</div>
         </section>
       )}
       {person && <Person api={api} userId={person} onClose={() => setPerson(null)} onMessage={(id) => (setPerson(null), setView({ kind: "dm", userId: id }))} />}

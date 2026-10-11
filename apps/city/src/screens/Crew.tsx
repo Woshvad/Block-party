@@ -2,12 +2,12 @@
 import { BUYABLE_IDS, CREW, CREW_POST_KINDS, DEFAULT_BANNER } from "@bp/core";
 import dynamic from "next/dynamic";
 import { useRef, useState } from "react";
-import { type Api, type Me, type MyCrew, newKey } from "../api";
+import { ApiError, type Api, type Me, type MyCrew, newKey } from "../api";
 import { paintAt } from "../banner";
 import { itemLabel, label, plural } from "../palette";
 import { OUTFIT } from "../palette";
 import Thread from "../Thread";
-import { Loading, Page, useAction } from "../ui";
+import { EmptyState, Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 import { handleOf, useWho } from "../who";
 
@@ -28,7 +28,7 @@ export default function Crew({ api, me, onBack, onChanged, onGoToHouse }: { api:
     onChanged();
   };
 
-  if (m === undefined) return <Page title="Crew" onBack={onBack}>{<Loading error={mine.error} retry={mine.reload} />}</Page>;
+  if (m === undefined) return <Page title="Find your people." onBack={onBack} className="community-page crew-page">{<Loading error={mine.error} retry={mine.reload} />}</Page>;
   if (m === null) return <NoCrew api={api} onBack={onBack} onJoined={reload} />;
   return <InCrew api={api} me={me} m={m} act={act} onBack={onBack} reload={reload} onGoToHouse={onGoToHouse} />;
 }
@@ -40,8 +40,9 @@ function NoCrew({ api, onBack, onJoined }: { api: Api; onBack: () => void; onJoi
   const [policy, setPolicy] = useState<"approval" | "open">("approval");
   const [code, setCode] = useState(() => (typeof location !== "undefined" ? new URLSearchParams(location.search).get("invite") ?? "" : ""));
   return (
-    <Page title="Crew" onBack={onBack}>
+    <Page title="Find your people." onBack={onBack} className="community-page crew-page">
       {act.toast}
+      <div className="community-welcome"><span className="eyebrow">BETTER TOGETHER</span><h2>A little corner of the city, together.</h2><p>Join a table, bring your frens, and build a place to belong.</p></div>
       <section className="card">
         <h2>Join with an invite</h2>
         <label className="field">
@@ -55,9 +56,9 @@ function NoCrew({ api, onBack, onJoined }: { api: Api; onBack: () => void; onJoi
       <section className="card">
         <h2>Open tables</h2>
         {!tables.data ? (
-          <Loading error={tables.error} />
+          <Loading error={tables.error} retry={tables.reload} />
         ) : tables.data.length === 0 ? (
-          <p className="muted">No open tables right now.</p>
+          <EmptyState icon="⌂" title="There’s room for your crew" description="No open tables right now. Join with an invite, or start your own crew below." />
         ) : (
           tables.data.map((t) => (
             <div className="listrow" key={t.id}>
@@ -78,10 +79,10 @@ function NoCrew({ api, onBack, onJoined }: { api: Api; onBack: () => void; onJoi
           <input value={name} maxLength={CREW.nameMaxChars} onChange={(e) => setName(e.target.value)} />
         </label>
         <div className="chips">
-          <button className={policy === "approval" ? "on" : ""} onClick={() => setPolicy("approval")}>
+          <button aria-pressed={policy === "approval"} className={policy === "approval" ? "on" : ""} onClick={() => setPolicy("approval")}>
             Invite or approve
           </button>
-          <button className={policy === "open" ? "on" : ""} onClick={() => setPolicy("open")}>
+          <button aria-pressed={policy === "open"} className={policy === "open" ? "on" : ""} onClick={() => setPolicy("open")}>
             Open table
           </button>
         </div>
@@ -111,18 +112,20 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
   useWho(api, (requests.data ?? []).map((r) => r.userId));
 
   return (
-    <Page title={c.name} onBack={onBack} right={<Banner rows={c.banner} small />}>
+    <Page className="community-page crew-page" title={c.name} onBack={onBack} right={<Banner rows={c.banner} small />}>
       {act.toast}
-      <p className="muted">
-        {c.status === "forming" ? `Forming: ${c.roster.length}/${CREW.minMembers} to go active` : `${plural(c.roster.length, "member")} of ${CREW.maxMembers}`} · pot {c.pot.toLocaleString("en-US")} GM · you're {m.role}
-      </p>
-      <div className="chips">
+      <div className="crew-summary" aria-label="Crew overview">
+        <div><span>Members</span><strong>{c.roster.length}<small> / {CREW.maxMembers}</small></strong><p>{c.status === "forming" ? `${Math.max(0, CREW.minMembers - c.roster.length)} more to go active` : "Your crew is active"}</p></div>
+        <div><span>Crew pot</span><strong>{c.pot.toLocaleString("en-US")}<small> GM</small></strong><p>Shared city ambitions</p></div>
+        <div><span>Your role</span><strong className="crew-role">{label(m.role)}</strong><p>A place at the table</p></div>
+      </div>
+      <nav className="community-tabs" aria-label="Crew sections">
         {(["crew", "chat", "house", "table"] as const).map((t) => (
-          <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
+          <button key={t} aria-pressed={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
             {t === "crew" ? "Crew" : t === "chat" ? "Chat" : t === "house" ? "Crew House" : "Syndicates"}
           </button>
         ))}
-      </div>
+      </nav>
 
       {tab === "chat" && <Thread api={api} me={me.userId} load={() => api.crewChat()} send={(t) => api.postCrewChat(t)} placeholder="Message the crew…" onAuthor={setPerson} />}
       {tab === "house" && <House api={api} crewId={c.id} act={act} onGo={() => onGoToHouse(c.id)} />}
@@ -156,7 +159,7 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                 )}
               </>
             ) : (
-              <Loading error={chain.error} />
+              <Loading error={chain.error} retry={chain.reload} />
             )}
           </section>
 
@@ -164,7 +167,7 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
             <h2>💰 Crew pot</h2>
             <p className="muted">GM in the pot backs syndicates. It never comes back out to anyone.</p>
             <div className="row">
-              <input className="ask" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))} />
+              <input aria-label="GM to add to crew pot" className="ask" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))} />
               <button
                 className="btn"
                 disabled={!Number(amount) || Number(amount) > me.gm || act.pending}
@@ -208,7 +211,15 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                     Code <b className="code">{invite.code}</b> · until {new Date(invite.expiresAt).toLocaleString()}
                   </p>
                   <div className="btnrow">
-                    <button className="btn light" onClick={() => navigator.clipboard?.writeText(`${location.origin}/?invite=${invite.code}`)}>
+                    <button className="btn light" disabled={act.pending} onClick={() => act.run(async () => {
+                      try {
+                        if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+                        await navigator.clipboard.writeText(`${location.origin}/?invite=${encodeURIComponent(invite.code)}`);
+                      } catch {
+                        throw new ApiError(0, "CLIPBOARD_UNAVAILABLE", "Couldn’t copy the link. Select and copy the invite code above instead.");
+                      }
+                      return true;
+                    }, "Invite link copied")}>
                       Copy link
                     </button>
                     <button className="btn light" onClick={() => act.run(() => api.revokeInvite(invite.code), "Invite revoked").then(() => setInvite(null))}>
@@ -221,6 +232,7 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                   Make an invite (24 h)
                 </button>
               )}
+              {requests.error && <Loading error={requests.error} retry={requests.reload} />}
               {(requests.data ?? []).length > 0 && <h3 className="band">Asking to join</h3>}
               {(requests.data ?? []).map((r) => (
                 <div className="listrow" key={r.id}>

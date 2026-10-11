@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, type Api, type Look, type Resident, type ResidentDraft } from "./api";
 import { GOALS, KIT_STYLES, LOOK_PALETTES, LOOK_PARTS, TRAITS, type Field, fieldErrors, latestOnly, stepLook, toggleTrait } from "./draft";
 import { HAIR, OUTFIT, SKIN, itemLabel, label } from "./palette";
+import { Loading } from "./ui";
 import { haptic } from "./telegram";
 
 const Avatar = dynamic(() => import("./Avatar"), { ssr: false });
@@ -12,6 +13,13 @@ const Avatar = dynamic(() => import("./Avatar"), { ssr: false });
 // backstory. Every step is checked with the API's own rules as you go.
 
 const STEPS = ["Look", "Name", "Traits", "Goal", "Move in"] as const;
+const STEP_COPY = [
+  ["Every neighbour starts somewhere.", "Make a little you. Choose a look that feels at home in the city."],
+  ["What should we call you?", "A name for your neighbours. A handle they can find you by."],
+  ["Bring your personality.", "Choose three traits. You can change them once a season."],
+  ["Find your kind of city life.", "Choose a goal and a room style to start your story."],
+  ["Your next chapter starts here.", "One last look before we hand over the keys."],
+] as const;
 const STEP_FIELDS: Field[][] = [["look"], ["name", "handle"], ["traits"], ["goal", "kitStyle"], []];
 const GOAL_WORDS: Record<string, string> = {
   oracle: "Call it right more than anyone",
@@ -24,13 +32,15 @@ const SWATCHES = { skinTone: SKIN, hairColor: HAIR, outfitColor: OUTFIT } as con
 
 type Avail = "idle" | "checking" | "free" | "taken" | "unknown";
 
-export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident) => void }) {
+export default function MoveIn({ api, onDone }: { api: Pick<Api, "pickForMe" | "handleAvailable" | "moveIn" | "me">; onDone: (r: Resident) => void }) {
   const [d, setD] = useState<ResidentDraft | null>(null);
   const [step, setStep] = useState(0);
   const [avail, setAvail] = useState<Avail>("idle");
   const [busy, setBusy] = useState(false);
   const [serverErr, setServerErr] = useState<{ field?: string; message: string } | null>(null);
   const [moved, setMoved] = useState<Resident | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, [step]);
   const checks = useRef(latestOnly());
   const sending = useRef(false); // state updates too late to stop a double tap; a ref doesn't
 
@@ -41,7 +51,7 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
       setD(p);
       setAvail("free"); // the API only suggests a handle that's free right now
     } catch (e) {
-      setServerErr({ message: e instanceof ApiError ? e.message : "couldn't pick" });
+      setServerErr({ message: e instanceof ApiError ? e.message : "We couldn't prepare your character. Please try again." });
     }
   };
   useEffect(() => {
@@ -70,16 +80,9 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
   if (!d) {
     return (
       <div className="screen center">
-        {serverErr ? (
-          <>
-            <p>{serverErr.message}</p>
-            <button className="cta" onClick={pick}>
-              Try again
-            </button>
-          </>
-        ) : (
-          <p className="muted">Getting your keys…</p>
-        )}
+        <span className="eyebrow">YOUR NEW NEIGHBOURHOOD</span>
+        <h1>Getting your keys…</h1>
+        <Loading error={serverErr?.message} retry={() => void pick()} />
       </div>
     );
   }
@@ -109,7 +112,7 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
         if (me?.resident) return onDone(me.resident);
       }
       const field = err?.field;
-      setServerErr({ field, message: err?.message ?? "couldn't move in" });
+      setServerErr({ field, message: err?.message ?? "We couldn't finish your move-in. Your choices are saved here; please try again." });
       if (field === "handle" || err?.code === "HANDLE_TAKEN") {
         setAvail("taken");
         setStep(1);
@@ -125,17 +128,23 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
   };
 
   return (
-    <div className="screen movein">
-      <header className="steps">
+    <main className="screen movein">
+      <div className="movein-brand"><a href="/">block party<span>·</span></a><span className="eyebrow">YOUR CITY. YOUR STORY.</span></div>
+      <nav className="steps" aria-label="Move-in steps">
         {STEPS.map((s, i) => (
-          <button key={s} className={i === step ? "on" : i < step ? "done" : ""} disabled={i > step} onClick={() => setStep(i)}>
-            {s}
+          <button key={s} className={i === step ? "on" : i < step ? "done" : ""} aria-current={i === step ? "step" : undefined} disabled={i > step || busy} onClick={() => setStep(i)}>
+            <span className="step-number" aria-hidden="true">{i < step ? "✓" : i + 1}</span>{s}
           </button>
         ))}
+      </nav>
+      <header className="movein-heading">
+        <span className="eyebrow">MAKE YOURSELF AT HOME · {step + 1} / {STEPS.length}</span>
+        <h1 ref={heading} tabIndex={-1}>{STEP_COPY[step]![0]}</h1>
+        <p>{STEP_COPY[step]![1]}</p>
       </header>
 
       {step === 0 && (
-        <section>
+        <section className="look-builder">
           <div className="avatar">
             <Avatar look={d.look} />
           </div>
@@ -209,15 +218,15 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
 
       {step === 2 && (
         <section>
-          <p className="muted">Pick 3. You can swap them once a season.</p>
+          <p className="selection-count" role="status">{d.traits.length} of 3 traits selected</p>
           <div className="chips">
             {TRAITS.map((t) => (
-              <button key={t} className={d.traits.includes(t) ? "on" : ""} onClick={() => set({ traits: toggleTrait(d.traits, t) })} disabled={!d.traits.includes(t) && d.traits.length >= 3}>
+              <button key={t} aria-pressed={d.traits.includes(t)} className={d.traits.includes(t) ? "on" : ""} onClick={() => set({ traits: toggleTrait(d.traits, t) })} disabled={!d.traits.includes(t) && d.traits.length >= 3}>
                 {label(t)}
               </button>
             ))}
           </div>
-          <p className="muted">{d.traits.length}/3</p>
+
         </section>
       )}
 
@@ -225,7 +234,7 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
         <section>
           <div className="options">
             {GOALS.map((g) => (
-              <button key={g} className={d.goal === g ? "on" : ""} onClick={() => set({ goal: g })}>
+              <button key={g} aria-pressed={d.goal === g} className={d.goal === g ? "on" : ""} onClick={() => set({ goal: g })}>
                 <b>{label(g)}</b>
                 <span>{GOAL_WORDS[g]}</span>
               </button>
@@ -234,7 +243,7 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
           <p className="muted">Your room's style</p>
           <div className="chips">
             {KIT_STYLES.map((k) => (
-              <button key={k} className={d.kitStyle === k ? "on" : ""} onClick={() => set({ kitStyle: k })}>
+              <button key={k} aria-pressed={d.kitStyle === k} className={d.kitStyle === k ? "on" : ""} onClick={() => set({ kitStyle: k })}>
                 {label(k)}
               </button>
             ))}
@@ -257,18 +266,18 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
         </section>
       )}
 
-      {serverErr && <p className="bad center">{serverErr.message}</p>}
+      {serverErr && <p role="alert" className="bad center">{serverErr.message}</p>}
       {stepErrors.length > 0 && step !== 1 && <p className="bad center">{stepErrors[0]}</p>}
 
       <footer className="nav">
         {step > 0 && (
-          <button className="ghost" onClick={() => setStep(step - 1)}>
+          <button className="ghost" disabled={busy} onClick={() => setStep(step - 1)}>
             Back
           </button>
         )}
         {step < STEPS.length - 1 ? (
           <button className="cta" disabled={!canNext} onClick={() => setStep(step + 1)}>
-            Next
+            Continue to {STEPS[step + 1]?.toLowerCase()} <span aria-hidden="true">↗</span>
           </button>
         ) : (
           <button className="cta" disabled={busy || Object.keys(errs).length > 0} onClick={submit}>
@@ -276,17 +285,18 @@ export default function MoveIn({ api, onDone }: { api: Api; onDone: (r: Resident
           </button>
         )}
       </footer>
-    </div>
+    </main>
   );
 }
 
 function Welcome({ r, onGo }: { r: Resident; onGo: () => void }) {
   return (
     <div className="screen center welcome">
+      <span className="eyebrow">THE KEYS ARE YOURS</span>
       <div className="avatar small">
         <Avatar look={r.look} />
       </div>
-      <h2>Welcome home, {r.name}</h2>
+      <h1>Welcome home, {r.name}.</h1>
       <p>
         The city dealt you <b>{label(r.backstory)}</b>.
       </p>

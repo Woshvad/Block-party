@@ -40,6 +40,7 @@ export const geo = {
   // Limbs pivot at the top (hip, shoulder).
   leg: new THREE.CapsuleGeometry(0.075, 0.13, 1, 6).translate(0, -0.14, 0),
   arm: new THREE.CapsuleGeometry(0.058, 0.16, 1, 6).translate(0, -0.13, 0),
+  hand: new THREE.SphereGeometry(0.06, 6, 4).scale(1, 1.1, 0.85),
   shoe: new THREE.BoxGeometry(0.14, 0.07, 0.2).translate(0, 0.035, 0.025),
   blob: new THREE.CircleGeometry(0.34, 12).rotateX(-Math.PI / 2),
 };

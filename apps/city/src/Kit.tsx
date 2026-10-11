@@ -1,31 +1,15 @@
 "use client";
 import { useGLTF } from "@react-three/drei";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { bake } from "./kitGeometry";
+export { bake } from "./kitGeometry";
 import type { Placement } from "./kitcity";
 
 // Kenney's City Kit models (CC0, see public/assets/kenney/*/License.txt),
 // drawn the cheap way: each model becomes ONE instanced mesh holding every
 // copy of it in the city. A pack shares one colour texture, so a whole street
 // of houses is a handful of draw calls.
-
-// One model's meshes baked into a single geometry (transforms applied).
-export function bake(scene: THREE.Object3D): { geometry: THREE.BufferGeometry; material: THREE.Material } | null {
-  const parts: THREE.BufferGeometry[] = [];
-  let material: THREE.Material | null = null;
-  scene.updateMatrixWorld(true);
-  scene.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh) return;
-    const g = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(m.matrixWorld);
-    for (const k of Object.keys(g.attributes)) if (!["position", "normal", "uv"].includes(k)) g.deleteAttribute(k);
-    parts.push(g);
-    material ??= Array.isArray(m.material) ? m.material[0]! : m.material;
-  });
-  if (!parts.length || !material) return null;
-  return { geometry: mergeGeometries(parts, false)!, material };
-}
 
 // Night windows: the packs colour everything from one palette image, glass in
 // pale blues. A mask of just those pixels becomes the glow map, so at night
@@ -67,19 +51,25 @@ function KitModel({ url, items, shadows, night }: { url: string; items: Placemen
   // Our own copy of the material, with the window glow wired in.
   const baked = useMemo(() => {
     if (!baked0) return null;
-    const m = (baked0.material as THREE.MeshStandardMaterial).clone();
-    // Roads and cars never glow (their palettes' blues are paint, not windows).
-    const glow = /\/(roads|cars)\//.test(url) ? null : windowGlow(m.map);
-    if (glow) {
-      m.emissiveMap = glow;
-      m.emissive = new THREE.Color("#ffffff");
-    }
-    return { geometry: baked0.geometry, material: m };
-  }, [baked0]);
+    const source = Array.isArray(baked0.material) ? baked0.material : [baked0.material];
+    const materials = source.map((original) => {
+      const m = (original as THREE.MeshStandardMaterial).clone();
+      const paletteKit = url.startsWith("/assets/kenney/");
+      const glow = paletteKit && !/\/(roads|cars)\//.test(url) ? windowGlow(m.map) : null;
+      if (glow) { m.emissiveMap = glow; m.emissive = new THREE.Color("#ffffff"); m.userData.cityWindowGlow = true; }
+      if (paletteKit) {
+        m.roughness = /\/roads\//.test(url) ? 0.96 : 0.72;
+        m.envMapIntensity = 0.45;
+      }
+      return m;
+    });
+    return { geometry: baked0.geometry, materials, material: materials.length === 1 ? materials[0]! : materials };
+  }, [baked0, url]);
   useLayoutEffect(() => {
-    const m = baked?.material as THREE.MeshStandardMaterial | undefined;
-    if (m) m.emissiveIntensity = night ? 0.9 : 0;
+    baked?.materials.forEach((m) => { if (m.userData.cityWindowGlow) m.emissiveIntensity = night ? 0.55 : 0; });
   }, [baked, night]);
+  useEffect(() => () => { baked?.materials.forEach((m) => m.dispose()); }, [baked]);
+  useEffect(() => () => { baked0?.geometry.dispose(); }, [baked0]);
   const ref = useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(() => {
     const m = ref.current;
@@ -120,5 +110,7 @@ export default function Kit({ placements, shadows = true, night = false }: { pla
 // A kit model baked once, for components that move their own instances (cars).
 export function useBaked(url: string) {
   const gltf = useGLTF(url);
-  return useMemo(() => bake(gltf.scene), [gltf]);
+  const baked = useMemo(() => bake(gltf.scene), [gltf]);
+  useEffect(() => () => { baked?.geometry.dispose(); }, [baked]);
+  return baked;
 }

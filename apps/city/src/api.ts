@@ -155,6 +155,9 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     timetable: () => request<{ bigNights: BigNight[] }>("GET", "/v1/city/timetable"),
 
     // --- The bell and results
+    headcounts: () => request<{ counts: Record<string, number | null>; sampledAt: string }>("GET", "/v1/city/headcounts"),
+    visitHome: (owner: string) => request<Home>("GET", `/v1/homes/${encodeURIComponent(owner)}`),
+    binder: (owner: string) => request<ReceiptBinder>("GET", `/v1/homes/${encodeURIComponent(owner)}/binder`),
     reel: (day?: string) => request<Record<string, unknown>>("GET", `/v1/reel${day ? `?day=${encodeURIComponent(day)}` : ""}`),
     grid: (day: string) => request<Record<string, unknown>>("GET", `/v1/slate/${encodeURIComponent(day)}/grid`),
     dailyClose: (day: string) => request<{ bellDay: string; pages: Record<string, { key: string; values: Record<string, string | number> }[]> }>("GET", `/v1/daily-close/${encodeURIComponent(day)}`),
@@ -369,3 +372,5 @@ export type Syndicate = { id: string; marketId: string | null; cityMarketId: str
 export type Duel = { id: string; marketId: string; challengerId: string; opponentId: string; challengerSide: Side; status: string; stakeChallenger: number; stakeOpponent: number; snapChallenger: number; snapOpponent: number; lastCall: boolean; retreatedBy: string | null; winnerId: string | null; createdAt: string };
 export type Grudge = { id: string; cityDay: string; newcomerId: string; inviterId: string; status: string; winnerId: string | null };
 export type CityMarket = { id: string; question: string; kind: string; place: string | null; threshold: number | null; locksAt: string; bellDay: string };
+
+export type ReceiptBinder = { season: number; receipts: { callId: string; question: string; side: string; chance: number; world: number; aura: number; resolvedAt: string }[] };

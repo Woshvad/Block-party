@@ -17,6 +17,13 @@ const welcome = {
 };
 
 describe("applyEvent", () => {
+  it("removes moderated text from both the log and the visible bubble", () => {
+    const initial = applyEvent(emptyRoom(), welcome, 0);
+    const s = applyEvent(initial, { t: "removed", lineId: "l1" }, 1100);
+    expect(s.lines[0]!.text).toBe("[removed]");
+    expect(bubbles(s, 1200)["u-b"]!.text).toBe("[removed]");
+    expect(applyEvent(s, { t: "removed", lineId: {} }, 0)).toBe(s);
+  });
   it("builds the room from the welcome", () => {
     const s = applyEvent(emptyRoom(), welcome, 0);
     expect(s.you).toBe(me);

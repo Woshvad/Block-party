@@ -1,7 +1,7 @@
 "use client";
 import { EMOTES } from "@bp/core";
 import { Html, OrbitControls } from "@react-three/drei";
-import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, type ThreeEvent, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
 import { ApiError, type Api, type CityHall, type Home, type Look, type MarketRow } from "./api";
@@ -10,14 +10,16 @@ import Interior from "./Interior";
 import { layoutFor, planFor } from "./interiors";
 import { type Plan, type Seat, findPath, makePlan, nearestFree, toTile, toWorld as planWorld } from "./plan";
 import { type Body, step } from "./steer";
+import HomeDisplay from "./HomeDisplay";
 import { HomeRoom } from "./HomeRoom";
 import Person from "./Person";
 import { footprintSize, homeSize, pieceOf } from "./furniture";
-import { fitCamera } from "./camera";
+import { RoomCamera, RoomLighting } from "./RoomLighting";
 import { useNow } from "./clock";
 import { placeName, roomSize } from "./places";
 import { type RoomState, applyEvent, bubbles, emptyRoom, showingEmote } from "./roomState";
 import { type SocketStatus, openRoomSocket } from "./roomSocket";
+import { chatDraft } from "./chatDraft";
 import { haptic } from "./telegram";
 import { useToast } from "./useToast";
 import { type Board, type FeedKey, dinerBoard, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
@@ -90,21 +92,6 @@ function Tags({ drawn, room, now, me, scale }: { drawn: React.MutableRefObject<D
   );
 }
 
-// Fits the whole room on screen, tall phone or wide laptop.
-function RoomCamera({ span }: { span: number }) {
-  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
-  const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height));
-  useEffect(() => {
-    const { fov, distance } = fitCamera(aspect, span * 1.02, { min: span * 0.8, max: span * 3 });
-    camera.fov = fov;
-    camera.position.copy(ROOM_VIEW).multiplyScalar(distance);
-    camera.lookAt(0, 0, 0);
-    camera.updateProjectionMatrix();
-  }, [aspect, span, camera]);
-  return null;
-}
-const ROOM_VIEW = new THREE.Vector3(0.55, 0.8, 0.95).normalize();
-
 // The room's NPCs (the server only counts them): standing at fixed spots by the back wall.
 // Where a room's NPCs stand: by the back wall, facing the room.
 const npcSpot = (i: number, w: number, h: number) => ({ x: w / 2 - 1.5 - i * 1.6, z: -h / 2 + 1.2 });
@@ -165,8 +152,9 @@ function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<Feed
 }
 
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
-  // Your own home or your crew's house: draw the furniture (the API shares a
-  // layout only with its owner, or the crew's members).
+  // Draw permitted home layouts, including open homes visited by neighbours.
+  const owner = place.startsWith("home:") ? place.slice(5) : null;
+  const [display, setDisplay] = useState<"trophy_wall" | "tv" | null>(null);
   const mine = !!me && place === `home:${me}`;
   const ourHouse = !!crewId && place === `crew_house:${crewId}`;
   const [home, setHome] = useState<Home | null>(null);
@@ -180,17 +168,21 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
       .catch(() => {});
   }, [api]);
   useEffect(() => {
-    if (mine) void api.home().then(setHome).catch(() => {});
+    let live = true;
+    setHome(null); setDisplay(null);
+    if (owner) void (mine ? api.home() : api.visitHome(owner)).then((h) => { if (live) setHome(h); }).catch(() => { if (live) setNapMsg("Couldn’t load this home. Its door may be closed."); });
     if (ourHouse)
       void api
         .crewHouse()
-        .then((h) => setHome({ userId: "", tier: "lounge", wallFinish: h.wallFinish, floorFinish: h.floorFinish, doorOpen: true, placed: h.placed.filter((p) => p.room === "lounge"), storage: [] }))
+        .then((h) => { if (live) setHome({ userId: "", tier: "lounge", wallFinish: h.wallFinish, floorFinish: h.floorFinish, doorOpen: true, placed: h.placed.filter((p) => p.room === "lounge"), storage: [] }); })
         .catch(() => {});
-  }, [api, mine, ourHouse]);
+    return () => { live = false; };
+  }, [api, mine, ourHouse, owner]);
   const size = roomSize(place) ?? { w: 10, h: 10 };
   const [room, dispatch] = useReducer((s: RoomState, a: { ev: unknown; now: number }) => applyEvent(s, a.ev, a.now), undefined, emptyRoom);
   const [status, setStatus] = useState<SocketStatus>({ kind: "connecting" });
-  const [text, setText] = useState("");
+  const [draft, updateDraft] = useReducer(chatDraft, { text: "", pending: null });
+  const text = draft.text;
   const [emotes, setEmotes] = useState(false);
   const [log, setLog] = useState(false);
   const [person, setPerson] = useState<string | null>(null);
@@ -219,10 +211,25 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   const here = (d: Drawn) => toTile(plan, d.x, d.z);
 
   useEffect(() => {
-    const c = openRoomSocket({ ticket: () => api.roomTicket(place) }, { event: (ev) => dispatch({ ev, now: Date.now() }), status: setStatus });
+    const c = openRoomSocket({ ticket: () => api.roomTicket(place) }, { event: (ev) => {
+      updateDraft({ type: "event", event: ev });
+      dispatch({ ev, now: Date.now() });
+    }, status: (s) => {
+      setStatus(s);
+      if (s.kind !== "live") updateDraft({ type: "disconnect" });
+    } });
     conn.current = c;
     return () => c.close();
   }, [api, place]);
+
+  useEffect(() => {
+    if (!draft.pending) return;
+    const timer = setTimeout(() => {
+      updateDraft({ type: "disconnect" });
+      setNapMsg("Delivery hasn't been confirmed. Your message is still here; check the chat before retrying.");
+    }, 15_000);
+    return () => clearTimeout(timer);
+  }, [draft.pending, setNapMsg]);
 
   // Keep the drawn list in step with who's here; walking happens per frame.
   useEffect(() => {
@@ -291,8 +298,9 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   };
   const say = () => {
     const t = text.trim();
-    if (!t) return;
-    if (send({ t: "chat", text: t })) setText("");
+    if (!t || draft.pending) return;
+    const requestId = crypto.randomUUID();
+    if (send({ t: "chat", text: t, requestId })) updateDraft({ type: "send", id: requestId });
   };
 
   const err = room.lastError && now - room.lastError.at < 4000 ? room.lastError : null;
@@ -310,11 +318,9 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   const span = Math.max(size.w, size.h);
   return (
     <>
-      <div className="stage">
-        <Canvas dpr={[1, 2]} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: true }}>
-          <color attach="background" args={["#dfeaf5"]} />
-          <hemisphereLight args={["#ffffff", "#b9c7d6", 1.1]} />
-          <directionalLight position={[6, 12, 6]} intensity={1.3} />
+      <div className="stage room-stage">
+        <Canvas shadows dpr={[1, 1.5]} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: true }}>
+          <RoomLighting span={span} outdoor={place === "roof"} />
           {home ? (
             <HomeRoom
               w={homeSize(home.tier).w}
@@ -322,13 +328,14 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
               wallFinish={home.wallFinish}
               floorFinish={home.floorFinish}
               placed={home.placed}
+              onPiece={(id) => { const p = home.placed.find((item) => item.itemId === id); if (p?.pieceId === "trophy_wall" || p?.pieceId === "tv") setDisplay(p.pieceId); }}
               onCell={(x, y) => goTo(x - size.w / 2 + 0.5, y - size.h / 2 + 0.5)}
             />
           ) : layout ? (
             <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} feeds={feeds} />
           ) : (
             <>
-              <mesh rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
+              <mesh receiveShadow rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
                 <planeGeometry args={[size.w, size.h]} />
                 <meshStandardMaterial map={tiles} />
               </mesh>
@@ -342,12 +349,12 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
               </mesh>
             </>
           )}
-          <RoomCamera span={span} />
+          <RoomCamera w={size.w} h={size.h} />
           <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />
           <Walk drawn={drawn} plan={plan} />
           <ChibiCrowd people={drawn} cap={CAP} onPerson={(id) => id !== room.you && !id.startsWith("npc:") && setPerson(id)} />
           <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />
-          <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 3} />
+          <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 8} />
         </Canvas>
       </div>
 
@@ -376,6 +383,8 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
       )}
       {err && <div className="toast bad">{err.message}</div>}
       {person && <Person api={api} userId={person} place={place} onClose={() => setPerson(null)} />}
+      {display && <HomeDisplay api={api} owner={owner ?? me ?? ""} kind={display} onClose={() => setDisplay(null)} />}
+      {home && <div className="home-displays">{(["trophy_wall", "tv"] as const).filter((kind) => home.placed.some((p) => p.pieceId === kind)).map((kind) => <button className="pill" key={kind} onClick={() => setDisplay(kind)}>{kind === "tv" ? "Watch TV" : "Trophy wall"}</button>)}</div>}
       {napMsg && <div className="toast">{napMsg}</div>}
       {mine && home && status.kind === "live" && home.placed.some((p) => pieceOf(p.pieceId)?.mood === "rested") && (
         <button
@@ -431,12 +440,12 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
         <button type="button" className="round" aria-label="chat log" onClick={() => setLog((v) => !v)}>
           💬
         </button>
-        <input value={text} onChange={(e) => setText(e.target.value)} placeholder={status.kind === "live" ? "Say something…" : "…"} maxLength={280} disabled={status.kind !== "live"} enterKeyHint="send" />
+        <input aria-label="Message the room" value={text} onChange={(e) => updateDraft({ type: "edit", text: e.target.value })} placeholder={status.kind === "live" ? "Say something…" : "Waiting for connection…"} maxLength={280} disabled={status.kind !== "live"} enterKeyHint="send" />
         <button type="button" className="round" aria-label="emotes" onClick={() => setEmotes((v) => !v)} disabled={status.kind !== "live"}>
           😀
         </button>
-        <button type="submit" className="round send" disabled={status.kind !== "live" || !text.trim()} aria-label="send">
-          ↑
+        <button type="submit" className="round send" disabled={status.kind !== "live" || !!draft.pending || !text.trim()} aria-label={draft.pending ? "Sending" : "Send"}>
+          {draft.pending ? "…" : "↑"}
         </button>
       </form>
     </>

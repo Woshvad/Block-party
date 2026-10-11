@@ -1,11 +1,11 @@
 "use client";
 import { REPORT_REASONS } from "@bp/core";
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Api } from "./api";
 import { label } from "./palette";
-import { useAction } from "./ui";
+import { EmptyState, Loading, useAction } from "./ui";
 import { useLoad } from "./useLoad";
 import { handleOf, useWho, who } from "./who";
 
@@ -24,6 +24,13 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
   const [note, setNote] = useState("");
   const [dueling, setDueling] = useState(false);
   const markets = useLoad(() => (dueling ? api.markets() : Promise.resolve([])), [api, dueling]);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    const modal = dialog.current;
+    modal?.showModal();
+    return () => { modal?.close(); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, []);
   const r = rel.data;
   const fren = r?.frens.find((f) => f.userId === userId);
   const best = r?.bestFrens.includes(userId);
@@ -32,30 +39,31 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
   const outgoing = r?.rivalRequests.outgoing.includes(userId);
 
   return createPortal(
-    <div className="backdrop" onClick={onClose}>
-      <div className="callsheet tall" onClick={(e) => e.stopPropagation()}>
+    <dialog ref={dialog} className="person-dialog" aria-labelledby="person-title" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="callsheet tall person-sheet">
         {act.toast}
         <button className="x" aria-label="close" onClick={onClose}>
           ×
         </button>
+        <span className="eyebrow">AROUND THE NEIGHBOURHOOD</span>
+        {!w?.look && <span className="person-monogram" aria-hidden="true">{w?.name.slice(0, 1).toUpperCase() ?? "?"}</span>}
         {w?.look && (
           <div className="avatar small">
             <Avatar look={w.look} />
           </div>
         )}
-        <p className="q">
-          {w ? w.name : "…"} <small className="muted">{handleOf(userId, "")}</small>
-        </p>
+        <header className="person-heading"><h2 id="person-title">{w ? w.name : "Your neighbour"}</h2><p className="muted">{handleOf(userId, "Profile unavailable")}</p></header>
+        {!r && <Loading error={rel.error} retry={rel.reload} />}
         {fren && <p className="muted">{fren.crewmate ? "Crewmate" : "Fren"}{best ? " · ⭐ best fren" : ""}{fren.mutualBest ? " (both ways)" : ""}</p>}
         {rival && <p className="muted">⚔️ Rivals</p>}
 
-        <div className="btnrow">
+        <div className="btnrow person-actions">
           {fren && onMessage && (
             <button className="btn" onClick={() => onMessage(userId)}>
               💬 Message
             </button>
           )}
-          {!fren && place && (
+          {r && !fren && place && (
             <button className="btn" disabled={act.pending} onClick={() => act.run(() => api.fren(userId, place), "Tapped! Frens once they tap you back").then(() => rel.reload())}>
               🤝 Fren
             </button>
@@ -70,7 +78,7 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
               ⚔️ Accept rivalry
             </button>
           )}
-          {!rival && !incoming && !outgoing && (
+          {fren && !rival && !incoming && !outgoing && (
             <button className="btn light" onClick={() => act.run(() => api.rival(userId), "Rivalry proposed").then(() => rel.reload())}>
               ⚔️ Rival
             </button>
@@ -88,14 +96,16 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           )}
         </div>
 
-        <div className="btnrow">
-          <button className="btn light" onClick={() => setDueling((v) => !v)}>
+        <div className="btnrow person-actions">
+          <button className="btn light" aria-expanded={dueling} onClick={() => setDueling((v) => !v)}>
             ⚔️ Fade Duel
           </button>
         </div>
         {dueling && (
           <div className="card">
             <p className="muted">Pick a market you've both called on opposite sides. 10 GM each to start.</p>
+            {!markets.data && <Loading error={markets.error} retry={markets.reload} />}
+            {markets.data?.length === 0 && <EmptyState icon="◇" title="No markets available" description="Check back when the Tower has an open market." />}
             {(markets.data ?? []).map((mk) => (
               <div className="listrow" key={mk.id}>
                 <span>{mk.question}</span>
@@ -106,7 +116,7 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
         )}
 
         <h3 className="band">Safety</h3>
-        <div className="btnrow">
+        <div className="btnrow person-actions">
           <button className="btn light" onClick={() => act.run(() => api.mute(userId, 24), "Muted for 24 hours: you won't see them")}>
             🔇 Mute 24h
           </button>
@@ -119,7 +129,7 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           <button className="btn light" onClick={() => act.run(() => api.unblock(userId), "Unblocked")}>
             Unblock
           </button>
-          <button className="btn light" onClick={() => setReporting((v) => !v)}>
+          <button className="btn light" aria-expanded={reporting} onClick={() => setReporting((v) => !v)}>
             🚩 Report
           </button>
         </div>
@@ -127,7 +137,7 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           <div className="card">
             <div className="chips">
               {REPORT_REASONS.map((x) => (
-                <button key={x} className={reason === x ? "on" : ""} onClick={() => setReason(x)}>
+                <button key={x} aria-pressed={reason === x} className={reason === x ? "on" : ""} onClick={() => setReason(x)}>
                   {x === "under_18" ? "Under 18" : label(x)}
                 </button>
               ))}
@@ -148,7 +158,7 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           </div>
         )}
       </div>
-    </div>,
+    </dialog>,
     document.body,
   );
 }

@@ -39,7 +39,7 @@ describe("triangle budget", () => {
     // Outlined: head, body, hair, hat. Not outlined: face, glasses, limbs, shoes, shadow.
     const worst =
       2 * (triangles(geo.head) + triangles(geo.body) + max(hairGeo) + max(hatGeo)) +
-      triangles(geo.face) + max(glassesGeo) + 2 * (triangles(geo.leg) + triangles(geo.arm) + triangles(geo.shoe)) + triangles(geo.blob);
+      triangles(geo.face) + max(glassesGeo) + 2 * (triangles(geo.leg) + triangles(geo.arm) + triangles(geo.hand) + triangles(geo.shoe)) + triangles(geo.blob);
     expect(worst).toBeLessThanOrEqual(3000);
   });
 });

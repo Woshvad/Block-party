@@ -72,6 +72,8 @@ export function applyEvent(s: RoomState, ev: unknown, now: number): RoomState {
       if (!isLine(e.line) || s.lines.some((l) => l.id === (e.line as Line).id)) return s;
       return { ...s, lines: [...s.lines, e.line].slice(-LINES_KEPT) };
     }
+    case "removed":
+      return str(e.lineId) ? { ...s, lines: s.lines.map((l) => l.id === e.lineId ? { ...l, text: "[removed]" } : l) } : s;
     case "emote": {
       const p = str(e.userId) ? s.people[e.userId] : undefined;
       if (!p || !str(e.emote)) return s;

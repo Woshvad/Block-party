@@ -63,6 +63,31 @@ function harness(ticket: () => Promise<{ url: string }> = async () => ({ url: "w
 }
 
 describe("openRoomSocket", () => {
+  it("keeps heartbeats scheduled while waiting for a ticket and after a reconnect", async () => {
+    let resolve!: (v: { url: string }) => void;
+    const h = harness(() => new Promise((r) => { resolve = r; }));
+    const ping = () => {
+      const t = h.timers.find((t) => t.live && t.ms === 25_000)!;
+      expect(t).toBeDefined();
+      t.live = false;
+      t.fn();
+    };
+    ping(); // ticket still pending after 25 seconds
+    resolve({ url: "ws://room" });
+    await h.flush();
+    h.sockets[0]!.open();
+    ping();
+    expect(h.sockets[0]!.sent).toEqual(['{"t":"ping"}']);
+    h.sockets[0]!.drop(1006);
+    ping(); // between connections
+    await h.fireRetry();
+    resolve({ url: "ws://room2" });
+    await h.flush();
+    h.sockets[1]!.open();
+    ping();
+    expect(h.sockets[1]!.sent).toEqual(['{"t":"ping"}']);
+    h.conn.close();
+  });
   it("connects, goes live, and passes parsed events through", async () => {
     const h = harness();
     await h.flush();

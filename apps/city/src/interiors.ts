@@ -40,20 +40,20 @@ const benchRow = (y: number, xs: number[], prefix: string, facing: number, color
 
 export const LAYOUTS: Record<string, Layout> = {
   diner: {
-    look: { wall: "#f3dccb", wall2: "#d4473f", floor: "#f4f1ea", floor2: "#2c2c2a" },
+    look: { wall: "#f3dccb", wall2: "#bd5948", floor: "#eee8da", floor2: "#414844" },
     decor: [
       { kind: "sign", x: 4, y: 0, w: 6, label: "GWEI DINER", color: "#ff5d73" },
-      { kind: "screen", x: 0, y: 0, w: 4, label: "ALPHA", color: "#f4f1ea", feed: "diner" },
-      { kind: "counter", x: 3, y: 1, w: 8, color: "#d4473f" },
-      ...[3, 5, 7, 9].map((x, i): Decor => ({ kind: "stool", x, y: 2, seat: `stool${i + 1}`, facing: N, color: "#d4473f" })),
+      { kind: "screen", x: 0, y: 0, w: 4, label: "ALPHA", color: "#eee8da", feed: "diner" },
+      { kind: "counter", x: 3, y: 1, w: 8, color: "#bd5948" },
+      ...[3, 5, 7, 9].map((x, i): Decor => ({ kind: "stool", x, y: 2, seat: `stool${i + 1}`, facing: N, color: "#bd5948" })),
       // Booths: bench, table, bench; along both side walls.
       ...[4, 6, 8].flatMap((y, i): Decor[] => [
-        { kind: "booth_bench", x: 0, y, seat: `booth${i + 1}a`, facing: E, color: "#d4473f" },
-        { kind: "table", x: 1, y, color: "#f4f1ea" },
-        { kind: "booth_bench", x: 2, y, seat: `booth${i + 1}b`, facing: W, color: "#d4473f" },
-        { kind: "booth_bench", x: 11, y, seat: `booth${i + 4}a`, facing: E, color: "#d4473f" },
-        { kind: "table", x: 12, y, color: "#f4f1ea" },
-        { kind: "booth_bench", x: 13, y, seat: `booth${i + 4}b`, facing: W, color: "#d4473f" },
+        { kind: "booth_bench", x: 0, y, seat: `booth${i + 1}a`, facing: E, color: "#bd5948" },
+        { kind: "table", x: 1, y, color: "#eee8da" },
+        { kind: "booth_bench", x: 2, y, seat: `booth${i + 1}b`, facing: W, color: "#bd5948" },
+        { kind: "booth_bench", x: 11, y, seat: `booth${i + 4}a`, facing: E, color: "#bd5948" },
+        { kind: "table", x: 12, y, color: "#eee8da" },
+        { kind: "booth_bench", x: 13, y, seat: `booth${i + 4}b`, facing: W, color: "#bd5948" },
       ]),
       { kind: "jukebox", x: 13, y: 0, color: "#ef9f27" },
       { kind: "plant", x: 11, y: 0 }, // the chalkboard has the corner

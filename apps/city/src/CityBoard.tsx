@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { clampTarget } from "./camera";
 import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, SQUARE, blockRect, zoneOf } from "./citygen";
 import CityScape from "./CityScape";
+import CityAtmosphere from "./CityAtmosphere";
 import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
@@ -23,17 +24,17 @@ type Picked = { name: string; icon: string; info: string; soon?: boolean };
 const PLACES: Place[] = (Object.keys(LANDMARKS) as PlaceKey[]).map((key) => ({ key, name: PLACE_INFO[key]!.name, icon: PLACE_INFO[key]!.icon, info: PLACE_INFO[key]!.info }));
 
 // Pins float over each landmark at a fixed size on screen.
-function Pins({ onTap }: { onTap: (p: Place) => void }) {
+function Pins({ onTap, counts }: { counts: Record<string, number | null>; onTap: (p: Place) => void }) {
   return (
     <>
       {PLACES.map((p) => {
         const l = LANDMARKS[p.key];
         return (
           <Html key={p.key} position={[l.x, l.pinY, l.z]} center zIndexRange={[1, 0]}>
-            {/* Live headcounts arrive with the rooms' presence endpoint; until then, no made-up numbers. */}
+            {/* Missing or failed counts remain unavailable, never shown as zero. */}
             <button className="pin" onClick={() => onTap(p)} aria-label={p.name}>
               <span className="ico">{p.icon}</span>
-              <span className="name">{p.name}</span>
+              <span className="name">{p.name}{counts[p.key] != null && <small>{counts[p.key]} here</small>}</span>
             </button>
           </Html>
         );
@@ -110,12 +111,12 @@ function ZoomLevel() {
 // The bell rings at 00:00 UTC; used until the Slate (which carries it) loads.
 const nextBell = (now: number) => new Date(Math.floor(now / 86_400_000 + 1) * 86_400_000).toISOString();
 
-// The Tower's LED crown glows with the market: green when the city's favourites are up, red when down.
+// A gentle architectural glow; market direction comes only from real odds data.
 function TowerTop({ night }: { night: boolean }) {
   const ref = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
     const m = ref.current?.material as THREE.MeshBasicMaterial | undefined;
-    if (m) m.color.setHSL(Math.sin(clock.elapsedTime * 0.4) > 0 ? 0.42 : 0.0, 0.75, night ? 0.55 : 0.47);
+    if (m) m.color.setHSL(0.42, 0.45, (night ? 0.55 : 0.47) + Math.sin(clock.elapsedTime * 0.4) * 0.03);
   });
   return (
     <mesh ref={ref} position={[LANDMARKS.tower.x, 17.05, LANDMARKS.tower.z]}>
@@ -126,18 +127,37 @@ function TowerTop({ night }: { night: boolean }) {
 }
 
 // The isometric camera: fixed angle (no orbiting, like SimCity); fits about
-// 22 tiles across a phone held upright, 40 across a laptop.
+// 30 tiles across a phone held upright, 65 across a laptop.
 const ISO = new THREE.Vector3(1, 0.85, 1).normalize();
-function IsoRig() {
+type MapCommand = { action: "in" | "out" | "reset" | "diner"; n: number };
+function IsoRig({ command }: { command: MapCommand }) {
   const camera = useThree((s) => s.camera) as THREE.OrthographicCamera;
   const size = useThree((s) => s.size);
+  const controls = useThree((s) => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | null;
   useEffect(() => {
-    const across = size.width < size.height ? 22 : 40;
+    const across = command.action === "diner" ? (size.width < size.height ? 16 : 24) : (size.width < size.height ? 30 : 65);
     camera.zoom = size.width / across;
-    camera.position.copy(ISO).multiplyScalar(90);
-    camera.lookAt(0, 0, 0);
+    const target = controls?.target ?? new THREE.Vector3();
+    camera.position.copy(ISO).multiplyScalar(90).add(target);
+    camera.lookAt(target);
     camera.updateProjectionMatrix();
   }, [camera, size.width, size.height]);
+  useEffect(() => {
+    if (!command.n) return;
+    if (command.action === "diner") {
+      const target = new THREE.Vector3(LANDMARKS.diner.x + 2, 0, LANDMARKS.diner.z + 2);
+      controls?.target.copy(target);
+      camera.position.copy(ISO).multiplyScalar(90).add(target);
+      camera.zoom = Math.min(90, size.width / (size.width < size.height ? 16 : 24));
+      camera.lookAt(target);
+    } else if (command.action === "reset") {
+      controls?.target.set(0, 0, 0);
+      camera.position.copy(ISO).multiplyScalar(90);
+      camera.zoom = size.width / (size.width < size.height ? 30 : 65);
+    } else camera.zoom = Math.max(8, Math.min(90, camera.zoom * (command.action === "in" ? 1.3 : 1 / 1.3)));
+    camera.updateProjectionMatrix();
+    controls?.update();
+  }, [command]);
   return null;
 }
 
@@ -177,7 +197,20 @@ function Strollers() {
   );
 }
 
-export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe }: { api: Api; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
+export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe, showcase = false }: { showcase?: boolean; api: Pick<Api, "cityHall" | "slate"> & Partial<Pick<Api, "headcounts">>; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
+  const [counts, setCounts] = useState<Record<string, number | null>>({});
+  useEffect(() => {
+    if (!api.headcounts) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try { const r = await api.headcounts!(); if (live) setCounts(r.counts); }
+      catch { if (live) setCounts({}); }
+      if (live) timer = setTimeout(poll, 15000);
+    };
+    void poll();
+    return () => { live = false; clearTimeout(timer); };
+  }, [api]);
   const hall = useLoad(() => api.cityHall(), [api]);
   const slate = useLoad(() => api.slate(), [api]);
   const now = useNow(1000);
@@ -187,6 +220,10 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   const hour = new Date().getHours();
   const [night, setNight] = useState(hour >= 19 || hour < 6);
   const [picked, setPicked] = useState<Picked | null>(null);
+  const [guide, setGuide] = useState(false);
+  const [command, setCommand] = useState<MapCommand>({ action: "reset", n: 0 });
+  const mapAction = (action: MapCommand["action"]) => setCommand((c) => ({ action, n: c.n + 1 }));
+  useEffect(() => { if (showcase) mapAction("diner"); else mapAction("reset"); }, [showcase]);
   const perf = useRef<HTMLDivElement>(null);
   useEffect(() => {
     initTelegram();
@@ -194,7 +231,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   return (
     <>
       {/* Mock values until the API is wired in phase 1. */}
-      <div className="banner" role="button" onClick={onOpenHall}>
+      <button className="banner" onClick={onOpenHall} disabled={!onOpenHall} aria-label="Open City Hall">
         {h?.mayor ? (
           <>
             Mayor <b>@{h.mayor.handle}</b>
@@ -214,7 +251,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
         ) : (
           "No Law this week"
         )}
-      </div>
+      </button>
       <div className="hud">
         {me?.resident ? (
           <button className="pill" onClick={onOpenMe}>
@@ -238,6 +275,20 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
           </div>
         )}
       </div>
+      <nav className="map-tools" aria-label="Map controls">
+        <button className="map-guide" aria-expanded={guide} onClick={() => setGuide((v) => !v)}>Explore places {guide ? "−" : "+"}</button>
+        <button aria-label="Zoom out" onClick={() => mapAction("out")}>−</button>
+        <button aria-label="Zoom in" onClick={() => mapAction("in")}>+</button>
+        <button aria-label="Recenter city" onClick={() => mapAction("reset")}>⌖</button>
+      </nav>
+      {guide && <section className="map-directory" aria-label="Places in the city">
+        <h2>Where to?</h2>
+        {PLACES.map((p) => <button key={p.key} onClick={() => {
+          setGuide(false);
+          if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
+          else setPicked(p);
+        }}>{p.icon}<span><b>{p.name}</b><small>{p.info}</small></span><span aria-hidden="true">↗</span></button>)}
+      </section>}
       {picked && (
         <div className="sheet" onClick={() => setPicked(null)}>
           <strong>
@@ -248,18 +299,20 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
         </div>
       )}
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
-        <Canvas shadows orthographic dpr={[1, 2]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
-          <hemisphereLight args={[night ? "#6b7cff" : "#ffffff", night ? "#0b1020" : "#b9c79d", night ? 0.9 : 1.15]} />
+        <Canvas shadows orthographic dpr={[1, 1.5]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
+          <CityAtmosphere night={night} />
+          <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
           {/* The sun, casting real shadows over the whole city. */}
           <directionalLight
-            position={[22, 34, 12]}
-            intensity={night ? 0.45 : 1.7}
+            position={[-28, 42, 24]}
+            color={night ? "#b1c7f7" : "#fff1d9"}
+            intensity={night ? 0.7 : 2.5}
             castShadow
             shadow-mapSize={[2048, 2048]}
-            shadow-camera-left={-44}
-            shadow-camera-right={44}
-            shadow-camera-top={44}
-            shadow-camera-bottom={-44}
+            shadow-camera-left={-62}
+            shadow-camera-right={62}
+            shadow-camera-top={62}
+            shadow-camera-bottom={-62}
             shadow-camera-far={120}
             shadow-bias={-0.0004}
             shadow-normalBias={0.03}
@@ -267,7 +320,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
           <CityScape night={night} />
           <TowerTop night={night} />
           <Strollers />
-          <Pins
+          <Pins counts={counts}
             onTap={(p) => {
               haptic("light");
               // Residents go there; guests can only look.
@@ -283,7 +336,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
           />
           <DistrictLabels />
           <ZoomLevel />
-          <IsoRig />
+          <IsoRig command={command} />
           <MapControls
             makeDefault
             enableRotate={false}

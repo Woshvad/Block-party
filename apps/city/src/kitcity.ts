@@ -1,3 +1,4 @@
+import { isDinerShop } from "./dinerArchitecture";
 import { CITY_SIZE, GRID, type Lot, SQUARE, blockRect, fillCity, roads, zoneOf } from "./citygen";
 
 // The lagoon row: roads crossing it become bridges.
@@ -70,6 +71,7 @@ export function lightPlacements(): Placement[] {
 export function lotPlacements(lots: Lot[] = fillCity()): Placement[] {
   const out: Placement[] = [];
   for (const l of lots) {
+    if (isDinerShop(l)) continue; // Custom architecture occupies exactly these existing lots.
     const k = hash(l.x, l.z);
     if (l.kind === "house") out.push({ url: KIT.suburban(pick(HOUSES, k)), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: 1.75 });
     else if (l.kind === "shop") out.push({ url: KIT.commercial(pick(SHOPS, k)), x: l.x, z: l.z, y: 0.16, rotY: l.yaw, scale: [2.0, 2.0 * (1 + (k % 3) * 0.25), 2.0] });
