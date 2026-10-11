@@ -19,6 +19,7 @@ import {
   setCrewBotMutes,
   setDeputy,
   setPrefs,
+  touchActivity,
   usualHour,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
@@ -248,6 +249,65 @@ describe("sending", () => {
     expect(to(u)).toHaveLength(3);
     for (const x of to(u)) expect(x).not.toMatch(/\{|Streak check/);
   });
+
+  it("the sender gets the notification's id (for the Open button)", async () => {
+    const u = await makeResident(db);
+    const t = fresh();
+    const ids: Array<string | undefined> = [];
+    const sender: NotificationSender = {
+      send: async (_userId, _text, notificationId) => {
+        ids.push(notificationId);
+        return "sent";
+      },
+    };
+    const n = await notify(db, u, "daily", {}, { now: new Date(t) });
+    await run(sender, new Date(t));
+    expect(ids).toEqual([n!.id]);
+  });
+
+  it("the push goes out after its row is claimed and committed, with no lock held over the network", async () => {
+    const u = await makeResident(db);
+    const t = fresh();
+    const seen: Array<{ status: string; reason: string | null; lockFree: boolean }> = [];
+    const sender: NotificationSender = {
+      send: async (userId) => {
+        // From another connection, while the message is on its way to Telegram.
+        const [row] = await client`SELECT status, reason FROM notifications WHERE user_id = ${userId}`;
+        const free = await client.begin((tx) => tx`SELECT 1 FROM users WHERE id = ${userId} FOR NO KEY UPDATE SKIP LOCKED`);
+        seen.push({ status: row!.status, reason: row!.reason, lockFree: free.length === 1 });
+        return "sent";
+      },
+    };
+    await notify(db, u, "daily", {}, { now: new Date(t) });
+    expect(await run(sender, new Date(t))).toMatchObject({ sent: 1 });
+    expect(seen).toEqual([{ status: "sent", reason: "sending", lockFree: true }]);
+    expect((await rows(u))[0]).toMatchObject({ status: "sent", reason: null });
+  });
+
+  it("a crash after Telegram took the message never sends it twice", async () => {
+    const u = await makeResident(db);
+    const t = fresh();
+    let delivered = 0;
+    const crashing: NotificationSender = {
+      send: async () => {
+        delivered++;
+        throw new Error("worker evicted");
+      },
+    };
+    const counting: NotificationSender = {
+      send: async () => {
+        delivered++;
+        return "sent";
+      },
+    };
+    await notify(db, u, "daily", {}, { now: new Date(t) });
+    await expect(run(crashing, new Date(t))).rejects.toThrow("worker evicted");
+    await run(counting, new Date(t + 60_000));
+    await run(counting, new Date(t + 10 * 60_000));
+    expect(delivered).toBe(1);
+    // Never confirmed: still counted as sent (for the caps), and marked so.
+    expect((await rows(u))[0]).toMatchObject({ status: "sent", reason: "sending" });
+  });
 });
 
 describe("ignored pushes", () => {
@@ -287,6 +347,44 @@ describe("ignored pushes", () => {
     await markOpened(db, u, last!.id, { now: new Date(t + 6 * D + H) });
     await ignore(u, t + 7 * D, 3, sender);
     expect(to(u)).toHaveLength(10);
+  });
+
+  it("playing within a few hours of a push counts as opening it, whether or not they tapped it", async () => {
+    const u = await makeResident(db);
+    const t = fresh();
+    const { sender, to } = recorder();
+    for (let d = 0; d < 10; d++) {
+      const at = t + d * D;
+      if (d % 2) {
+        // Already playing when it arrived, and still about half an hour later.
+        await touchActivity(db, u, { now: new Date(at - 20 * 60_000) });
+        await notify(db, u, "daily", {}, { now: new Date(at) });
+        await run(sender, new Date(at));
+        await touchActivity(db, u, { now: new Date(at + 30 * 60_000) });
+      } else {
+        // Came back two hours later.
+        await notify(db, u, "daily", {}, { now: new Date(at) });
+        await run(sender, new Date(at));
+        await touchActivity(db, u, { now: new Date(at + 2 * H) });
+      }
+    }
+    expect(to(u)).toHaveLength(10);
+    expect(to(u).some((x) => x.includes(FAREWELL))).toBe(false);
+  });
+
+  it("playing only before a push, or long after it, doesn't count as opening it", async () => {
+    const u = await makeResident(db);
+    const t = fresh();
+    const { sender, to } = recorder();
+    for (let d = 0; d < 8; d++) {
+      const at = t + d * D;
+      await touchActivity(db, u, { now: new Date(at - H) }); // left an hour before it arrived
+      await notify(db, u, "daily", {}, { now: new Date(at) });
+      await run(sender, new Date(at));
+      await touchActivity(db, u, { now: new Date(at + (NOTIFY.backWithinHours + 1) * H) });
+    }
+    expect(to(u)).toHaveLength(7); // the 8th waits for the weekly one
+    expect((await rows(u)).filter((r) => r.reason === "weekly")).toHaveLength(1);
   });
 
   it("pushes less than a day old don't count as ignored yet", async () => {
