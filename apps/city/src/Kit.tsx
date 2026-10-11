@@ -6,6 +6,7 @@ import { bake } from "./kitGeometry";
 export { bake } from "./kitGeometry";
 import type { Placement } from "./kitcity";
 import { failedAsset, noteModelAsked, noteModelLoaded, takeFailedModels } from "./sceneHealth";
+import { type LoadedGltf, glowFor, shareModelImages } from "./kitTextures";
 
 // Kenney's City Kit models (CC0, see public/assets/kenney/*/License.txt),
 // drawn the cheap way: each model becomes ONE instanced mesh holding every
@@ -14,13 +15,15 @@ import { failedAsset, noteModelAsked, noteModelLoaded, takeFailedModels } from "
 
 // Night windows: the packs colour everything from one palette image, glass in
 // pale blues. A mask of just those pixels becomes the glow map, so at night
-// the windows light up warm and the walls stay dark. One per palette image.
-const glowCache = new Map<THREE.Texture, THREE.Texture>();
+// the windows light up warm and the walls stay dark. One per palette image
+// (kitTextures.ts shares the image between a pack's models).
 function windowGlow(map: THREE.Texture | null): THREE.Texture | null {
   const img = map?.image as (CanvasImageSource & { width: number; height: number }) | undefined;
   if (!map || !img || !img.width) return null;
-  const hit = glowCache.get(map);
-  if (hit) return hit;
+  return glowFor(map, buildGlow);
+}
+function buildGlow(map: THREE.Texture): THREE.Texture {
+  const img = map.image as CanvasImageSource & { width: number; height: number };
   const c = document.createElement("canvas");
   c.width = img.width;
   c.height = img.height;
@@ -42,15 +45,16 @@ function windowGlow(map: THREE.Texture | null): THREE.Texture | null {
   t.flipY = map.flipY;
   t.magFilter = map.magFilter;
   t.minFilter = map.minFilter;
-  glowCache.set(map, t);
   return t;
 }
 
-// A kit model, noted so a failed download can be retried (see sceneHealth.ts).
+// A kit model, noted so a failed download can be retried (see sceneHealth.ts),
+// with its palette shared with the rest of its pack (see kitTextures.ts).
 function useModel(url: string) {
   noteModelAsked(url);
   const gltf = useGLTF(url);
   noteModelLoaded(url);
+  shareModelImages(url, gltf as unknown as LoadedGltf);
   return gltf;
 }
 
