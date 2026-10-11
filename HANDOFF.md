@@ -9,9 +9,7 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
   - **Backend room-access work** (another developer): `apps/api/src/app.ts`, `apps/api/test/api.test.ts`, `apps/rooms/src/worker.ts`, `apps/rooms/test/rooms.test.ts`, `packages/core/src/{room,ticket}.ts`, `packages/core/test/room.test.ts`, `packages/db/src/{accounts,chat,real-money}.ts` and their tests. It adds `roomAccess` and `POST /internal/rooms/access`, and the rooms Worker now refreshes safety permissions before joins and actions.
   - **Frontend polish pass** (the new frontend developer): the many modified and new files under `apps/city`, including the `*-preview` routes, `CityAtmosphere`, `CityWater`, `CityStreetGlow`, `RoomLighting`, `DinerQuarter` and `TodayView`.
   - Review and commit each set on its own. Don't sweep them into one commit.
-- **⚠️ `apps/api/src/app.ts` fails the typecheck. Fix this first.** On 10 October it was accidentally emptied while uncommitted. It was rebuilt from the dev server's compiled cache, and its compiled output matches the lost version byte for byte. Two things could not be recovered:
-  1. Three non-null assertions (they don't survive compiling). Restore them: `access.hidden`, `access.blocked` and `access.chat` in the room-ticket route (around lines 759–762) should be `access!.hidden`, `access!.blocked` and `access!.chat`. Then run `pnpm --filter @bp/api typecheck` and `pnpm --filter @bp/api test`.
-  2. Any comments the room-access developer wrote inside those three changes. They should re-read that route and the new `/internal/rooms/access` route.
+- **`apps/api/src/app.ts` was rebuilt once.** On 10 October it was accidentally emptied while uncommitted, then rebuilt from the dev server's compiled cache. Its compiled output matches the lost version byte for byte, and it typechecks again. Any comments the room-access developer wrote in the room-ticket route and `/internal/rooms/access` were lost, so they should re-read both.
 - **Local settings:** the shared `.env` (symlinked as `apps/api/.env`) has `ODDS_SOURCE=polymarket`, so the local API polls live Polymarket. Use `mock` to work offline.
 - **Running it:** `.claude/launch.json` starts the city on :3100, the API on :8787 (set `LOCAL_CRON=1` for the minute cron) and rooms on :8788. To sign in, a dev button on the guest screen says "claim as a Telegram tester". `?perf` on the city shows draw calls, triangles and memory.
 
@@ -33,15 +31,19 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 
 ### 1. Build next (frontend and API)
 
-- [ ] **The trophy wall and TV** (plan: "Build mode"; both are MVP).
-  - The **Receipt Binder query is done and tested**. Still needed: the `GET /v1/binder` route in `app.ts`, next to `/v1/tower/right-list`, after the typecheck above is fixed; `binder()` in `apps/city/src/api.ts`; and the trophy wall drawn in `HomeRoom.tsx` as a 3×3 grid of receipt cards with stamp, question, side and Aura. Every home piece is still a plain box today.
-  - **The TV** plays the bell reel live and the Morning After replay. Use the existing `GET /v1/reel` (`api.reel()`). "Whoever's on your couch watches together" means the TV screen should follow room state.
-  - The same two pieces go in the **Crew House** (Crew Row), where the TV is the crew's bell-night screen.
-- [ ] **Visitors see your furniture.** The API only shares a home layout with its owner or crew. Visiting an open door shows an empty room.
-- [ ] **Live headcounts on pins.** The plan wants "12 here · 3 NPC · 2 away". This needs a presence endpoint from the rooms Worker. Pins show no numbers until then, and none should be invented.
-- [ ] **Lagoon billboards** show random-walk charts. Either feed them real Polymarket prices (with the credit line) or keep them clearly decorative.
-- [ ] **Re-measure performance** after the new atmosphere, water and street-glow layers. The plan's phone budget is 100–150 draw calls. The last measurement, before those layers, was 114 draw calls, 390k triangles and 97 MB at 60 fps on a laptop. It has never been measured on a mid-range phone or inside Telegram.
-- [ ] **Not yet checked:** map labels at full zoom-in and at night, and the Watch Party and Diner screens in the browser. Tests cover the Tower and City Hall screens, and those were also checked by eye.
+Done since this file was first written. All are in the working tree and not yet committed:
+
+- [x] **The trophy wall and TV.** `GET /v1/homes/:id/binder` (the Receipt Binder) and `api.binder()`, drawn by `HomeDisplay.tsx`, with a `/home-display-preview` route.
+- [x] **Visitors see your furniture.** `GET /v1/homes/:id` returns placed furniture and finishes, never storage, when the door is open and nobody has blocked the other.
+- [x] **Live headcounts on pins.** `api.headcounts()` feeds the city board.
+- [x] **Lagoon billboards** are labelled "CITY ART · NOT LIVE DATA".
+- [x] **Performance re-measured** with the new visual layers (see [PERFORMANCE_BASELINE.md](PERFORMANCE_BASELINE.md)). Desktop: 146 draw calls, 414k triangles. Phone-sized window: 123 draw calls. Both are inside the plan's 100–150 budget.
+
+Still open:
+
+- [ ] **Commit the work above.** It is still uncommitted in the working tree.
+- [ ] **Performance on a real mid-range phone inside Telegram.** This hasn't been measured; PERFORMANCE_BASELINE.md says how to do it. Desktop is already near the top of the budget, so check before adding more geometry.
+- [ ] **Not yet checked:** map labels at full zoom-in and at night, and the Watch Party and Diner screens in the browser.
 
 ### 2. From the plan, not started
 
