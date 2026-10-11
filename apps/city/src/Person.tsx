@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Api } from "./api";
 import { label } from "./palette";
+import { ifConfirmed } from "./telegram";
 import { EmptyState, Loading, useAction } from "./ui";
 import { useLoad } from "./useLoad";
 import { handleOf, useWho, who } from "./who";
@@ -90,7 +91,7 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
             </button>
           )}
           {fren && !fren.crewmate && (
-            <button className="btn light" onClick={() => confirm("Unfren?") && act.run(() => api.unfren(userId), "Unfrenned").then(() => rel.reload())}>
+            <button className="btn light" onClick={() => ifConfirmed("Unfren?", () => act.run(() => api.unfren(userId), "Unfrenned").then(() => rel.reload()))}>
               Unfren
             </button>
           )}
@@ -123,7 +124,7 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           <button className="btn light" onClick={() => act.run(() => api.unmute(userId), "Unmuted")}>
             Unmute
           </button>
-          <button className="btn danger" onClick={() => confirm("Block them? Neither of you will see the other.") && act.run(() => api.block(userId), "Blocked")}>
+          <button className="btn danger" onClick={() => ifConfirmed("Block them? Neither of you will see the other.", () => act.run(() => api.block(userId), "Blocked"))}>
             🚫 Block
           </button>
           <button className="btn light" onClick={() => act.run(() => api.unblock(userId), "Unblocked")}>

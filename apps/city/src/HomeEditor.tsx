@@ -10,7 +10,7 @@ import SceneBoundary from "./SceneBoundary";
 import { HomeRoom } from "./HomeRoom";
 import { FLOOR_COLORS, WALL_COLORS, checkPlacement, firstFreeSpot, homeSize, nextRot, pieceOf } from "./furniture";
 import { itemLabel, label } from "./palette";
-import { haptic } from "./telegram";
+import { haptic, useClosingConfirmation } from "./telegram";
 import { Loading } from "./ui";
 import { useLoad } from "./useLoad";
 import { useToast } from "./useToast";
@@ -36,6 +36,8 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
 
   const h = home.data;
   const size = h ? homeSize(h.tier) : { w: 8, d: 8 };
+  // A piece mid-placement isn't saved: closing the Mini App asks first.
+  useClosingConfirmation(mode.kind === "placing");
 
   // One change at a time; the home reloads after each so the screen is the truth.
   const run = async (fn: () => Promise<unknown>, ok?: string) => {

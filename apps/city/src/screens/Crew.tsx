@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ActionKeys } from "../actionKeys";
 import { ApiError, type Api, type Me, type MyCrew } from "../api";
 import { paintAt } from "../banner";
+import { ifConfirmed, useClosingConfirmation } from "../telegram";
 import { itemLabel, label, plural } from "../palette";
 import { OUTFIT } from "../palette";
 import Thread from "../Thread";
@@ -111,6 +112,8 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
   const [paint, setPaint] = useState(1);
   const [botMuted, setBotMuted] = useState<string[]>([]);
   useWho(api, (requests.data ?? []).map((r) => r.userId));
+  // A banner painted but not saved: closing the Mini App asks first.
+  useClosingConfirmation(banner !== null);
 
   return (
     <Page className="community-page crew-page" title={c.name} onBack={onBack} right={<Banner rows={c.banner} small />}>
@@ -194,8 +197,8 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                 {m.role === "lead" && r.userId !== me.userId && (
                   <span className="btnrow">
                     <button onClick={() => act.run(() => api.setDeputy(r.userId, r.role !== "deputy"), r.role === "deputy" ? "No longer a deputy" : "Made a deputy").then(() => reload())}>{r.role === "deputy" ? "Undeputy" : "Deputy"}</button>
-                    <button onClick={() => confirm(`Make @${r.handle} the lead?`) && act.run(() => api.transferLead(r.userId), "Lead handed over").then(() => reload())}>Lead</button>
-                    <button onClick={() => confirm(`Remove @${r.handle}?`) && act.run(() => api.removeMember(r.userId), "Removed").then(() => reload())}>Remove</button>
+                    <button onClick={() => ifConfirmed(`Make @${r.handle} the lead?`, () => act.run(() => api.transferLead(r.userId), "Lead handed over").then(() => reload()))}>Lead</button>
+                    <button onClick={() => ifConfirmed(`Remove @${r.handle}?`, () => act.run(() => api.removeMember(r.userId), "Removed").then(() => reload()))}>Remove</button>
                   </span>
                 )}
               </div>
@@ -302,15 +305,15 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
           )}
 
           <div className="btnrow">
-            <button className="btn light" onClick={() => confirm("Leave the crew?") && act.run(() => api.leaveCrew(), "You've left").then((x) => {
+            <button className="btn light" onClick={() => ifConfirmed("Leave the crew?", () => act.run(() => api.leaveCrew(), "You've left").then((x) => {
                 if (x !== undefined) void reload();
-              })}>
+              }))}>
               Leave crew
             </button>
             {m.role === "lead" && (
-              <button className="btn danger" onClick={() => confirm("Dissolve the crew for everyone?") && act.run(() => api.dissolve(), "Crew dissolved").then((x) => {
+              <button className="btn danger" onClick={() => ifConfirmed("Dissolve the crew for everyone?", () => act.run(() => api.dissolve(), "Crew dissolved").then((x) => {
                   if (x !== undefined) void reload();
-                })}>
+                }))}>
                 Dissolve
               </button>
             )}

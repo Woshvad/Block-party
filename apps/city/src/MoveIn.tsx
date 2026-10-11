@@ -5,7 +5,7 @@ import { ApiError, type Api, type Look, type Resident, type ResidentDraft } from
 import { GOALS, KIT_STYLES, LOOK_PALETTES, LOOK_PARTS, TRAITS, type Field, fieldErrors, latestOnly, stepLook, toggleTrait } from "./draft";
 import { HAIR, OUTFIT, SKIN, itemLabel, label } from "./palette";
 import { Loading } from "./ui";
-import { haptic } from "./telegram";
+import { haptic, useClosingConfirmation } from "./telegram";
 
 const Avatar = dynamic(() => import("./Avatar"), { ssr: false });
 
@@ -43,6 +43,8 @@ export default function MoveIn({ api, onDone }: { api: Pick<Api, "pickForMe" | "
   useEffect(() => { heading.current?.focus(); }, [step]);
   const checks = useRef(latestOnly());
   const sending = useRef(false); // state updates too late to stop a double tap; a ref doesn't
+  // Choices aren't saved until the move: closing the Mini App midway asks first.
+  useClosingConfirmation(!moved);
 
   const pick = async () => {
     setServerErr(null);

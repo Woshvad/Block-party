@@ -5,6 +5,7 @@ import { ActionKeys } from "../actionKeys";
 import { type Api, type Me } from "../api";
 import { toggleTrait } from "../draft";
 import { label, plural } from "../palette";
+import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 
@@ -276,7 +277,7 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
           <button className="btn light" onClick={() => act.run(() => api.logout()).then(() => (api.signOut(), location.reload()))}>
             Sign out
           </button>
-          <button className="btn danger" onClick={() => confirm("Sign out on every device?") && act.run(() => api.logoutAll()).then(() => (api.signOut(), location.reload()))}>
+          <button className="btn danger" onClick={() => ifConfirmed("Sign out on every device?", () => act.run(() => api.logoutAll()).then(() => (api.signOut(), location.reload())))}>
             Sign out everywhere
           </button>
         </div>
