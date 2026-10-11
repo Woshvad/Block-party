@@ -50,7 +50,21 @@ type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export type Api = ReturnType<typeof createApi>;
 
-export function createApi(opts: { base: string; store: TokenStore; fetch?: typeof fetch; client?: string }) {
+// How long a request may take before the city gives up on it. Without a limit
+// a stalled mobile connection holds the request (and every busy guard behind
+// it) for as long as the browser cares to wait, often minutes.
+export const REQUEST_TIMEOUT_MS = 15_000;
+
+// An abort signal that fires after `ms`. Older webviews lack AbortSignal.timeout.
+function deadline(ms: number): AbortSignal | undefined {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  if (typeof AbortController === "undefined") return undefined;
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
+export function createApi(opts: { base: string; store: TokenStore; fetch?: typeof fetch; client?: string; timeoutMs?: number }) {
   const doFetch = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const base = opts.base.replace(/\/+$/, "");
 
@@ -62,10 +76,14 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     if (extra.idempotencyKey) headers["idempotency-key"] = extra.idempotencyKey;
     // Inside Telegram the API must know it: real trades never happen in the Mini App.
     if (opts.client) headers["x-client"] = opts.client;
+    const signal = deadline(opts.timeoutMs ?? REQUEST_TIMEOUT_MS);
     let res: Response;
     try {
-      res = await doFetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      res = await doFetch(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal });
     } catch {
+      // Both are status 0: the request may still have reached the city, so a
+      // caller with an idempotency key keeps it for the retry.
+      if (signal?.aborted) throw new ApiError(0, "TIMEOUT", "the city is taking too long to answer");
       throw new ApiError(0, "OFFLINE", "can't reach the city right now");
     }
     let data: unknown = null;
@@ -81,10 +99,13 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
       const e = (data as { error?: { code?: unknown; message?: unknown; field?: unknown } } | null)?.error;
       const code = typeof e?.code === "string" ? e.code : `HTTP_${res.status}`;
       const message = typeof e?.message === "string" ? e.message : "something went wrong";
-      // A dead session is forgotten so the next boot signs in fresh.
-      if (res.status === 401) opts.store.set(null);
+      // A dead session is forgotten so the next boot signs in fresh. Only the
+      // one this request carried: a sign-in since may have stored a newer one.
+      if (res.status === 401 && token !== null && opts.store.get() === token) opts.store.set(null);
       throw new ApiError(res.status, code, message, typeof e?.field === "string" ? e.field : undefined);
     }
+    // 204: done, and nothing to say.
+    if (res.status === 204) return null as T;
     if (data === null) throw new ApiError(res.status, "BAD_REPLY", "the city sent something unreadable");
     return data as T;
   }
@@ -138,6 +159,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     pon: () => request<Pon>("GET", "/v1/pon"),
     prefs: () => request<Prefs>("GET", "/v1/notifications/prefs"),
     setPrefs: (p: Partial<Pick<Prefs, "timeZone" | "quietStart" | "quietEnd" | "alerts" | "bell2h" | "pushOff">>) => request<Prefs>("PATCH", "/v1/notifications/prefs", p),
+    // The player opened the app from this push (its link carries the id).
+    notificationOpened: (id: string) => request<null>("POST", `/v1/notifications/${encodeURIComponent(id)}/opened`),
     restrictions: () => request<Restriction[]>("GET", "/v1/restrictions"),
     appeal: (id: string, text: string) => request<unknown>("POST", `/v1/restrictions/${encodeURIComponent(id)}/appeal`, { text }),
     logout: () => request<{ ok: boolean }>("POST", "/v1/auth/logout"),
@@ -160,7 +183,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     binder: (owner: string) => request<ReceiptBinder>("GET", `/v1/homes/${encodeURIComponent(owner)}/binder`),
     reel: (day?: string) => request<Record<string, unknown>>("GET", `/v1/reel${day ? `?day=${encodeURIComponent(day)}` : ""}`),
     grid: (day: string) => request<Record<string, unknown>>("GET", `/v1/slate/${encodeURIComponent(day)}/grid`),
-    dailyClose: (day: string) => request<{ bellDay: string; pages: Record<string, { key: string; values: Record<string, string | number> }[]> }>("GET", `/v1/daily-close/${encodeURIComponent(day)}`),
+    // 404: no paper that day. Anything else is a real failure, shown with a retry.
+    dailyClose: (day: string) => request<{ bellDay: string; pages: Record<string, { key: string; values: Record<string, string | number> }[]> }>("GET", `/v1/daily-close/${encodeURIComponent(day)}`).catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))),
     rightList: () => request<{ season: number; rows: Record<string, unknown>[]; me: Record<string, unknown> | null }>("GET", "/v1/tower/right-list"),
     bellStamp: () => request<Record<string, unknown>>("POST", "/v1/bell-stamp"),
     awayRecap: () => request<Record<string, unknown>>("GET", "/v1/away/recap"),

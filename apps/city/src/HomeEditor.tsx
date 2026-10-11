@@ -9,6 +9,7 @@ import { HomeRoom } from "./HomeRoom";
 import { FLOOR_COLORS, WALL_COLORS, checkPlacement, firstFreeSpot, homeSize, nextRot, pieceOf } from "./furniture";
 import { itemLabel, label } from "./palette";
 import { haptic } from "./telegram";
+import { Loading } from "./ui";
 import { useLoad } from "./useLoad";
 import { useToast } from "./useToast";
 
@@ -54,7 +55,7 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
     }
   };
 
-  if (!h) return <div className="screen center muted">{home.error ?? "Unlocking your door…"}</div>;
+  if (!h) return <div className="screen center muted">{home.error ? <Loading error={home.error} retry={home.reload} /> : "Unlocking your door…"}</div>;
 
   const selected = mode.kind === "selected" ? h.placed.find((p) => p.itemId === mode.itemId) : null;
   const ghostErr = mode.kind === "placing" ? checkPlacement(h.tier, mode.pieceId, mode.placement, h.placed, mode.itemId) : null;
@@ -202,7 +203,7 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
               <>
                 <p className="q">Shop</p>
                 <p className="muted">GM spent here burns. You have {gm.toLocaleString("en-US")} GM.</p>
-                {!catalogue.data && <p className="muted">Loading…</p>}
+                {!catalogue.data && <Loading error={catalogue.error} retry={catalogue.reload} />}
                 {catalogue.data &&
                   BANDS.map((band) => {
                     const items = catalogue.data!.pieces.filter((p) => p.band === band);

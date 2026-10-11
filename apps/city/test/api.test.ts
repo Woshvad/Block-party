@@ -46,6 +46,42 @@ describe("api client", () => {
     expect(store.get()).toBeNull();
   });
 
+  it("a late 401 for an old session never erases a newer one", async () => {
+    // A slow request goes out with session A; a sign-in meanwhile stores B;
+    // then the old request comes back 401. B must survive.
+    const store = memoryTokenStore("bps_a");
+    let answer!: (r: Response) => void;
+    const api = createApi({ base: "http://x", store, fetch: server(() => new Promise<Response>((r) => (answer = r))).f });
+    const slow = api.me().catch((e) => e.status);
+    await Promise.resolve();
+    store.set("bps_b");
+    answer(json(401, { error: { code: "INVALID_SESSION", message: "sign in again" } }));
+    expect(await slow).toBe(401);
+    expect(store.get()).toBe("bps_b");
+  });
+
+  it("gives up on a stalled request with a status-0 TIMEOUT", async () => {
+    const hang = ((_url: string, init: RequestInit) =>
+      new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+    const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: hang, timeoutMs: 20 });
+    expect(await api.me().catch((e) => [e.constructor.name, e.status, e.code])).toEqual(["ApiError", 0, "TIMEOUT"]);
+  });
+
+  it("takes a 204 as done, and only a 204 may be empty", async () => {
+    const s = server(() => new Response(null, { status: 204 }));
+    const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: s.f });
+    expect(await api.notificationOpened("4f0c2a8e-1d7b-4c3e-9a51-0b6f2d9e7c11")).toBeNull();
+    expect(s.seen[0]!.url).toBe("http://x/v1/notifications/4f0c2a8e-1d7b-4c3e-9a51-0b6f2d9e7c11/opened");
+    expect(s.seen[0]!.init.method).toBe("POST");
+  });
+
+  it("the Daily Close is null only when there's no paper (404), and a failure otherwise", async () => {
+    const none = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: server(() => json(404, { error: { code: "NOT_FOUND", message: "no paper for that day" } })).f });
+    expect(await none.dailyClose("2026-10-10")).toBeNull();
+    const down = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: server(() => json(500, { error: { code: "INTERNAL", message: "something went wrong" } })).f });
+    expect(await down.dailyClose("2026-10-10").catch((e) => e.status)).toBe(500);
+  });
+
   it("network failures, HTML error pages and empty replies are all ApiErrors", async () => {
     const offline = createApi({ base: "http://x", store: memoryTokenStore(), fetch: (() => Promise.reject(new TypeError("Failed to fetch"))) as unknown as typeof fetch });
     expect(await offline.me().catch((e) => e.code)).toBe("OFFLINE");
