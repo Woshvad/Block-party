@@ -2,6 +2,7 @@
 // http://localhost:8788, talking to the local API. Reads the repo's .env.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
 
 const env = Object.fromEntries(
@@ -13,11 +14,11 @@ const env = Object.fromEntries(
 );
 for (const k of ["TICKET_SECRET", "INTERNAL_SECRET"]) if (!env[k]) throw new Error(`${k} is not set in .env`);
 
-execFileSync("node", ["build.mjs"], { cwd: new URL("..", import.meta.url).pathname, stdio: "inherit" });
+execFileSync("node", ["build.mjs"], { cwd: fileURLToPath(new URL("..", import.meta.url)), stdio: "inherit" });
 const port = Number(process.env.PORT ?? 8788);
 const mf = new Miniflare({
   modules: true,
-  scriptPath: new URL("../dist/worker.js", import.meta.url).pathname,
+  scriptPath: fileURLToPath(new URL("../dist/worker.js", import.meta.url)),
   compatibilityDate: "2026-07-01",
   durableObjects: { ROOMS: "RoomDO", DIRECTORY: "DirectoryDO" },
   bindings: { TICKET_SECRET: env.TICKET_SECRET, INTERNAL_SECRET: env.INTERNAL_SECRET, API_URL: env.API_URL ?? "http://localhost:8787" },
