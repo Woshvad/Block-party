@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { FeedMarket, OddsProvider } from "@bp/core";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { type FeedMarket, type GammaEvent, type GammaMarket, type OddsProvider, auraCenti, polymarketProvider } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   TowerError,
@@ -9,6 +11,7 @@ import {
   makeCall,
   marketView,
   myTickets,
+  openMarkets,
   pollOdds,
   setPrefs,
   touchActivity,
@@ -119,6 +122,52 @@ describe("the odds feed", () => {
     await pollOdds(db, f.provider, { now: new Date(t) });
     await pollOdds(db, f.provider, { now: new Date(t) });
     expect(await client`SELECT 1 FROM market_ticks WHERE market_id = ${await idOf(a.externalId)}`).toHaveLength(1);
+  });
+
+  it("a market the feed drops leaves the Floor and takes no calls until it's back", async () => {
+    const t = fresh();
+    const f = feed();
+    const [a, b] = [f.add(t), f.add(t)];
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const [ia, ib] = [await idOf(a.externalId), await idOf(b.externalId)];
+    const floor = async (at: number) => (await openMarkets(db, { now: new Date(at), limit: 200 })).map((m) => m.id);
+    expect(await floor(t + 1000)).toEqual(expect.arrayContaining([ia, ib]));
+    // b drops out of the listing (an extreme price, or out of the top 20): its price goes stale.
+    f.ms.delete(b.externalId);
+    await pollOdds(db, f.provider, { now: new Date(t + MIN) });
+    expect(await floor(t + MIN + 1000)).toContain(ia);
+    expect(await floor(t + MIN + 1000)).not.toContain(ib);
+    const u = await makeResident(db);
+    expect(await code(makeCall(db, u, { marketId: ib, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + MIN + 1000) }))).toBe("MARKET_CLOSED");
+    expect(await myTickets(db, u, { now: new Date(t) })).toMatchObject({ tickets: 3 });
+    // Back in the listing: callable again.
+    f.ms.set(b.externalId, b);
+    await pollOdds(db, f.provider, { now: new Date(t + 2 * MIN) });
+    expect(await floor(t + 2 * MIN + 1000)).toContain(ib);
+    expect(await code(makeCall(db, u, { marketId: ib, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + 2 * MIN + 1000) }))).toBe("OK");
+  });
+
+  it("a market past its freeze is frozen whether the feed lists it or not, and leaves the Floor at once", async () => {
+    const t = fresh();
+    const f = feed();
+    const early = f.add(t, { freezesAt: new Date(t + H), settlesBy: new Date(t + 2 * H) });
+    const late = f.add(t, { freezesAt: new Date(t + 5 * H), settlesBy: new Date(t + 6 * H) });
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const [ie, il] = [await idOf(early.externalId), await idOf(late.externalId)];
+    const u = await makeResident(db);
+    const c = await makeCall(db, u, { marketId: ie, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + 1000) });
+    // Past its freeze, before any poll has noticed: already off the Floor.
+    expect((await openMarkets(db, { now: new Date(t + H + 1000), limit: 200 })).map((m) => m.id)).not.toContain(ie);
+    // The feed stops listing it before it freezes (Polymarket drops frozen markets).
+    f.ms.delete(early.externalId);
+    await pollOdds(db, f.provider, { now: new Date(t + 2 * H) });
+    expect((await client`SELECT status, in_feed FROM markets WHERE id = ${ie}`)[0]).toMatchObject({ status: "frozen", in_feed: false });
+    expect((await callRow(c.id)).status).toBe("expired");
+    expect(await myTickets(db, u, { now: new Date(t) })).toMatchObject({ tickets: 3 });
+    // So the open rows on the Floor are the live ones, however many have frozen before them.
+    const listed = (await openMarkets(db, { now: new Date(t + 2 * H + 1000), limit: 200 })).map((m) => m.id);
+    expect(listed).toContain(il);
+    expect(listed).not.toContain(ie);
   });
 });
 
@@ -552,5 +601,59 @@ describe("settling, receipts and the Right List", () => {
     expect(JSON.stringify(receipts)).not.toMatch(/wallet|usdc|amount|real/i);
     // Someone else's binder isn't mine, and holds no REKT and no Tail even with room to spare.
     expect((await receiptBinder(db, fren, { now: new Date(t + D) })).receipts.map((r) => r.question)).toEqual(["Q12?"]);
+  });
+});
+
+// The live provider on real Gamma payloads (recorded 2026-10-11, see
+// packages/core/test/fixtures), driven through pollOdds to settlement.
+describe("the live Polymarket feed, on recorded Gamma payloads", () => {
+  const fixture = <T,>(name: string): T => JSON.parse(readFileSync(join(__dirname, "..", "..", "core", "test", "fixtures", name), "utf8")) as T;
+  const listing: Record<string, GammaEvent[]> = { crypto: fixture("gamma-events-crypto.json"), sports: fixture("gamma-events-sports.json") };
+  const market = (k: string) => fixture<GammaMarket[]>(`gamma-market-${k}.json`)[0]!;
+  const [resolvedYes, resolvedNo, voided, proposed] = [market("resolved-yes"), market("resolved-no"), market("void"), market("proposed")];
+  const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+
+  it("live markets lock, then settle as Gamma reports them: YES scores, a 50/50 voids, a proposed result waits until it resolves", async () => {
+    const at = Date.parse("2026-10-11T19:00:00Z"); // when the payloads were recorded
+    // Gamma as recorded, plus whatever has closed since: a closed market shows
+    // up closed in its event, and in /markets?closed=true&id=...
+    const closed = new Map<string, GammaMarket>();
+    const gamma = (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/events") return ok((listing[u.searchParams.get("tag_slug")!] ?? []).map((e) => ({ ...e, markets: (e.markets ?? []).map((m) => closed.get(m.id) ?? m) })));
+      return ok(u.searchParams.getAll("id").flatMap((id) => (closed.has(id) ? [closed.get(id)!] : [])));
+    };
+    const provider = polymarketProvider({ fetch: gamma, log: () => {} });
+    expect(await pollOdds(db, provider, { now: new Date(at) })).toMatchObject({ ok: true, ticked: 8 });
+    const row = async (ext: string) => (await client`SELECT id, price, status, outcome FROM markets WHERE source = 'polymarket' AND external_id = ${ext}`)[0]!;
+    const [btc, reach, margin] = [await row("pm:5330080"), await row("pm:5170735"), await row("pm:5304665")];
+    expect([btc.price, reach.price, margin.price]).toEqual([46, 57, 34]);
+    const [a, b, c] = [await makeResident(db), await makeResident(db), await makeResident(db)];
+    const ca = await makeCall(db, a, { marketId: btc.id, side: "yes", chance: 70, seenPrice: 46 }, { now: new Date(at + 1000) });
+    const cb = await makeCall(db, b, { marketId: reach.id, side: "no", chance: 40, seenPrice: 57 }, { now: new Date(at + 1000) });
+    const cc = await makeCall(db, c, { marketId: margin.id, side: "yes", chance: 50, seenPrice: 34 }, { now: new Date(at + 1000) });
+    await pollOdds(db, provider, { now: new Date(at + MIN) });
+    for (const x of [ca, cb, cc]) expect((await callRow(x.id)).status).toBe("locked");
+
+    // They close: Gamma's records of a market that resolved YES, a fight
+    // cancelled and paid 50/50, and a result still proposed, for the three.
+    closed.set("5330080", { ...resolvedYes, id: "5330080" });
+    closed.set("5170735", { ...voided, id: "5170735" });
+    closed.set("5304665", { ...proposed, id: "5304665" });
+    expect(await pollOdds(db, provider, { now: new Date(at + 2 * MIN) })).toMatchObject({ ok: true, settled: 1 });
+    expect(await row("pm:5330080")).toMatchObject({ status: "resolved", outcome: true });
+    expect(await row("pm:5170735")).toMatchObject({ status: "void", outcome: null });
+    expect(await row("pm:5304665")).toMatchObject({ status: "frozen", outcome: null });
+    expect((await callRow(ca.id)).aura_centi).toBe(auraCenti(true, 46, 70));
+    expect((await callRow(cb.id)).aura_centi).toBeNull();
+    expect((await callRow(cc.id)).aura_centi).toBeNull();
+
+    // Polls later, UMA settles the proposed one NO: now it scores.
+    await pollOdds(db, provider, { now: new Date(at + 3 * MIN) });
+    expect(await row("pm:5304665")).toMatchObject({ status: "frozen" });
+    closed.set("5304665", { ...resolvedNo, id: "5304665" });
+    expect(await pollOdds(db, provider, { now: new Date(at + 4 * MIN) })).toMatchObject({ ok: true, settled: 1 });
+    expect(await row("pm:5304665")).toMatchObject({ status: "resolved", outcome: false });
+    expect((await callRow(cc.id)).aura_centi).toBe(auraCenti(false, 34, 50));
   });
 });

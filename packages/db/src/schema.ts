@@ -1200,11 +1200,16 @@ export const markets = pgTable(
     status: marketStatus("status").notNull().default("open"),
     outcome: boolean("outcome"),
     price: integer("price").notNull(),
+    // Carried, open, by the latest good poll of its feed. One the feed has
+    // dropped keeps its last price, so it's off the Floor and takes no calls.
+    inFeed: boolean("in_feed").notNull().default(false),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("markets_source_external").on(t.source, t.externalId),
+    // Every poll reads its source's markets that aren't final yet.
+    index("markets_unsettled").on(t.source, t.freezesAt).where(sql`${t.status} IN ('open', 'frozen')`),
     check("markets_price", sql`${t.price} BETWEEN 1 AND 99`),
     check("markets_resolved", sql`(${t.status} = 'resolved') = (${t.outcome} IS NOT NULL)`),
     check("markets_order", sql`${t.settlesBy} >= ${t.freezesAt}`),

@@ -883,8 +883,8 @@ export function createApp(cfg: AppConfig) {
 
   // --- The Prediction Tower --------------------------------------------------
 
-  app.get("/v1/tower/markets", auth, async (c) => c.json(await openMarkets(db, { infoOnly: false })));
-  app.get("/v1/tower/odds-wall", auth, async (c) => c.json(await openMarkets(db)));
+  app.get("/v1/tower/markets", auth, async (c) => c.json(await openMarkets(db, { infoOnly: false, ...opts() })));
+  app.get("/v1/tower/odds-wall", auth, async (c) => c.json(await openMarkets(db, opts())));
   app.get("/v1/tower/feed", auth, async (c) => c.json(await feedStatus(db, opts())));
   app.get("/v1/tower/tickets", auth, async (c) => c.json(await myTickets(db, c.get("userId"), opts())));
   app.get("/v1/tower/markets/:id", auth, async (c) => c.json(await marketView(db, c.get("userId"), uuid(c, "id"), opts())));

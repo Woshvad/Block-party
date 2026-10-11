@@ -23,7 +23,7 @@ import {
   ticketsAfter,
   vibeGap,
 } from "@bp/core";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, notInArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { areFrens } from "./chat";
 import { recordStreakDay } from "./daily";
@@ -94,7 +94,7 @@ async function refundTicket(tx: Db, userId: string, now: Date) {
 function statusFor(m: FeedMarket, now: Date): "open" | "frozen" | "resolved" | "void" {
   if (m.voided) return "void";
   if (m.resolved !== null) return "resolved";
-  return now >= m.freezesAt ? "frozen" : "open";
+  return m.closed || now >= m.freezesAt ? "frozen" : "open";
 }
 
 const validFeed = (m: FeedMarket) =>
@@ -115,9 +115,17 @@ const validFeed = (m: FeedMarket) =>
 // it. One poller at a time (an advisory lock); a second one just skips.
 export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
+  // Our markets from this feed that aren't final yet, soonest to freeze
+  // first: a feed that only lists what's trading looks these up to say what
+  // became of the ones it no longer lists.
+  const known = await db
+    .select({ externalId: markets.externalId, question: markets.question, category: markets.category, ladder: markets.ladder, freezesAt: markets.freezesAt, settlesBy: markets.settlesBy, price: markets.price })
+    .from(markets)
+    .where(and(eq(markets.source, provider.source), inArray(markets.status, ["open", "frozen"])))
+    .orderBy(markets.freezesAt);
   let feed: FeedMarket[];
   try {
-    feed = await provider.fetch(now);
+    feed = await provider.fetch(now, known);
     if (!Array.isArray(feed)) throw new Error("feed did not return a list");
   } catch (e) {
     await db.insert(feedPolls).values({ source: provider.source, ok: false, error: String((e as Error)?.message ?? e).slice(0, 500), at: now });
@@ -130,6 +138,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     let locked = 0;
     let moved = 0;
     let bad = 0;
+    const carried: string[] = []; // the open markets this poll carried
     for (const m of feed) {
       if (!validFeed(m)) {
         bad++;
@@ -151,6 +160,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
           outcome: status === "resolved" ? m.resolved : null,
           resolvedAt: status === "resolved" || status === "void" ? now : null,
           price: m.price,
+          inFeed: status === "open",
         })
         .onConflictDoNothing()
         .returning();
@@ -173,12 +183,14 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
             outcome: status === "resolved" ? m.resolved : null,
             resolvedAt: status === "resolved" || status === "void" ? now : null,
             ...(status === "open" ? { price: m.price } : {}),
+            inFeed: status === "open",
           })
           .where(eq(markets.id, market.id))
           .returning();
         market = updated!;
       }
       if (market.status !== "open") continue;
+      carried.push(market.id);
       // A repeat poll for the same moment (two crons racing) adds nothing.
       const [last] = await tx.select({ at: marketTicks.at }).from(marketTicks).where(eq(marketTicks.marketId, market.id)).orderBy(desc(marketTicks.id)).limit(1);
       if (last && last.at >= now) continue;
@@ -204,6 +216,16 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
         }
       }
     }
+    // Markets this poll didn't carry: frozen once their time is up, listed or
+    // not, and off the Floor meanwhile, because their last price is stale.
+    await tx
+      .update(markets)
+      .set({ status: "frozen", inFeed: false })
+      .where(and(eq(markets.source, provider.source), eq(markets.status, "open"), lte(markets.freezesAt, now)));
+    await tx
+      .update(markets)
+      .set({ inFeed: false })
+      .where(and(eq(markets.source, provider.source), eq(markets.status, "open"), eq(markets.inFeed, true), notInArray(markets.id, carried)));
     // Calls that can never lock: their market froze or ended first, or the feed
     // went quiet for too long. Tickets come back.
     const stale = await tx
@@ -446,6 +468,8 @@ export async function makeCall(db: Db, userId: string, input: CallInput, opts: {
   if (!market) throw new TowerError("NO_SUCH_MARKET", "no such market");
   if (market.infoOnly) throw new TowerError("INFO_ONLY", "this one's on the Odds Wall: read it, don't call it");
   if (market.status !== "open" || now >= market.freezesAt) throw new TowerError("MARKET_CLOSED", "calls are closed on this market");
+  // The latest poll didn't carry it, so its price is stale: no new calls.
+  if (!market.inFeed) throw new TowerError("MARKET_CLOSED", "this market has dropped off the feed; calls are closed");
   if ((await feedStatus(db, { now })).paused) throw new TowerError("FEED_PAUSED", "odds are paused; try again when they're back");
   if (Math.abs(market.price - seen) > TOWER.maxSlip) throw new TowerError("PRICE_MOVED", "price moved; call again?");
   const onSlate = opts.onSlate ? await opts.onSlate(market.id) : await isOnSlate(db, market.id, now);
@@ -578,11 +602,16 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
 }
 
 // The Floor: every callable open market; the Odds Wall: everything open, read-only.
-export async function openMarkets(db: Db, opts: { infoOnly?: boolean; limit?: number } = {}) {
+// Only what the latest poll carried and isn't frozen yet: a market the feed
+// has dropped has a stale price, and one past its freeze is done.
+export async function openMarkets(db: Db, opts: { infoOnly?: boolean; limit?: number; now?: Date } = {}) {
+  const now = opts.now ?? new Date();
   return db
     .select({ id: markets.id, question: markets.question, category: markets.category, price: markets.price, freezesAt: markets.freezesAt, infoOnly: markets.infoOnly })
     .from(markets)
-    .where(and(eq(markets.status, "open"), opts.infoOnly === undefined ? undefined : eq(markets.infoOnly, opts.infoOnly)))
+    .where(
+      and(eq(markets.status, "open"), eq(markets.inFeed, true), gt(markets.freezesAt, now), opts.infoOnly === undefined ? undefined : eq(markets.infoOnly, opts.infoOnly)),
+    )
     .orderBy(markets.freezesAt)
     .limit(Math.min(Math.max(opts.limit ?? 100, 1), 200));
 }

@@ -36,7 +36,7 @@ function feed() {
     ms.set(m.externalId, m);
     return m;
   };
-  return { provider, add };
+  return { provider, add, ms };
 }
 const six = (f: ReturnType<typeof feed>, t: number) => [80, 50, 60, 30, 20, 8].map((p) => f.add(t, p));
 // Which slot each market landed in (within a tier the order is the day's hash).
@@ -69,6 +69,18 @@ describe("publishing the Slate", () => {
     await pollOdds(db, f.provider, { now: new Date(d0 + H) });
     expect(await publishSlate(db, { now: new Date(d0 + H) })).toMatchObject({ published: false, reason: "not_enough_markets", found: 3 });
     expect(await publishSlate(db, { now: new Date(d0 + 3 * H) })).toMatchObject({ published: true, cards: 3 });
+  });
+
+  it("a market the feed has dropped isn't dealt: it takes no calls", async () => {
+    const t = fresh();
+    const f = feed();
+    const ms = six(f, t);
+    await pollOdds(db, f.provider, { now: new Date(t - MIN) });
+    f.ms.delete(ms[0]!.externalId);
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    expect(await publishSlate(db, { now: new Date(t) })).toMatchObject({ published: true, cards: 5 });
+    const dealt = await client`SELECT market_id FROM slate_cards WHERE city_day = ${dayOf(t)}`;
+    expect(dealt.map((c) => c.market_id)).not.toContain(await idOf(ms[0]!.externalId));
   });
 
   it("a published Slate never changes", async () => {

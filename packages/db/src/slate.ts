@@ -13,10 +13,11 @@ export async function publishSlate(db: Db, opts: { now?: Date } = {}) {
   const day = cityDay(now);
   const [existing] = await db.select().from(slates).where(eq(slates.cityDay, day));
   if (existing) return { cityDay: day, published: false, reason: "already" as const };
+  // Only markets the latest poll carried: one the feed has dropped takes no calls.
   const candidates = await db
     .select({ id: markets.id, category: markets.category, ladder: markets.ladder, price: markets.price, freezesAt: markets.freezesAt, settlesBy: markets.settlesBy, infoOnly: markets.infoOnly })
     .from(markets)
-    .where(eq(markets.status, "open"));
+    .where(and(eq(markets.status, "open"), eq(markets.inFeed, true)));
   const picks = pickSlate(candidates, day);
   const late = now.getTime() - Date.parse(`${day}T00:00:00Z`) >= 2 * 3_600_000;
   if (picks.length === 0 || (picks.length < 6 && !late)) return { cityDay: day, published: false, reason: "not_enough_markets" as const, found: picks.length };
