@@ -452,6 +452,26 @@ describe("live rooms over HTTP", () => {
     expect((await call("POST", "/internal/rooms/effects", { body: { place: "../x", copy: 0, effects: [] }, headers: { "x-internal-secret": SECRET } })).status).toBe(400);
   });
 
+  it("live room access separates mutes from blocks and refreshes restrictions", async () => {
+    const [a, b, muted, mod] = [await resident(), await resident(), await resident(), await resident()];
+    const { client } = await import("./harness");
+    const query = () => call("POST", "/internal/rooms/access", { body: { userIds: [a.userId, b.userId] }, headers: { "x-internal-secret": SECRET } });
+    expect((await call("POST", "/internal/rooms/access", { body: { userIds: [a.userId] } })).status).toBe(404);
+    await call("POST", `/v1/blocks/${b.userId}`, { token: a.token });
+    await call("POST", `/v1/mutes/${muted.userId}`, { token: a.token, body: {} });
+    await client`INSERT INTO staff (user_id, role) VALUES (${mod.userId}, 'moderator')`;
+    await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: a.userId, kind: "chat_mute", hours: 1, reason: "A live chat restriction for the regression test." } });
+    const states = (await query()).body as Array<{ userId: string; hidden: string[]; blocked: string[]; chat: boolean; suspended: boolean }>;
+    const mine = states.find((x) => x.userId === a.userId)!;
+    expect(new Set(mine.hidden)).toEqual(new Set([b.userId, muted.userId]));
+    expect(mine.blocked).toEqual([b.userId]);
+    expect(mine).toMatchObject({ chat: false, suspended: false });
+    expect(states.find((x) => x.userId === b.userId)!.blocked).toEqual([a.userId]);
+    await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: b.userId, kind: "suspended", hours: 1, reason: "A suspension for the live room regression test." } });
+    expect((await query()).body.find((x: { userId: string }) => x.userId === b.userId)).toMatchObject({ chat: false, suspended: true });
+    expect((await call("POST", "/internal/rooms/access", { body: { userIds: ["garbage"] }, headers: { "x-internal-secret": SECRET } })).status).toBe(400);
+  });
+
   it("flagged content comes down where it lives: hidden on a Board, taken down in a room", async () => {
     const { roomsState, client } = await import("./harness");
     const u = await resident();
@@ -905,5 +925,25 @@ describe("the real-money record over HTTP", () => {
     expect((await call("GET", "/v1/real/activity", { token: me.token })).body).toMatchObject({ intoTradesCents: 0, trades: [] });
     expect((await call("GET", "/v1/real/reality-check", { token: me.token })).body).toMatchObject({ due: false });
     expect((await call("POST", `/v1/real/trades/${crypto.randomUUID()}/fill`, { token: me.token, body: { filled: false } })).status).toBe(404);
+  });
+});
+
+describe("visitor home displays", () => {
+  it("shares placed furniture, hides storage, and gates layouts and binders by door and blocks", async () => {
+    const a = await resident(); const b = await resident();
+    for (const suffix of ["", "/binder"]) {
+      expect((await call("GET", `/v1/homes/${a.userId}${suffix}`)).status).toBe(401);
+      expect((await call("GET", `/v1/homes/${a.userId}${suffix}`, { token: b.token })).status).toBe(403);
+    }
+    await call("PATCH", "/v1/home", { token: a.token, body: { doorOpen: true } });
+    const owner = await call("GET", "/v1/home", { token: a.token });
+    const visitor = await call("GET", `/v1/homes/${a.userId}`, { token: b.token });
+    expect(visitor.status).toBe(200);
+    expect(visitor.body.placed).toEqual(owner.body.placed);
+    expect(visitor.body.storage).toEqual([]);
+    expect((await call("GET", `/v1/homes/${a.userId}/binder`, { token: b.token })).body.receipts).toEqual([]);
+    await call("POST", `/v1/blocks/${b.userId}`, { token: a.token });
+    for (const suffix of ["", "/binder"]) expect((await call("GET", `/v1/homes/${a.userId}${suffix}`, { token: b.token })).status).toBe(403);
+    expect((await call("GET", `/v1/homes/${a.userId}/binder`, { token: a.token })).status).toBe(200);
   });
 });

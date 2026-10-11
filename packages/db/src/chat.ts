@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
 import { accountAgeDays, allowNewDmThread, enqueueModeration, isBlockedEitherWay, isRestricted } from "./safety";
-import { bestFrens, blocks, boardFollows, crewMembers, dmThreads, frenTaps, frens, messages, mutes, users } from "./schema";
+import { bestFrens, blocks, boardFollows, crewMembers, dmThreads, frenTaps, frens, messages, mutes, restrictions, users } from "./schema";
 
 export type ChatErrorCode =
   | "INVALID_INPUT"
@@ -128,6 +128,23 @@ export async function hiddenFor(db: Db, readerId: string, now: Date): Promise<Se
     db.select({ id: mutes.mutedId, until: mutes.until }).from(mutes).where(eq(mutes.muterId, readerId)),
   ]);
   return new Set([...b1.map((x) => x.id), ...b2.map((x) => x.id), ...m.filter((x) => x.until === null || x.until > now).map((x) => x.id)]);
+}
+
+// One batch for a live room: fresh blocks, incoming-only mutes and staff
+// restrictions. Missing users are omitted so the room refuses their access.
+export async function roomAccess(db: Db, userIds: string[], now = new Date()) {
+  if (!userIds.length) return [];
+  const [people, blocked, muted, restricted] = await Promise.all([
+    db.select({ userId: users.id }).from(users).where(inArray(users.id, userIds)),
+    db.select().from(blocks).where(or(inArray(blocks.blockerId, userIds), inArray(blocks.blockedId, userIds))),
+    db.select().from(mutes).where(and(inArray(mutes.muterId, userIds), or(isNull(mutes.until), sql`${mutes.until} > ${now.toISOString()}::timestamptz`))),
+    db.select().from(restrictions).where(and(inArray(restrictions.userId, userIds), isNull(restrictions.liftedAt), sql`${restrictions.startsAt} <= ${now.toISOString()}::timestamptz`, or(isNull(restrictions.endsAt), sql`${restrictions.endsAt} > ${now.toISOString()}::timestamptz`))),
+  ]);
+  return people.map(({ userId }) => {
+    const b = blocked.filter((x) => x.blockerId === userId || x.blockedId === userId).map((x) => x.blockerId === userId ? x.blockedId : x.blockerId);
+    const r = restricted.filter((x) => x.userId === userId);
+    return { userId, blocked: [...new Set(b)], hidden: [...new Set([...b, ...muted.filter((x) => x.muterId === userId).map((x) => x.mutedId)])], chat: r.length === 0, suspended: r.some((x) => x.kind === "suspended") };
+  });
 }
 
 async function read(db: Db, readerId: string, where: Channel, opts: { before?: unknown; now: Date }) {

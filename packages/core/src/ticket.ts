@@ -10,6 +10,7 @@ export type RoomTicket = {
   crew: string | null;
   place: string;
   hidden: string[]; // blocks either way plus this resident's mutes
+  blocked?: string[]; // blocks only; mutes must never suppress outgoing lines
   frens: string[];
   chat: boolean; // false under a chat mute or suspension
   age: number; // account age in days (link rules)
@@ -47,6 +48,7 @@ export async function signRoomTicket(t: Omit<RoomTicket, "v" | "exp">, secret: s
     v: 1,
     ...t,
     hidden: t.hidden.slice(0, TICKET_MAX_LIST),
+    ...(t.blocked ? { blocked: t.blocked.slice(0, TICKET_MAX_LIST) } : {}),
     frens: t.frens.slice(0, TICKET_MAX_LIST),
     exp: Math.floor(now.getTime() / 1000) + TICKET_TTL_SECONDS,
   };
@@ -70,7 +72,7 @@ export async function verifyRoomTicket(token: unknown, secret: string, now = new
   } catch {
     throw new TicketError("MALFORMED");
   }
-  if (t?.v !== 1 || typeof t.u !== "string" || typeof t.place !== "string" || !PLACE_RE.test(t.place) || !Array.isArray(t.hidden) || !Array.isArray(t.frens)) {
+  if (t?.v !== 1 || typeof t.u !== "string" || typeof t.place !== "string" || !PLACE_RE.test(t.place) || !Array.isArray(t.hidden) || !Array.isArray(t.frens) || (t.blocked !== undefined && !Array.isArray(t.blocked))) {
     throw new TicketError("MALFORMED");
   }
   if (!Number.isSafeInteger(t.exp) || t.exp < Math.floor(now.getTime() / 1000)) throw new TicketError("EXPIRED");

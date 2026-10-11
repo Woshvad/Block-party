@@ -57,9 +57,10 @@ function timingSafeEqual(a: string, b: string) {
 const internalOk = (req: Request, env: Env) => env.INTERNAL_SECRET?.length >= 32 && timingSafeEqual(req.headers.get("x-internal-secret") ?? "", env.INTERNAL_SECRET);
 
 // What a socket remembers about its resident across hibernation.
-type Attachment = { m: Omit<Member, "hidden"> & { hidden: string[] }; age: number };
-const toMember = (a: Attachment): Member => ({ ...a.m, hidden: new Set(a.m.hidden) });
-const fromMember = (m: Member, age: number): Attachment => ({ m: { ...m, hidden: [...m.hidden] }, age });
+type Attachment = { m: Omit<Member, "hidden" | "blocked"> & { hidden: string[]; blocked?: string[] }; age: number };
+const toMember = (a: Attachment): Member => ({ ...a.m, hidden: new Set(a.m.hidden), blocked: new Set(a.m.blocked ?? a.m.hidden) });
+const fromMember = (m: Member, age: number): Attachment => ({ m: { ...m, hidden: [...m.hidden], blocked: [...(m.blocked ?? m.hidden)] }, age });
+type Access = { userId: string; hidden: string[]; blocked: string[]; chat: boolean; suspended: boolean };
 
 // --- The Worker: tickets in, sockets out ----------------------------------------
 
@@ -77,10 +78,10 @@ export default {
         return json({ error: e instanceof TicketError ? e.reason : "MALFORMED" }, 401);
       }
       if (!placeSpec(t.place)) return json({ error: "NO_SUCH_PLACE" }, 404);
-      const dir = env.DIRECTORY.get(env.DIRECTORY.idFromName(t.place));
-      const { copy } = (await (await dir.fetch("https://dir/assign", { method: "POST", body: JSON.stringify({ u: t.u, crew: t.crew, frens: t.frens }) })).json()) as { copy: number };
-      const room = env.ROOMS.get(env.ROOMS.idFromName(`${t.place}#${copy}`));
-      return room.fetch("https://room/join", { headers: { upgrade: "websocket", "x-ticket": JSON.stringify(t), "x-place": t.place, "x-copy": String(copy) } });
+      // The same namespace also holds one connection coordinator per user.
+      // Serialise across places, rather than just replacing tabs in one copy.
+      const user = env.DIRECTORY.get(env.DIRECTORY.idFromName(`user:${t.u}`));
+      return user.fetch("https://user/connect", { headers: { upgrade: "websocket", "x-ticket": JSON.stringify(t) } });
     }
 
     if (url.pathname.startsWith("/internal/")) {
@@ -89,6 +90,10 @@ export default {
       if (!placeSpec(place)) return json({ error: "NO_SUCH_PLACE" }, 404);
       const dir = env.DIRECTORY.get(env.DIRECTORY.idFromName(place));
       if (url.pathname === "/internal/presence") return dir.fetch(`https://dir/where?u=${encodeURIComponent(url.searchParams.get("u") ?? "")}`);
+      if (url.pathname === "/internal/headcount") {
+        if (place.includes(":")) return json({ error: "NOT_FOUND" }, 404);
+        return dir.fetch("https://dir/copies");
+      }
       const copy = Number(url.searchParams.get("copy"));
       if (!Number.isSafeInteger(copy) || copy < 0) return json({ error: "BAD_COPY" }, 400);
       const room = env.ROOMS.get(env.ROOMS.idFromName(`${place}#${copy}`));
@@ -130,6 +135,23 @@ export class DirectoryDO implements DurableObject {
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname === "/connect") {
+      return this.ctx.blockConcurrencyWhile(async () => {
+        const t = JSON.parse(req.headers.get("x-ticket") ?? "null") as RoomTicket;
+        const previous = await this.ctx.storage.get<{ place: string; copy: number }>("connection");
+        if (previous && previous.place !== t.place) {
+          const old = this.env.ROOMS.get(this.env.ROOMS.idFromName(`${previous.place}#${previous.copy}`));
+          await old.fetch(`https://room/disconnect?u=${encodeURIComponent(t.u)}`, { method: "POST" });
+          await this.ctx.storage.delete("connection");
+        }
+        const dir = this.env.DIRECTORY.get(this.env.DIRECTORY.idFromName(t.place));
+        const { copy } = await (await dir.fetch("https://dir/assign", { method: "POST", body: JSON.stringify({ u: t.u, crew: t.crew, frens: t.frens }) })).json() as { copy: number };
+        const room = this.env.ROOMS.get(this.env.ROOMS.idFromName(`${t.place}#${copy}`));
+        const res = await room.fetch("https://room/join", { headers: { upgrade: "websocket", "x-ticket": JSON.stringify(t), "x-place": t.place, "x-copy": String(copy) } });
+        if (res.status === 101) await this.ctx.storage.put("connection", { place: t.place, copy });
+        return res;
+      });
+    }
     const s = await this.load();
     const now = Date.now();
     for (const [u, r] of Object.entries(s.reservations)) if (r.until <= now) delete s.reservations[u];
@@ -240,6 +262,45 @@ export class RoomDO implements DurableObject {
     return this.ctx.getWebSockets(userId);
   }
 
+  // Refresh all recipients too: a mute made by an already-connected reader
+  // must apply to the next incoming line. Failure refuses the action.
+  private async refreshAccess(e: RoomEngine, extra?: string): Promise<Map<string, Access>> {
+    const userIds = [...new Set([...e.members.keys(), ...(extra ? [extra] : [])])];
+    if (!userIds.length) return new Map();
+    if (!this.env.API_URL) throw new Error("room access API is not configured");
+    const res = await fetch(`${this.env.API_URL}/internal/rooms/access`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-secret": this.env.INTERNAL_SECRET },
+      body: JSON.stringify({ userIds }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error("room access unavailable");
+    const rows = await res.json() as Access[];
+    if (!Array.isArray(rows) || rows.some((a) => !a || typeof a.userId !== "string" || !Array.isArray(a.hidden) || !a.hidden.every((x) => typeof x === "string") || !Array.isArray(a.blocked) || !a.blocked.every((x) => typeof x === "string") || typeof a.chat !== "boolean" || typeof a.suspended !== "boolean")) throw new Error("invalid room access");
+    const access = new Map(rows.map((a) => [a.userId, a]));
+    if (userIds.some((u) => !access.has(u))) throw new Error("missing room access");
+    for (const a of rows) {
+      e.updateAccess(a.userId, a);
+      if (a.suspended) await this.disconnect(e, a.userId);
+    }
+    this.persistMembers(e);
+    return access;
+  }
+
+  private async disconnect(e: RoomEngine, userId: string) {
+    const m = e.snapshot(userId);
+    for (const ws of this.sockets(userId)) {
+      ws.serializeAttachment(null);
+      ws.close(4000, "connection replaced or restricted");
+    }
+    if (!m) return;
+    const out = e.leave(userId, Date.now());
+    this.deliver(out.deliveries);
+    out.effects.push({ kind: "visit_end", userId, at: Date.now() } as unknown as Effect);
+    await this.dir().fetch("https://dir/left", { method: "POST", body: JSON.stringify({ copy: this.copy, u: userId, crew: m.crewId }) });
+    await this.afterEvent(e, out.effects);
+  }
+
   private deliver(ds: Delivery[]) {
     for (const d of ds) {
       const msg = JSON.stringify(d.event);
@@ -285,6 +346,10 @@ export class RoomDO implements DurableObject {
   }
 
   async fetch(req: Request): Promise<Response> {
+    return this.ctx.blockConcurrencyWhile(() => this.handleFetch(req));
+  }
+
+  private async handleFetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/join") {
       const t = JSON.parse(req.headers.get("x-ticket") ?? "null") as RoomTicket | null;
@@ -295,12 +360,19 @@ export class RoomDO implements DurableObject {
         await this.ctx.storage.put("meta", { place: this.place, copy: this.copy });
       }
       const e = await this.ensure();
+      let access: Access;
+      try {
+        access = (await this.refreshAccess(e, t.u)).get(t.u)!;
+      } catch {
+        return json({ error: "ACCESS_UNAVAILABLE" }, 503);
+      }
+      if (access.suspended) return json({ error: "RESTRICTED" }, 403);
       // A second tab replaces the first: one resident, one socket.
       for (const old of this.sockets(t.u)) old.close(4000, "replaced by a newer connection");
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
       this.ctx.acceptWebSocket(server, [t.u]);
-      const out = e.join({ userId: t.u, handle: t.h, crewId: t.crew, hidden: new Set(t.hidden), canChat: t.chat }, Date.now());
+      const out = e.join({ userId: t.u, handle: t.h, crewId: t.crew, hidden: new Set(access.hidden), blocked: new Set(access.blocked), canChat: access.chat }, Date.now());
       if (!out.ok) {
         server.send(JSON.stringify(out.deliveries[0]?.event));
         server.close(4001, out.code ?? "refused");
@@ -317,11 +389,16 @@ export class RoomDO implements DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
     const e = await this.ensure();
+    if (url.pathname === "/disconnect" && req.method === "POST") {
+      await this.disconnect(e, url.searchParams.get("u") ?? "");
+      return json({ ok: true });
+    }
     if (url.pathname === "/evidence") return json(e.evidence20());
     if (url.pathname === "/takedown" && req.method === "POST") {
       const { lineId } = (await req.json()) as { lineId: string };
       e.takeDown(String(lineId));
       await this.ctx.storage.put("evidence", e.evidenceAll());
+      this.deliver([{ to: [...e.members.keys()], event: { t: "removed", lineId: String(lineId) } }]);
       return json({ ok: true });
     }
     if (url.pathname === "/presence") return json({ here: e.isHere(url.searchParams.get("u") ?? "") });
@@ -334,16 +411,32 @@ export class RoomDO implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+    return this.ctx.blockConcurrencyWhile(() => this.handleMessage(ws, raw));
+  }
+
+  private async handleMessage(ws: WebSocket, raw: string | ArrayBuffer) {
     const e = await this.ensure();
     const a = ws.deserializeAttachment() as Attachment | null;
     if (!a) return ws.close(4002, "unknown socket");
     const send = (event: unknown) => ws.send(JSON.stringify(event));
     if (typeof raw !== "string" || raw.length > 8192) return send({ t: "error", code: "BAD_MESSAGE", message: "messages are small JSON text" });
-    let msg: { t?: unknown; text?: unknown; to?: unknown; seat?: unknown; emote?: unknown };
+    let msg: { t?: unknown; text?: unknown; to?: unknown; seat?: unknown; emote?: unknown; requestId?: unknown };
     try {
       msg = JSON.parse(raw);
     } catch {
       return send({ t: "error", code: "BAD_MESSAGE", message: "not JSON" });
+    }
+    const chatResult = (ok: boolean, code?: string) => {
+      if (msg?.t === "chat" && typeof msg.requestId === "string" && msg.requestId.length <= 80) send({ t: "chat_result", requestId: msg.requestId, ok, ...(code ? { code } : {}) });
+    };
+    if (typeof msg?.t === "string" && ["chat", "move", "sit", "emote"].includes(msg.t)) {
+      try {
+        await this.refreshAccess(e);
+      } catch {
+        chatResult(false, "ACCESS_UNAVAILABLE");
+        return send({ t: "error", code: "ACCESS_UNAVAILABLE", message: "safety check unavailable; try again" });
+      }
+      if (!e.isHere(a.m.userId)) return;
     }
     const now = Date.now();
     let out;
@@ -351,8 +444,12 @@ export class RoomDO implements DurableObject {
       case "chat": {
         // The moderation check runs here, before anyone sees the line.
         const v = checkMessage(msg.text, { accountAgeDays: a.age });
-        if (!v.ok) return send({ t: "error", code: v.reason, message: v.message });
+        if (!v.ok) {
+          chatResult(false, v.reason);
+          return send({ t: "error", code: v.reason, message: v.message });
+        }
         out = e.chat(a.m.userId, v.text, now);
+        chatResult(out.ok, out.code);
         break;
       }
       case "move":

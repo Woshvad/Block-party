@@ -231,6 +231,21 @@ describe("move-in", () => {
 });
 
 describe("races", () => {
+  it("signing back into the current account revokes the supplied session", async () => {
+    const data = await initData(tgId());
+    const first = await signInWithTelegram(db, { initData: data, botToken: BOT, ageAck: true });
+    const next = await signInWithTelegram(db, { initData: data, botToken: BOT, currentSessionToken: first.sessionToken });
+    expect(await resolveSession(db, first.sessionToken)).toBeNull();
+    expect(await resolveSession(db, next.sessionToken)).toMatchObject({ userId: first.userId });
+  });
+
+  it("a queued sign-in cannot reuse a session another sign-in just rotated", async () => {
+    const data = await initData(tgId());
+    const first = await signInWithTelegram(db, { initData: data, botToken: BOT, ageAck: true });
+    const results = await race("sessions", 2, [0, 1].map(() => () => signInWithTelegram(db, { initData: data, botToken: BOT, currentSessionToken: first.sessionToken })));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.find((r) => !r.ok)).toMatchObject({ e: { code: "INVALID_SESSION" } });
+  });
   it("20 simultaneous first sign-ins with one Telegram id make exactly one resident", async () => {
     const raceStart = new Date(Date.now() - 1000);
     const id = tgId();

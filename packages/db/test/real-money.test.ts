@@ -21,7 +21,7 @@ import {
   realityCheck,
   ackRealityCheck,
 } from "../src";
-import { makeResident } from "./helpers";
+import { makeResident, raceAt } from "./helpers";
 
 const { db, client, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 30 });
 const H = 3_600_000;
@@ -160,6 +160,49 @@ describe("the gate", () => {
 });
 
 describe("the trade record", () => {
+  async function reviewMarket(at: Date) {
+    const externalId = `limits-${randomUUID()}`;
+    await pollOdds(db, { source: externalId, fetch: async () => [{ externalId, question: "Spending limits?", category: "sports", ladder: null, price: 50, freezesAt: new Date(at.getTime() + 10 * D), settlesBy: new Date(at.getTime() + 11 * D), resolved: null, voided: false }] }, { now: at });
+    return (await client`SELECT id FROM markets WHERE external_id = ${externalId}`)[0]!.id as string;
+  }
+
+  const ctx = { switchOn: true, country: "ZZ", locationOk: true, firstSession: false, inMiniApp: false };
+
+  it("concurrent intents reserve spending under the same lock", async () => {
+    const u = await makeResident(db);
+    await setup(u);
+    const marketId = await reviewMarket(now);
+    const input = { marketId, side: "yes", amountCents: 4000, polymarketFeeCents: 0 };
+    const results = await raceAt(client, "real_trades", 2, [() => recordIntent(db, u, input, ctx, { now }), () => recordIntent(db, u, input, ctx, { now })]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    const failure = results.find((r) => !r.ok);
+    expect(failure && !failure.ok && failure.e).toMatchObject({ code: "GATE_CLOSED", message: "over_limit" });
+    expect((await client`SELECT sum(amount_cents)::int AS n FROM real_trades WHERE user_id = ${u}`)[0]!.n).toBe(4000);
+  });
+
+  it("the rolling week includes the previous month while monthly spending resets", async () => {
+    const at = new Date("2044-06-02T12:00:00Z");
+    const u = await makeResident(db);
+    await setup(u, { monthlyCents: 4000 });
+    const marketId = await reviewMarket(at);
+    await client`INSERT INTO real_trades (user_id, market_id, side, amount_cents, polymarket_fee_cents, builder_fee_cents, status, created_at) VALUES (${u}, ${marketId}, 'yes', 4000, 0, 20, 'filled', '2044-05-31T12:00:00Z')`;
+    expect(await gate(u, { marketId, amountCents: 4000 }, at)).toEqual({ ok: false, reason: "over_limit" });
+    expect(await gate(u, { marketId, amountCents: 1000 }, at)).toEqual({ ok: true });
+    await reviewMarket(new Date("2044-06-08T12:00:00Z"));
+    expect(await gate(u, { marketId, amountCents: 4000 }, new Date("2044-06-08T12:00:00Z"))).toEqual({ ok: true });
+  });
+
+  it("a client-reported failure cannot release its spending reservation", async () => {
+    const u = await makeResident(db);
+    await setup(u);
+    const marketId = await reviewMarket(now);
+    const input = { marketId, side: "yes", amountCents: 4000, polymarketFeeCents: 0 };
+    const t = await recordIntent(db, u, input, ctx, { now });
+    await reportFill(db, u, t.id, { filled: false }, { now });
+    expect(await code(recordIntent(db, u, input, ctx, { now }))).toBe("GATE_CLOSED");
+    expect((await realActivity(db, u, "2044-05", { now })).intoTradesCents).toBe(0);
+  });
+
   it("intent only through an open gate; fill reported once, by the owner; results on resolution; the month adds up", async () => {
     const u = await makeResident(db);
     await setup(u);

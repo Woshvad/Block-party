@@ -22,6 +22,8 @@ type LimitKind = (typeof LIMITS)[number];
 const col = { weekly: "weeklyCents", monthly: "monthlyCents", loss: "lossCents" } as const;
 const cents = (x: unknown) => Number.isSafeInteger(x) && (x as number) > 0 && (x as number) <= 1_000_000_00;
 
+const lockRealUser = (tx: Db, userId: string) => tx.execute(sql`SELECT 1 FROM users WHERE id = ${userId} FOR NO KEY UPDATE`);
+
 // Before a first real trade: a birth year (18+, as given), the declarations,
 // and limits ("Set a limit" is already selected).
 export async function setupReal(
@@ -51,6 +53,13 @@ export async function setupReal(
 
 // Lowering works at once; raising waits 24 hours and asks again.
 export async function changeLimit(db: Db, userId: string, kind: unknown, value: unknown, opts: { now?: Date } = {}) {
+  return db.transaction(async (tx) => {
+    await lockRealUser(tx, userId);
+    return changeLimitLocked(tx, userId, kind, value, opts);
+  });
+}
+
+async function changeLimitLocked(db: Db, userId: string, kind: unknown, value: unknown, opts: { now?: Date }) {
   const now = opts.now ?? new Date();
   if (!(LIMITS as readonly unknown[]).includes(kind) || !cents(value)) throw new RealMoneyError("INVALID_INPUT", "weekly, monthly or loss, in cents");
   const [p] = await db.select().from(realProfiles).where(eq(realProfiles.userId, userId));
@@ -74,6 +83,7 @@ export async function confirmRaise(db: Db, userId: string, raiseId: unknown, opt
   const now = opts.now ?? new Date();
   if (typeof raiseId !== "string" || !UUID.test(raiseId)) throw new RealMoneyError("NO_SUCH_RAISE", "no such raise");
   return db.transaction(async (tx) => {
+    await lockRealUser(tx, userId);
     const [r] = await tx
       .select()
       .from(realLimitRaises)
@@ -99,10 +109,14 @@ export async function takeBreak(db: Db, userId: string, kind: unknown, length: u
     if (typeof length !== "string" || !(length in EXCLUSIONS)) throw new RealMoneyError("INVALID_INPUT", "6m, 1y, 5y or forever");
     days = EXCLUSIONS[length as keyof typeof EXCLUSIONS];
   } else throw new RealMoneyError("INVALID_INPUT", "timeout or exclusion");
-  const [b] = await db
-    .insert(realBreaks)
-    .values({ userId, kind, startedAt: now, endsAt: days === null ? null : new Date(now.getTime() + days * 86_400_000) })
-    .returning();
+  const b = await db.transaction(async (tx) => {
+    await lockRealUser(tx, userId);
+    const [row] = await tx
+      .insert(realBreaks)
+      .values({ userId, kind, startedAt: now, endsAt: days === null ? null : new Date(now.getTime() + days * 86_400_000) })
+      .returning();
+    return row!;
+  });
   return { id: b!.id, kind, endsAt: b!.endsAt };
 }
 
@@ -177,11 +191,15 @@ export async function realTradeGate(
   const spent = await db
     .select({
       week: sql<number>`COALESCE(SUM(${realTrades.amountCents}) FILTER (WHERE ${realTrades.createdAt} >= ${weekStart.toISOString()}::timestamptz), 0)::int`,
-      month: sql<number>`COALESCE(SUM(${realTrades.amountCents}), 0)::int`,
-      lost: sql<number>`COALESCE(-SUM(LEAST(${realTrades.pnlCents}, 0)), 0)::int`,
+      month: sql<number>`COALESCE(SUM(${realTrades.amountCents}) FILTER (WHERE ${realTrades.createdAt} >= ${monthStart.toISOString()}::timestamptz), 0)::int`,
+      lost: sql<number>`COALESCE(-SUM(LEAST(${realTrades.pnlCents}, 0)) FILTER (WHERE ${realTrades.settledAt} >= ${monthStart.toISOString()}::timestamptz), 0)::int`,
     })
     .from(realTrades)
-    .where(and(eq(realTrades.userId, userId), inArray(realTrades.status, ["intent", "filled", "settled"]), gte(realTrades.createdAt, monthStart)));
+    // A device's failure report cannot release a reservation. Only trusted
+    // exchange reconciliation can establish that no order was filled; until
+    // that integration exists, failed reports count for the original window.
+    .where(and(eq(realTrades.userId, userId), inArray(realTrades.status, ["intent", "filled", "settled", "failed"]),
+      sql`(${realTrades.createdAt} >= ${new Date(Math.min(weekStart.getTime(), monthStart.getTime())).toISOString()}::timestamptz OR ${realTrades.settledAt} >= ${monthStart.toISOString()}::timestamptz)`));
   return realGate({
     switchOn: input.switchOn,
     countryOn: !!sw?.realTrades,
@@ -229,14 +247,17 @@ export async function recordIntent(
   if (input.side !== "yes" && input.side !== "no") throw new RealMoneyError("INVALID_INPUT", "side is yes or no");
   if (!Number.isSafeInteger(input.amountCents) || (input.amountCents as number) <= 0) throw new RealMoneyError("INVALID_INPUT", "an amount in cents");
   if (!Number.isSafeInteger(input.polymarketFeeCents) || (input.polymarketFeeCents as number) < 0 || (input.polymarketFeeCents as number) > (input.amountCents as number)) throw new RealMoneyError("INVALID_INPUT", "Polymarket's fee in cents");
-  const g = await realTradeGate(db, userId, { ...ctx, marketId: input.marketId.toLowerCase(), amountCents: input.amountCents as number }, { now });
-  if (!g.ok) throw new RealMoneyError("GATE_CLOSED", g.reason);
-  const q = feeQuote(input.amountCents as number, input.polymarketFeeCents as number);
-  const [t] = await db
-    .insert(realTrades)
-    .values({ userId, marketId: input.marketId.toLowerCase(), side: input.side, amountCents: q.amountCents, polymarketFeeCents: q.polymarketFeeCents, builderFeeCents: q.builderFeeCents, createdAt: now })
-    .returning();
-  return { id: t!.id, ...q };
+  return db.transaction(async (tx) => {
+    await lockRealUser(tx, userId);
+    const g = await realTradeGate(tx, userId, { ...ctx, marketId: (input.marketId as string).toLowerCase(), amountCents: input.amountCents as number }, { now });
+    if (!g.ok) throw new RealMoneyError("GATE_CLOSED", g.reason);
+    const q = feeQuote(input.amountCents as number, input.polymarketFeeCents as number);
+    const [t] = await tx
+      .insert(realTrades)
+      .values({ userId, marketId: (input.marketId as string).toLowerCase(), side: input.side as "yes" | "no", amountCents: q.amountCents, polymarketFeeCents: q.polymarketFeeCents, builderFeeCents: q.builderFeeCents, createdAt: now })
+      .returning();
+    return { id: t!.id, ...q };
+  });
 }
 
 // The device reports the order: filled in full (at its price) or not at all.

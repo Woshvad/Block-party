@@ -6,6 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const TICKET_SECRET = "t".repeat(40);
 const INTERNAL_SECRET = "i".repeat(40);
 const effects: Array<{ place: string; copy: number; effects: Array<{ kind: string }> }> = [];
+type Access = { userId: string; hidden: string[]; blocked: string[]; chat: boolean; suspended: boolean };
+const access = new Map<string, Access>();
+let accessAvailable = true;
 let mf: Miniflare;
 
 beforeAll(async () => {
@@ -18,6 +21,11 @@ beforeAll(async () => {
     // Stands in for the API: captures room effects the Worker posts.
     outboundService: async (req: Request) => {
       const path = new URL(req.url).pathname;
+      if (path === "/internal/rooms/access") {
+        if (!accessAvailable) return new Response("unavailable", { status: 503 });
+        const { userIds } = await req.json() as { userIds: string[] };
+        return Response.json(userIds.map((u) => access.get(u)));
+      }
       if (path === "/internal/rooms/effects") effects.push(await req.json());
       if (path === "/internal/rooms/away") {
         // Two dimmed residents on the watch party floor; garbage elsewhere must not break a room.
@@ -34,6 +42,7 @@ afterAll(() => mf?.dispose());
 type Client = { ws: WebSocket; events: Array<Record<string, any>>; next: (t: string, ms?: number) => Promise<Record<string, any>>; send: (m: unknown) => void };
 
 async function connect(u: string, over: Partial<{ crew: string | null; place: string; hidden: string[]; chat: boolean; age: number; frens: string[] }> = {}): Promise<Client> {
+  if (!access.has(u)) access.set(u, { userId: u, hidden: over.hidden ?? [], blocked: over.hidden ?? [], chat: over.chat ?? true, suspended: false });
   const ticket = await signRoomTicket({ u, h: `h_${u}`, crew: null, place: "diner", hidden: [], frens: [], chat: true, age: 30, ...over }, TICKET_SECRET);
   const res = await mf.dispatchFetch(`http://rooms.test/connect?ticket=${encodeURIComponent(ticket)}`, { headers: { upgrade: "websocket" } });
   const ws = res.webSocket as unknown as WebSocket;
@@ -99,9 +108,11 @@ describe("talking", () => {
     const b = await connect("tb", { place: "tower" });
     await a.next("welcome");
     await b.next("welcome");
-    a.send({ t: "chat", text: "gm frens" });
+    a.send({ t: "chat", text: "gm frens", requestId: "draft-1" });
+    expect(await a.next("chat_result")).toEqual({ t: "chat_result", requestId: "draft-1", ok: true });
     expect((await b.next("chat")).line.text).toBe("gm frens");
-    a.send({ t: "chat", text: "abandon ability able about above absent absorb abstract absurd abuse access accident" });
+    a.send({ t: "chat", text: "abandon ability able about above absent absorb abstract absurd abuse access accident", requestId: "draft-2" });
+    expect(await a.next("chat_result")).toEqual({ t: "chat_result", requestId: "draft-2", ok: false, code: "SECRET" });
     expect((await a.next("error")).code).toBe("SECRET");
     await quiet();
     expect(b.events.filter((e) => e.t === "chat")).toEqual([]);
@@ -154,6 +165,7 @@ describe("talking", () => {
     const ev = (await (await internal("/internal/evidence?place=city_hall&copy=0")).json()) as any[];
     expect(ev.map((l: any) => l.text)).toContain("something to report");
     await internal("/internal/takedown?place=city_hall&copy=0", { method: "POST", body: JSON.stringify({ lineId: line.id }) });
+    expect(await a.next("removed")).toEqual({ t: "removed", lineId: line.id });
     const after = (await (await internal("/internal/evidence?place=city_hall&copy=0")).json()) as any[];
     expect(after.find((l: any) => l.id === line.id).text).toBe("[removed]");
     expect((await mf.dispatchFetch("http://rooms.test/internal/evidence?place=city_hall&copy=0")).status).toBe(404); // no secret
@@ -162,6 +174,17 @@ describe("talking", () => {
 });
 
 describe("presence and copies", () => {
+  it("connecting in another place closes the old socket and removes its presence", async () => {
+    const first = await connect("traveller", { place: "roof" });
+    await first.next("welcome");
+    const closed = new Promise<number>((resolve) => first.ws.addEventListener("close", (e: CloseEvent) => resolve(e.code)));
+    const second = await connect("traveller", { place: "city_hall" });
+    await second.next("welcome");
+    expect(await closed).toBe(4000);
+    expect(await (await internal("/internal/presence?place=roof&u=traveller")).json()).toEqual({ here: false, copy: null });
+    expect(await (await internal("/internal/presence?place=city_hall&u=traveller")).json()).toEqual({ here: true, copy: 0 });
+    second.ws.close();
+  });
   it("presence knows who's at City Hall (for voting in person)", async () => {
     const a = await connect("pa", { place: "city_hall" });
     await a.next("welcome");
@@ -195,6 +218,50 @@ describe("presence and copies", () => {
     expect((await mate.next("welcome")).members.map((m: any) => m.userId).sort()).toEqual(["f60", "f61"]);
     for (const p of [...people, extra, mate]) p.ws.close();
   }, 60_000);
+});
+
+describe("live safety permissions", () => {
+  it("updates a reader's mute and block without reconnecting, then allows chat after unblocking", async () => {
+    const a = await connect("safety-a", { place: "faucet" });
+    const b = await connect("safety-b", { place: "faucet" });
+    await a.next("welcome"); await b.next("welcome");
+    access.set("safety-a", { userId: "safety-a", hidden: ["safety-b"], blocked: [], chat: true, suspended: false });
+    b.send({ t: "chat", text: "muted line" });
+    await b.next("chat");
+    await quiet();
+    expect(a.events.some((e) => e.t === "chat" && e.line.text === "muted line")).toBe(false);
+    a.send({ t: "chat", text: "outgoing still works" });
+    expect((await b.next("chat")).line.text).toBe("outgoing still works");
+    access.get("safety-a")!.blocked = ["safety-b"];
+    a.send({ t: "chat", text: "blocked outgoing" });
+    await quiet();
+    expect(b.events.some((e) => e.t === "chat" && e.line.text === "blocked outgoing")).toBe(false);
+    access.get("safety-a")!.hidden = []; access.get("safety-a")!.blocked = [];
+    b.send({ t: "chat", text: "unblocked line" });
+    expect((await a.next("chat")).line.text).toBe("outgoing still works"); // own earlier echo
+    expect((await a.next("chat")).line.text).toBe("blocked outgoing"); // own echo
+    expect((await a.next("chat")).line.text).toBe("unblocked line");
+    a.ws.close(); b.ws.close();
+  });
+
+  it("enforces staff restrictions on existing sockets and refuses actions when the API fails", async () => {
+    const a = await connect("restricted-live", { place: "gm_wall" });
+    await a.next("welcome");
+    access.get("restricted-live")!.chat = false;
+    a.send({ t: "chat", text: "cannot send this" });
+    expect((await a.next("error")).code).toBe("CHAT_RESTRICTED");
+    access.get("restricted-live")!.chat = true;
+    accessAvailable = false;
+    try {
+      a.send({ t: "chat", text: "cannot bypass outage" });
+      expect((await a.next("error")).code).toBe("ACCESS_UNAVAILABLE");
+    } finally { accessAvailable = true; }
+    const closed = new Promise<number>((resolve) => a.ws.addEventListener("close", (e: CloseEvent) => resolve(e.code)));
+    access.get("restricted-live")!.suspended = true;
+    a.send({ t: "move", to: { x: 1, y: 1 } });
+    expect(await closed).toBe(4000);
+    expect(await (await internal("/internal/presence?place=gm_wall&u=restricted-live")).json()).toEqual({ here: false, copy: null });
+  });
 });
 
 describe("hibernation", () => {
@@ -277,4 +344,15 @@ describe("Proof of Neighbour visits", () => {
     // Other tests' rooms post effects late, so only check this resident's own.
     expect(effects.filter((e) => e.effects.some((x: any) => x.userId === "pv")).every((e) => e.place === "gm_wall")).toBe(true);
   });
+});
+
+it("headcounts require internal auth and follow actual connected residents", async () => {
+  const path = "/internal/headcount?place=gm_wall";
+  expect((await mf.dispatchFetch(`http://rooms.test${path}`)).status).toBe(404);
+  const a = await connect("headcount-a", { place: "gm_wall" });
+  await a.next("welcome");
+  const counts = await (await internal(path)).json() as Record<string, number>;
+  expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(1);
+  expect((await internal("/internal/headcount?place=home:private")).status).toBe(404);
+  a.ws.close();
 });

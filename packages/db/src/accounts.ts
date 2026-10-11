@@ -132,7 +132,10 @@ async function signInOnce(db: Db, input: IdentityInput): Promise<AuthResult> {
   return db.transaction(async (tx) => {
     let current: SessionInfo | null = null;
     if (input.currentSessionToken !== undefined) {
-      current = await resolveSession(tx, input.currentSessionToken, { lock: true });
+      const locked = await resolveSession(tx, input.currentSessionToken, { lock: true });
+      // A request queued on the user lock may have read the session before
+      // the previous sign-in revoked it. Re-read after acquiring the lock.
+      current = locked ? await resolveSession(tx, input.currentSessionToken) : null;
       // Never silently fall through to "new resident": the client drops the
       // stale token and retries without it.
       if (!current) throw new AccountError("INVALID_SESSION", "session is expired, revoked or unknown");
@@ -145,7 +148,7 @@ async function signInOnce(db: Db, input: IdentityInput): Promise<AuthResult> {
       .where(and(eq(identities.provider, input.provider), eq(identities.subject, input.subject)));
 
     if (known) {
-      if (current && current.userId !== known.userId && input.currentSessionToken) {
+      if (current && input.currentSessionToken) {
         await revokeSession(tx, input.currentSessionToken);
       }
       const s = await issueSession(tx, known.userId);

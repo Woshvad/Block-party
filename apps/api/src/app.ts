@@ -45,6 +45,7 @@ import {
   getCrew,
   getCrewHouse,
   getHome,
+  receiptBinder,
   getResident,
   isHandleAvailable,
   accountAgeDays,
@@ -66,7 +67,6 @@ import {
   grantMood,
   hideMessage,
   isBlockedEitherWay,
-  isRestricted,
   myThreads,
   postToBoard,
   postToCrew,
@@ -77,7 +77,7 @@ import {
   tapFren,
   unfollowBoard,
   unfren,
-  hiddenFor,
+  roomAccess,
   activeRestrictions,
   appealRestriction,
   blockUser,
@@ -522,10 +522,42 @@ export function createApp(cfg: AppConfig) {
 
   // --- Home ----------------------------------------------------------------
 
+  app.get("/v1/city/headcounts", auth, async (c) => {
+    if (!cfg.roomsUrl) throw new ApiError(503, "ROOMS_DISABLED", "live headcounts are unavailable");
+    const places = ["city_hall", "tower", "roof", "watch_party", "gm_wall", "faucet", "diner", "crew_row"];
+    const counts = await Promise.all(places.map(async (place) => {
+      const base = cfg.roomsUrl!.replace(/^ws:/, "http:").replace(/^wss:/, "https:");
+      const url = new URL("/internal/headcount", base); url.searchParams.set("place", place);
+      try {
+        const response = await fetch(url, { headers: { "x-internal-secret": cfg.internalSecret ?? "" }, signal: AbortSignal.timeout(2500) });
+        if (!response.ok) return [place, null];
+        const copies: unknown = await response.json();
+        if (!copies || typeof copies !== "object" || Array.isArray(copies)) return [place, null];
+        const values = Object.values(copies);
+        return [place, values.every((n) => Number.isSafeInteger(n) && n >= 0) ? values.reduce((a, b) => a + b, 0) : null];
+      } catch { return [place, null]; }
+    }));
+    return c.json({ counts: Object.fromEntries(counts), sampledAt: now().toISOString() });
+  });
   app.get("/v1/home", auth, async (c) => {
     const h = await getHome(db, c.get("userId"));
     if (!h) throw new ApiError(404, "NO_HOME", "move in first");
     return c.json(h);
+  });
+  app.get("/v1/homes/:id", auth, async (c) => {
+    const owner = uuid(c, "id");
+    const h = await getHome(db, owner);
+    if (!h) throw new ApiError(404, "NO_HOME", "no such home");
+    if (owner !== c.get("userId") && (!h.doorOpen || await isBlockedEitherWay(db, c.get("userId"), owner))) throw new ApiError(403, "DOOR_CLOSED", "their door is closed");
+    // Visitors see placed furniture and finishes, never the owner's storage.
+    return c.json({ userId: h.userId, tier: h.tier, wallFinish: h.wallFinish, floorFinish: h.floorFinish, doorOpen: h.doorOpen, placed: h.placed, storage: [] });
+  });
+  app.get("/v1/homes/:id/binder", auth, async (c) => {
+    const owner = uuid(c, "id");
+    const h = await getHome(db, owner);
+    if (!h) throw new ApiError(404, "NO_HOME", "no such home");
+    if (owner !== c.get("userId") && (!h.doorOpen || await isBlockedEitherWay(db, c.get("userId"), owner))) throw new ApiError(403, "DOOR_CLOSED", "their door is closed");
+    return c.json(await receiptBinder(db, owner, opts()));
   });
   app.post("/v1/home/buy", auth, async (c) => c.json(await buyPiece(db, c.get("userId"), (await body(c)).pieceId, idem(c, "buy")), 201));
   app.put("/v1/home/items/:id/place", auth, async (c) => c.json(await placeItem(db, c.get("userId"), uuid(c, "id"), await body(c))));
@@ -750,16 +782,18 @@ export function createApp(cfg: AppConfig) {
       throw new ApiError(404, "NOT_FOUND", "no such place");
     }
     const t = now();
-    const hidden = [...(await hiddenFor(db, userId, t))];
+    const [access] = await roomAccess(db, [userId], t);
+    if (!access) throw new ApiError(403, "ACCESS_UNAVAILABLE", "room access could not be verified");
     const ticket = await signRoomTicket(
       {
         u: userId,
         h: resident.handle,
         crew: crew?.crew.id ?? null,
         place,
-        hidden,
+        hidden: access.hidden,
+        blocked: access.blocked,
         frens: await frensOf(db, userId),
-        chat: !(await isRestricted(db, userId, "chat_mute", t)),
+        chat: access.chat,
         age: Math.floor(await accountAgeDays(db, userId, t)),
       },
       cfg.ticketSecret,
@@ -1089,6 +1123,11 @@ export function createApp(cfg: AppConfig) {
   });
 
   // Who's wandering a place in their away life, for the rooms to draw dimmed.
+  app.post("/internal/rooms/access", internal, async (c) => {
+    const ids = (await body(c)).userIds;
+    if (!Array.isArray(ids) || ids.length > 100 || !ids.every((id) => typeof id === "string" && UUID.test(id))) throw new ApiError(400, "INVALID_INPUT", "resident ids required");
+    return c.json(await roomAccess(db, [...new Set(ids.map((id) => id.toLowerCase()))], now()));
+  });
   app.get("/internal/rooms/away", internal, async (c) => {
     const place = c.req.query("place") ?? "";
     if (!PLACE_RE.test(place)) throw new ApiError(400, "INVALID_INPUT", "which place?");

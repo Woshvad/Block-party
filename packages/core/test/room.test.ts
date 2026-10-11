@@ -7,7 +7,7 @@ const uid = (e: Effect) => ("userId" in e ? e.userId : "");
 const T = 1_800_000_000_000;
 const MIN = 60_000;
 const none = new Set<string>();
-const person = (userId: string, over: Partial<{ crewId: string | null; hidden: Set<string>; canChat: boolean }> = {}) => ({
+const person = (userId: string, over: Partial<{ crewId: string | null; hidden: Set<string>; blocked: Set<string>; canChat: boolean }> = {}) => ({
   userId,
   handle: `h_${userId}`,
   crewId: null,
@@ -91,11 +91,13 @@ describe("blocks and mutes in the room", () => {
 
   it("a mute is one-way", () => {
     const r = new RoomEngine("diner", { w: 10, h: 10 });
-    r.join(person("a", { hidden: new Set(["b"]) }), T); // a muted b: modelled on a's side only
+    r.join(person("a", { hidden: new Set(["b"]), blocked: new Set() }), T);
     r.join(person("b"), T);
     expect(recipients(r.chat("b", "hi", T).deliveries, "chat")).toEqual(["b"]);
-    // (b still hears a because the server only puts mutes in the muter's set;
-    //  a block puts the pair in a's set, which also stops a's lines reaching b.)
+    expect(recipients(r.chat("a", "hello", T).deliveries, "chat").sort()).toEqual(["a", "b"]);
+    const view = r.join(person("b"), T).deliveries[0]!.event;
+    expect(view.t === "welcome" && view.members.map((m) => m.userId)).toContain("a");
+    expect(view.t === "welcome" && view.bubbles.map((l) => l.userId)).toContain("a");
   });
 
   it("a block made mid-session applies at once", () => {

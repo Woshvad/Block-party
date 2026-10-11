@@ -28,6 +28,7 @@ export type Member = {
   // Everyone this member must not see: blocks either way, plus their own
   // mutes. Loaded by the server when they join.
   hidden: ReadonlySet<string>;
+  blocked?: ReadonlySet<string>; // separate from incoming-only mutes
   canChat: boolean; // false under a chat mute or suspension
   joinedAt: number;
   pos: Pos;
@@ -47,6 +48,7 @@ export type ServerEvent =
   | { t: "moving"; userId: string; to: Pos }
   | { t: "sat"; userId: string; seat: string | null }
   | { t: "chat"; line: ChatLine }
+  | { t: "removed"; lineId: string }
   | { t: "emote"; userId: string; emote: Emote }
   | { t: "headcount"; headcount: Headcount }
   | { t: "error"; code: string; message: string };
@@ -116,6 +118,11 @@ export class RoomEngine {
     if (m) m.hidden = hidden;
   }
 
+  updateAccess(userId: string, access: { hidden: string[]; blocked: string[]; chat: boolean }) {
+    const m = this.members.get(userId);
+    if (m) Object.assign(m, { hidden: new Set(access.hidden), blocked: new Set(access.blocked), canChat: access.chat });
+  }
+
   headcount(): Headcount {
     return { here: this.members.size, npc: this.npcs, away: this.away.size };
   }
@@ -130,7 +137,7 @@ export class RoomEngine {
         if (includeSender) out.push(m.userId);
         continue;
       }
-      if (m.hidden.has(sender) || s?.hidden.has(m.userId)) continue;
+      if (m.hidden.has(sender) || (s?.blocked ?? s?.hidden)?.has(m.userId)) continue;
       out.push(m.userId);
     }
     return out;
@@ -155,7 +162,7 @@ export class RoomEngine {
 
   private visibleBubbles(to: Member, now: number): ChatLine[] {
     const since = now - ROOM.bubbleSeconds * 1000;
-    return this.evidence.filter((l) => l.at > since && !to.hidden.has(l.userId));
+    return this.evidence.filter((l) => l.at > since && !to.hidden.has(l.userId) && !(this.members.get(l.userId)?.blocked ?? this.members.get(l.userId)?.hidden)?.has(to.userId));
   }
 
   // --- Arriving and leaving --------------------------------------------------
@@ -165,7 +172,7 @@ export class RoomEngine {
     const existing = this.members.get(input.userId);
     if (existing) {
       // A reconnect (a deploy, a flaky phone): same place in the room, fresh view.
-      Object.assign(existing, { handle: input.handle, crewId: input.crewId, hidden: input.hidden, canChat: input.canChat });
+      Object.assign(existing, { handle: input.handle, crewId: input.crewId, hidden: input.hidden, blocked: input.blocked, canChat: input.canChat });
       return done([{ to: [input.userId], event: this.welcome(existing, now) }]);
     }
     if (this.members.size >= ROOM.capacity) return refuse(input.userId, "ROOM_FULL", "this room is full; the directory will send you to a copy");
@@ -181,7 +188,7 @@ export class RoomEngine {
   }
 
   private welcome(m: Member, now: number): ServerEvent {
-    const visible = [...this.members.values()].filter((o) => o.userId === m.userId || !(m.hidden.has(o.userId) || o.hidden.has(m.userId)));
+    const visible = [...this.members.values()].filter((o) => o.userId === m.userId || !(m.hidden.has(o.userId) || (o.blocked ?? o.hidden).has(m.userId)));
     const away = [...this.away.values()].filter((a) => !m.hidden.has(a.userId));
     return {
       t: "welcome",
