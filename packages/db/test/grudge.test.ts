@@ -12,6 +12,7 @@ import {
   getBalance,
   makeCall,
   offerGrudge,
+  openGmStakes,
   pollOdds,
   publishSlate,
   redeemInvite,
@@ -108,6 +109,18 @@ describe("the Grudge Match", () => {
     expect((await client`SELECT status FROM grudge_matches WHERE id = ${g1.id}`)[0]!.status).toBe("tied");
     expect((await client`SELECT status FROM grudge_matches WHERE id = ${g2.id}`)[0]!.status).toBe("expired");
     expect([await bal(p1.newcomer), await bal(p1.inviter), await bal(p2.newcomer)]).toEqual([a0, b0, c0]);
+  });
+
+  it("Grudge stakes still count as the players' GM (rent, the broke floor) until the match ends", async () => {
+    const d0 = freshDay();
+    const { inviter, newcomer } = await pair();
+    const staked = async () => [await openGmStakes(db, newcomer), await openGmStakes(db, inviter)];
+    const g = await offerGrudge(db, newcomer, { now: new Date(d0 - 12 * H) });
+    expect(await staked()).toEqual([10, 0]); // an offer holds only the newcomer's stake
+    await respondGrudge(db, inviter, g.id, true, { now: new Date(d0 - 11 * H) });
+    expect(await staked()).toEqual([10, 10]);
+    await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] }); // nobody called: a tie
+    expect(await staked()).toEqual([0, 0]);
   });
 
   it("tonight's bell leaves tomorrow's match alone", async () => {

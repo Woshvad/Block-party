@@ -12,6 +12,7 @@ import {
   ensureSystemAccounts,
   getBalance,
   makeCall,
+  openGmStakes,
   pollOdds,
   proposeSyndicate,
   redeemInvite,
@@ -121,6 +122,8 @@ describe("a syndicate on a City market", () => {
     await shakeSyndicate(db, people[3]!, p.id, {}, { now: at }); // the pot only has 10 left
     expect(await getBalance(db, cityAccountId(m.id))).toBe(100);
     expect(await getBalance(db, crewPotAccountId(crewId))).toBe(0);
+    // Pot GM on a stake is the crew's, not any one shaker's: it never counts toward their rent or drip.
+    for (const u of people) expect(await openGmStakes(db, u)).toBe(0);
     // A resident takes the other side; YES wins; the crew's winnings go back to the pot.
     const rival = await makeResident(db);
     await stakeCity(db, rival, { marketId: m.id, side: "no", stake: 50 }, { now: at });

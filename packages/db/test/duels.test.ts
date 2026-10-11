@@ -13,6 +13,7 @@ import {
   grantMood,
   makeCall,
   moodState,
+  openGmStakes,
   pollOdds,
   respond,
   retreat,
@@ -107,6 +108,20 @@ describe("a duel, start to finish", () => {
     expect((await moodState(db, s.b, { now: new Date(s.d0 + 21 * H + MIN) })).tilt.tilted).toBe(true);
     expect((await moodState(db, s.a, { now: new Date(s.d0 + 21 * H + MIN) })).tilt.tilted).toBe(false);
     expect(await settleDuels(db, { now: new Date(s.d0 + 22 * H) })).toMatchObject({ settled: 0 }); // once
+  });
+
+  it("duel stakes still count as each side's GM (rent, the broke floor) until the duel settles", async () => {
+    const s = await scene();
+    const staked = async () => [await openGmStakes(db, s.a), await openGmStakes(db, s.b)];
+    const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });
+    expect(await staked()).toEqual([10, 0]); // an offer holds only the challenger's ante
+    await respond(db, s.b, d.id, true, { now: s.at });
+    await snap(db, s.b, d.id, { now: s.at });
+    expect(await staked()).toEqual([20, 20]);
+    s.m.resolved = false; // NO: b wins
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 21 * H) });
+    await settleDuels(db, { now: new Date(s.d0 + 21 * H) });
+    expect(await staked()).toEqual([0, 0]);
   });
 
   it("retreat: the ante to the opponent, the rest burns, their stake comes back", async () => {

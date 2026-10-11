@@ -1,9 +1,9 @@
-import { GM, STREAK_PIECES, type StreakState, advanceStreak, cityDay, dripFor, nextBell, streakView, userAccountId } from "@bp/core";
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { GM, GRUDGE, STREAK_PIECES, type StreakState, advanceStreak, cityDay, dripFor, nextBell, streakView, userAccountId } from "@bp/core";
+import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { grantEarned } from "./home";
 import { burn, mint } from "./ledger";
-import { badges, dailyGm, gmEntries, gmAccounts, gmTransactions, streakDays, streaks, users } from "./schema";
+import { badges, cityPositions, dailyGm, duels, gmEntries, gmAccounts, gmTransactions, grudgeMatches, streakDays, streaks, users } from "./schema";
 
 export class DailyError extends Error {
   constructor(readonly code: "UNKNOWN_USER" | "HODL_FULL", message: string) {
@@ -34,10 +34,34 @@ export async function gmNetWorth(db: Db, userId: string, now = new Date()): Prom
   return (bal?.balance ?? 0) + Number(recent?.spent ?? 0) + (await openGmStakes(db, userId));
 }
 
-// GM a resident has riding on open City/Crew markets and duels. Those bricks
-// don't exist yet; each one adds its escrow here when it lands.
-export async function openGmStakes(_db: Db, _userId: string): Promise<number> {
-  return 0;
+// GM a resident has out on stakes that haven't settled yet: their City market
+// stakes, Fade Duel stakes and Grudge Match stakes. It's still theirs, so it
+// counts toward the broke floor and toward rent; parking GM in a stake
+// mustn't make anyone look poorer than they are. Syndicate stakes and Tower
+// Lights bids are left out: they come from a crew pot, which belongs to no
+// one resident.
+export async function openGmStakes(db: Db, userId: string): Promise<number> {
+  // A City position gets its payout (0 for a loss) when its market settles.
+  const [city] = await db
+    .select({ n: sql<string>`COALESCE(SUM(${cityPositions.stake}), 0)` })
+    .from(cityPositions)
+    .where(and(eq(cityPositions.userId, userId), isNull(cityPositions.payout)));
+  // An offered duel holds the challenger's stake; the opponent's is 0 until they accept.
+  const [duel] = await db
+    .select({ n: sql<string>`COALESCE(SUM(CASE WHEN ${duels.challengerId} = ${userId} THEN ${duels.stakeChallenger} ELSE ${duels.stakeOpponent} END), 0)` })
+    .from(duels)
+    .where(and(or(eq(duels.challengerId, userId), eq(duels.opponentId, userId)), inArray(duels.status, ["offered", "active"])));
+  // An offered match holds the newcomer's stake; an active one holds both.
+  const [grudge] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(grudgeMatches)
+    .where(
+      or(
+        and(eq(grudgeMatches.newcomerId, userId), inArray(grudgeMatches.status, ["offered", "active"])),
+        and(eq(grudgeMatches.inviterId, userId), eq(grudgeMatches.status, "active")),
+      ),
+    );
+  return Number(city!.n) + Number(duel!.n) + grudge!.n * GRUDGE.stake;
 }
 
 // --- gm and the drip ------------------------------------------------------

@@ -208,6 +208,10 @@ describe("other bell steps", () => {
     const second = await runBell(db, { now: new Date(sat.getTime() + 60_000), only: ["rent"] });
     expect(second.ran.rent).toBe("already done");
     expect(await bal(u)).toBe(800);
+    // On a Saturday, rent is the bell's first step: before anyone can spend,
+    // and before tonight's stakes pay out.
+    const order = await runBell(db, { now: new Date(sat.getTime() + 2 * 60_000), only: ["chains", "rent"] });
+    expect(Object.keys(order.ran)).toEqual(["rent", "chains"]);
   }, 120_000);
 
   it("settles crew chains and records each step with its result", async () => {

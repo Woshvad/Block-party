@@ -71,6 +71,7 @@ async function stepRent(db: Db, now: Date, pageSize: number): Promise<StepResult
   let paid = 0;
   let couch = 0;
   let sublet = 0;
+  let owed = 0;
   const fetch = (after: string, limit: number) =>
     db
       .select({ id: sql<string>`${residents.userId}::text` })
@@ -83,12 +84,13 @@ async function stepRent(db: Db, now: Date, pageSize: number): Promise<StepResult
       for (const o of await collectRent(db, r.id, { now })) {
         if (o.status === "paid") paid++;
         else if (o.status === "couch") couch++;
+        else if (o.status === "owed") owed++;
         else sublet++;
       }
       checked++;
     }
   }
-  return { residents: checked, paid, couch, sublet };
+  return { residents: checked, paid, couch, sublet, owed };
 }
 
 // Halves and burns the excess above 2,000 on every resident balance and crew
@@ -158,7 +160,11 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
   const bellDay = addDays(today, -1);
   const pageSize = opts.pageSize ?? 200;
 
-  const due: Array<{ day: string; step: string; run: () => Promise<StepResult> }> = [
+  const due: Array<{ day: string; step: string; run: () => Promise<StepResult> }> = [];
+  // Saturday: rent comes first, before anyone can spend, and before tonight's
+  // stakes pay out (rent counts them as the resident's own GM).
+  if (isSaturday(today)) due.push({ day: bellDay, step: "rent", run: () => stepRent(db, now, pageSize) });
+  due.push(
     { day: bellDay, step: "chains", run: () => stepChains(db, now, pageSize) },
     // After the chains, so Bell Scores see tonight's chain lengths.
     { day: bellDay, step: "tower", run: () => stepTower(db, bellDay, now) },
@@ -167,8 +173,7 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     { day: bellDay, step: "alts", run: async () => ({ ...(await runAltChecks(db, { now })) }) },
     // Last: the paper reads the scores, moods and lines above.
     { day: bellDay, step: "close", run: () => stepClose(db, bellDay, now) },
-  ];
-  if (isSaturday(today)) due.push({ day: bellDay, step: "rent", run: () => stepRent(db, now, pageSize) });
+  );
   // Monday 00:00: last week's count closes and the new Mayor is sworn in.
   if (cityWeekday(today) === 1) {
     due.push({ day: bellDay, step: "election", run: async () => ({ ...(await finalizeElection(db, addDays(today, -7), { now })) }) });

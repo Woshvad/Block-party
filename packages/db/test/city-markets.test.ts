@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { CAST, type FeedMarket, type OddsProvider, cityAccountId, userAccountId } from "@bp/core";
+import { CAST, type FeedMarket, type OddsProvider, addDays, cityAccountId, cityDay, cityWeekday, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   CityMarketError,
+  burn,
+  collectRent,
   createCityMarket,
   createDb,
   ensureSystemAccounts,
@@ -10,12 +12,15 @@ import {
   grantMood,
   headcount,
   makeCall,
+  openGmStakes,
   pollOdds,
   recordVisit,
   reel,
   resolveCityMarket,
   runBell,
+  sayGm,
   seasonStack,
+  settleCityMarkets,
   stakeCity,
   supplyStats,
 } from "../src";
@@ -218,5 +223,65 @@ describe("staking and settling", () => {
     expect((await client`SELECT status FROM city_markets WHERE id = ${vm.id}`)[0]!.status).toBe("refunded");
     const r = await reel(db, x, { now: new Date(d0 + D + 10 * MIN) });
     expect(r!.cityMarkets).toEqual(expect.arrayContaining([{ question: "2+ on the Roof at the bell?", result: "yes" }, { question: "Will this get voided?", result: "void" }]));
+  });
+});
+
+describe("a stake is still the staker's GM", () => {
+  // Real days from today, so ledger timestamps (set by Postgres) and the city
+  // clock agree, as in the rent tests.
+  const today = cityDay();
+  const toSat = ((6 - cityWeekday(today) + 7) % 7) || 7; // days to the next Saturday, 1..7
+  const day = (n: number, hour = 12) => new Date(Date.parse(`${addDays(today, n)}T00:00:00Z`) + hour * H);
+  const burnTo = async (u: string, gm: number) => burn(db, { accountId: userAccountId(u), amount: (await bal(u)) - gm, kind: "test", idempotencyKey: `burn_to:${u}` });
+
+  it("for the broke floor: 120 GM with 30 of it staked still gets the plain drip", async () => {
+    const s = await staffer();
+    const m = await createCityMarket(db, s, { question: "Does the drip see stakes?", kind: "manual", bellDay: addDays(today, 3) }, { now: new Date() });
+    const u = await makeResident(db);
+    await burnTo(u, 120);
+    await stakeCity(db, u, { marketId: m.id, side: "yes", stake: 30 }, { now: new Date() }); // the 25% cap
+    expect(await bal(u)).toBe(90);
+    expect(await openGmStakes(db, u)).toBe(30);
+    expect(await sayGm(db, u, { now: day(1) })).toMatchObject({ drip: 50, brokeFloor: false });
+  });
+
+  it("for rent: a stake over the Saturday bell isn't the couch; the rent waits until the stake comes home", async () => {
+    const s = await staffer();
+    const bellDay = addDays(today, toSat + 2); // settles after the Saturday
+    const m = await createCityMarket(db, s, { question: "Does rent see stakes?", kind: "manual", bellDay }, { now: new Date() });
+    const u = await makeResident(db);
+    await burnTo(u, 300);
+    await stakeCity(db, u, { marketId: m.id, side: "yes", stake: 75 }, { now: new Date() });
+    const saturday = addDays(today, toSat);
+    // 225 in the wallet and 75 staked: they can pay, just not yet. No couch, no charge.
+    expect(await collectRent(db, u, { now: day(toSat, 1) })).toEqual([{ saturday, status: "owed", amount: 0 }]);
+    expect(await bal(u)).toBe(225);
+    expect(await client`SELECT 1 FROM rent_charges WHERE user_id = ${u}`).toHaveLength(0);
+    // The market is voided at its bell and the stake comes home.
+    await resolveCityMarket(db, s, m.id, "void");
+    await settleCityMarkets(db, bellDay, day(toSat + 3, 0));
+    expect(await openGmStakes(db, u)).toBe(0);
+    await sayGm(db, u, { now: day(toSat + 1) }); // still around: the next Saturday isn't a sublet
+    // The next Saturday: the owed week is paid first (350 -> 100), then this week is the couch.
+    const next = await collectRent(db, u, { now: day(toSat + 7, 1) });
+    expect(next.map((o) => [o.saturday, o.status, o.amount])).toEqual([
+      [saturday, "paid", 250],
+      [addDays(saturday, 7), "couch", 0],
+    ]);
+    expect(await bal(u)).toBe(100);
+  });
+
+  it("until it settles", async () => {
+    const d0 = freshDay();
+    const s = await staffer();
+    const m = await createCityMarket(db, s, { question: "Does a settled stake still count?", kind: "manual", bellDay: dayOf(d0) }, { now: new Date(d0) });
+    const [a, b] = [await ponned(), await ponned()];
+    const at = new Date(d0 + 10 * H);
+    await stakeCity(db, a, { marketId: m.id, side: "yes", stake: 40 }, { now: at });
+    await stakeCity(db, b, { marketId: m.id, side: "no", stake: 60 }, { now: at });
+    expect([await openGmStakes(db, a), await openGmStakes(db, b)]).toEqual([40, 60]);
+    await resolveCityMarket(db, s, m.id, "no");
+    await settleCityMarkets(db, dayOf(d0), new Date(d0 + D + 5 * MIN));
+    expect([await openGmStakes(db, a), await openGmStakes(db, b)]).toEqual([0, 0]);
   });
 });
