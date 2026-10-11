@@ -117,12 +117,13 @@ export function browserHost(history: Pick<History, "pushState" | "replaceState" 
 
 let stack: BackStack | null = null;
 
-// The app's one stack: Telegram's BackButton inside the Mini App (when its
-// version has one), the browser's history otherwise.
+// The app's one stack: Telegram's BackButton inside the Mini App (from
+// version 6.1, which has one), the browser's history otherwise.
 export function backStack(): BackStack | null {
   if (typeof window === "undefined") return null;
   if (!stack) {
-    const button = telegram()?.BackButton;
+    const w = telegram();
+    const button = w?.isVersionAtLeast?.("6.1") ? w.BackButton : undefined;
     stack = new BackStack(button ? telegramHost(button, window.history) : browserHost(window.history, (cb) => window.addEventListener("popstate", cb)));
   }
   return stack;
