@@ -271,9 +271,9 @@ describe("hibernation", () => {
     const b = await connect("hb", { place: "diner", crew: "hc" });
     await a.next("welcome");
     await b.next("welcome");
-    a.send({ t: "move", to: { x: 3, y: 4 } });
+    a.send({ t: "move", to: { x: 0, y: 4 } });
     await b.next("moving");
-    a.send({ t: "sit", seat: "booth_1a" });
+    a.send({ t: "sit", seat: "booth1a" });
     await b.next("sat");
     a.send({ t: "chat", text: "before the nap" });
     await b.next("chat");
@@ -284,11 +284,11 @@ describe("hibernation", () => {
     // Still the same room after waking: chat still flows both ways...
     b.send({ t: "chat", text: "after the nap" });
     expect((await a.next("chat")).line.text).toBe("after the nap");
-    // ...a newcomer sees both, with a still at 3,4 in booth_1a...
+    // ...a newcomer sees both, with a still at 0,4 in booth1a...
     const c = await connect("hc", { place: "diner" });
     const w = await c.next("welcome");
     const ha = w.members.find((m: any) => m.userId === "ha");
-    expect(ha).toMatchObject({ pos: { x: 3, y: 4 }, seat: "booth_1a" });
+    expect(ha).toMatchObject({ pos: { x: 0, y: 4 }, seat: "booth1a" });
     expect(w.headcount.here).toBe(3);
     // ...and the evidence survived.
     const ev = (await (await internal("/internal/evidence?place=diner&copy=0")).json()) as any[];

@@ -10,6 +10,7 @@ export const ROOM = {
   chatPerWindow: 5,
   emotePerWindow: 10,
   movePerWindow: 4,
+  sitPerWindow: 4,
   rateWindowSeconds: 10,
   cozyAfterMinutes: 10,
   cozyMinCrewmates: 2, // you plus 2+ crewmates
@@ -20,6 +21,49 @@ export const EMOTES = ["wave", "gm", "lfg", "rekt", "victory_lap", "crew_couch",
 export type Emote = (typeof EMOTES)[number];
 
 export type Pos = { x: number; y: number };
+
+// --- Seats -------------------------------------------------------------------
+
+// Where each place's seats are, in tiles. The city draws the same seats
+// (apps/city/src/interiors.ts, and a city test keeps the two in step). Homes
+// and Crew Houses have none: being there together is what counts.
+export type RoomSeat = { id: string; x: number; y: number };
+
+const seatRow = (prefix: string, y: number, xs: number[]): RoomSeat[] => xs.map((x, i) => ({ id: `${prefix}${i + 1}`, x, y }));
+
+export const ROOM_SEATS: Readonly<Record<string, readonly RoomSeat[]>> = {
+  diner: [
+    ...seatRow("stool", 2, [3, 5, 7, 9]),
+    // Booths along both side walls: bench, table, bench.
+    ...[4, 6, 8].flatMap((y, i) => [
+      { id: `booth${i + 1}a`, x: 0, y },
+      { id: `booth${i + 1}b`, x: 2, y },
+      { id: `booth${i + 4}a`, x: 11, y },
+      { id: `booth${i + 4}b`, x: 13, y },
+    ]),
+  ],
+  // A stool either side of each round table.
+  tower: [[3, 5], [8, 5], [12, 5], [5, 9], [10, 9]].flatMap(([x, y], i) => [
+    { id: `t${i + 1}a`, x: x! - 1, y: y! },
+    { id: `t${i + 1}b`, x: x! + 1, y: y! },
+  ]),
+  roof: [...seatRow("front", 7, [5, 7, 12, 14]), ...seatRow("back", 10, [4, 7, 12, 15])],
+  city_hall: [...seatRow("row1-", 5, [2, 3, 4, 11, 12, 13]), ...seatRow("row2-", 7, [2, 3, 4, 11, 12, 13]), ...seatRow("row3-", 9, [2, 3, 4, 11, 12, 13])],
+  watch_party: [...seatRow("sofa", 5, [3, 7, 12, 16]), ...seatRow("bean", 9, [2, 5, 8, 11, 14, 17])],
+  gm_wall: seatRow("bench", 4, [2, 4, 7, 9]),
+  faucet: [
+    { id: "bench1", x: 1, y: 3 },
+    { id: "bench2", x: 8, y: 3 },
+  ],
+  crew_row: seatRow("bench", 5, [4, 14, 24]),
+  bunker: [...seatRow("n", 3, [4, 5, 6, 7]), ...seatRow("s", 6, [4, 5, 6, 7])],
+};
+
+// "bunker:<id>:yes" has the bunker's seats.
+export function seatsFor(place: string): readonly RoomSeat[] {
+  const kind = place.split(":")[0]!;
+  return Object.hasOwn(ROOM_SEATS, kind) ? ROOM_SEATS[kind]! : [];
+}
 
 export type Member = {
   userId: string;
@@ -82,6 +126,8 @@ export class RoomEngine {
     // Where Cozy can happen: "room" (your home, the Crew House: being there
     // together counts), "seat" (a Diner booth: you have to sit), or "none".
     readonly cozyMode: "room" | "seat" | "none" = "none",
+    // The only seats you can take here.
+    readonly seats: readonly RoomSeat[] = seatsFor(place),
   ) {}
 
   // When this member's "together" clock started, or null if it isn't running.
@@ -245,14 +291,21 @@ export class RoomEngine {
     return done([{ to: this.audience(userId), event: { t: "moving", userId, to: m.pos } }], effects);
   }
 
+  // Only a real seat in this place, and only once you've walked up to it (a
+  // tap on a seat sends the walk and then the sit).
   sit(userId: string, seat: unknown, now: number): Outcome {
     const m = this.members.get(userId);
     if (!m) return refuse(userId, "NOT_HERE", "join the room first");
-    if (typeof seat !== "string" || !/^[a-z0-9_-]{1,40}$/.test(seat)) return refuse(userId, "BAD_SEAT", "no such seat");
-    if ([...this.members.values()].some((o) => o.seat === seat && o.userId !== userId)) return refuse(userId, "SEAT_TAKEN", "someone's sitting there");
-    m.seat = seat;
+    const s = typeof seat === "string" ? this.seats.find((x) => x.id === seat) : undefined;
+    if (!s) return refuse(userId, "BAD_SEAT", "no such seat");
+    if (Math.abs(m.pos.x - s.x) > 1 || Math.abs(m.pos.y - s.y) > 1) return refuse(userId, "TOO_FAR", "walk over to that seat first");
+    if (!this.allowed("sit", userId, ROOM.sitPerWindow, now)) return refuse(userId, "SLOW_DOWN", "slow down, ser");
+    if (m.seat === s.id) return done(); // already sitting there
+    if ([...this.members.values()].some((o) => o.seat === s.id && o.userId !== userId)) return refuse(userId, "SEAT_TAKEN", "someone's sitting there");
+    m.seat = s.id;
+    m.pos = { x: s.x, y: s.y };
     m.sittingSince = now;
-    return done([{ to: this.audience(userId), event: { t: "sat", userId, seat } }]);
+    return done([{ to: this.audience(userId), event: { t: "sat", userId, seat: s.id } }]);
   }
 
   // Standing up stops the seat clock; recheckCozy ends Cozy if that matters here.

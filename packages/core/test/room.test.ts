@@ -193,16 +193,39 @@ describe("Cozy", () => {
   });
 
   it("at the Diner you have to be sitting in a booth", () => {
-    const r = new RoomEngine("diner", { w: 10, h: 10 }, 0, "seat");
+    const r = new RoomEngine("diner", { w: 14, h: 10 }, 0, "seat");
     for (const u of ["a", "b", "c"]) r.join(person(u, { crewId: "c1" }), T);
     expect(r.tick(T + 20 * MIN).effects).toEqual([]);
-    r.sit("a", "booth_1a", T + 20 * MIN);
-    r.sit("b", "booth_1b", T + 20 * MIN);
-    r.sit("c", "booth_1c", T + 21 * MIN);
-    expect(r.sit("b", "booth_1c", T + 21 * MIN).code).toBe("SEAT_TAKEN");
+    // Walk up to the first booths, then sit.
+    r.move("a", { x: 0, y: 4 }, T + 20 * MIN);
+    r.move("b", { x: 2, y: 4 }, T + 20 * MIN);
+    r.move("c", { x: 1, y: 5 }, T + 21 * MIN);
+    expect(r.sit("a", "booth1a", T + 20 * MIN).ok).toBe(true);
+    expect(r.sit("b", "booth1b", T + 20 * MIN).ok).toBe(true);
+    expect(r.sit("c", "booth1a", T + 21 * MIN).code).toBe("SEAT_TAKEN");
+    expect(r.sit("c", "booth2a", T + 21 * MIN).ok).toBe(true);
     expect(r.tick(T + 31 * MIN).effects.map(uid).sort()).toEqual(["a", "b", "c"]);
     // standing up ends it for those left with fewer than 2 seated crewmates
     expect(r.move("c", { x: 1, y: 1 }, T + 32 * MIN).effects.map((e) => `${e.kind}:${uid(e)}`).sort()).toEqual(["cozy_end:a", "cozy_end:b", "cozy_end:c"]);
+  });
+
+  it("made-up seats, seats across the room and seat spam get nowhere", () => {
+    const r = new RoomEngine("diner", { w: 14, h: 10 }, 0, "seat");
+    for (const u of ["a", "b", "c"]) r.join(person(u, { crewId: "c1" }), T);
+    // The old trick: three crewmates "sit" on seats that don't exist, from anywhere.
+    expect(["x", "y", "z"].map((s, i) => r.sit(["a", "b", "c"][i]!, s, T).code)).toEqual(["BAD_SEAT", "BAD_SEAT", "BAD_SEAT"]);
+    expect(r.sit("a", "booth1a", T).code).toBe("TOO_FAR"); // still by the door
+    expect(r.sit("a", "constructor", T).code).toBe("BAD_SEAT");
+    expect(r.tick(T + 30 * MIN).effects).toEqual([]);
+    // Sitting moves you onto the seat; sitting again is no news, and a stream of sits is rate-limited.
+    r.move("a", { x: 1, y: 5 }, T);
+    const outs = Array.from({ length: 5 }, (_, i) => r.sit("a", "booth2a", T + i));
+    expect(outs.map((o) => o.code ?? "OK")).toEqual(["OK", "OK", "OK", "OK", "SLOW_DOWN"]);
+    expect(outs.map((o) => recipients(o.deliveries, "sat").length)).toEqual([3, 0, 0, 0, 0]);
+    expect(r.members.get("a")!.pos).toEqual({ x: 0, y: 6 });
+    // A seat in another place is no seat here.
+    expect(new RoomEngine("home:u1", { w: 8, h: 8 }, 0, "room").seats).toEqual([]);
+    expect(new RoomEngine("bunker:m1:yes", { w: 12, h: 10 }).seats.map((s) => s.id)).toContain("n1");
   });
 
   it("nowhere Cozy, never Cozy", () => {
@@ -261,7 +284,9 @@ describe("the room under random traffic (simulation)", () => {
     );
     fc.assert(
       fc.property(fc.constantFrom<"room" | "seat">("room", "seat"), fc.array(op, { maxLength: 300 }), (mode, ops) => {
-        const r = new RoomEngine("sim", { w: 12, h: 12 }, 0, mode);
+        // Nine seats around the tile everyone walks to (3,4): s0..s8.
+        const seats = Array.from({ length: 9 }, (_, i) => ({ id: `s${i}`, x: 2 + (i % 3), y: 3 + Math.floor(i / 3) }));
+        const r = new RoomEngine("sim", { w: 12, h: 12 }, 0, mode, seats);
         let now = T;
         const cozy = new Map<string, boolean>();
         for (const o of ops) {
