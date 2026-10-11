@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { createDb, hitRateLimit, sweepRateLimits } from "../src";
+import { RATE_LIMIT_MAX_WINDOW_SECONDS, createDb, hitRateLimit, sweepRateLimits } from "../src";
 
-const { db, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 30 });
+const { db, client, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 30 });
 afterAll(() => close());
 
 describe("rate limits", () => {
@@ -42,5 +42,22 @@ describe("rate limits", () => {
     await hitRateLimit(db, b, { limit: 1, windowSeconds: 60, now: new Date("2020-01-01T00:00:00Z") });
     await sweepRateLimits(db, new Date("2021-01-01T00:00:00Z"));
     expect((await hitRateLimit(db, b, { limit: 1, windowSeconds: 60, now: new Date("2020-01-01T00:00:30Z") })).count).toBe(1);
+  });
+
+  it("sweeps a bounded batch at a time, and keeps windows that started after the cutoff", async () => {
+    // Back-dated far before any other test's clock, so only these are old enough.
+    const p = `t:sweep:${randomUUID()}:`;
+    for (let i = 0; i < 7; i++) await hitRateLimit(db, `${p}${i}`, { limit: 1, windowSeconds: 60, now: new Date("1991-01-01T00:00:00Z") });
+    await hitRateLimit(db, `${p}fresh`, { limit: 1, windowSeconds: 60, now: new Date("1991-01-02T12:00:00Z") });
+    const cutoff = new Date("1991-01-02T00:00:00Z");
+    expect(await sweepRateLimits(db, cutoff, { batch: 3, maxBatches: 2 })).toBe(6);
+    expect(await sweepRateLimits(db, cutoff, { batch: 3, maxBatches: 2 })).toBe(1);
+    expect(await sweepRateLimits(db, cutoff, { batch: 3, maxBatches: 2 })).toBe(0);
+    expect((await client`SELECT bucket FROM rate_limits WHERE bucket LIKE ${p + "%"}`).map((r) => r.bucket)).toEqual([`${p}fresh`]);
+  });
+
+  it("no window is longer than a day, so anything that started a day ago has ended", async () => {
+    await expect(hitRateLimit(db, "x", { limit: 1, windowSeconds: RATE_LIMIT_MAX_WINDOW_SECONDS + 1 })).rejects.toThrow(RangeError);
+    expect((await hitRateLimit(db, `t:${randomUUID()}`, { limit: 1, windowSeconds: RATE_LIMIT_MAX_WINDOW_SECONDS })).allowed).toBe(true);
   });
 });

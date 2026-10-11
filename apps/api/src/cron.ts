@@ -22,6 +22,12 @@ export async function runMinute(
   const jobs: Array<Promise<unknown>> = [runBell(db), finishDueActions(db), runLastCall(db, { now: at }), pickRatioPrompt(db, { now: at }), settleRealTrades(db, { now: at })];
   if (deps.sender) jobs.push(runNotificationBatch(db, deps.sender, { batch: 200 }));
   if (at.getUTCMinutes() % 15 === 0) jobs.push(queueDailyPings(db, { now: at }));
+  // Every 10 minutes, the sweeps: rate-limit windows that started over a day ago
+  // (none is longer, so they've ended) and sessions that ended over a week ago.
+  if (at.getUTCMinutes() % 10 === 5) {
+    const { RATE_LIMIT_MAX_WINDOW_SECONDS, sweepRateLimits, sweepSessions } = await import("@bp/db");
+    jobs.push(sweepRateLimits(db, new Date(at.getTime() - RATE_LIMIT_MAX_WINDOW_SECONDS * 1000)), sweepSessions(db, { now: at }));
+  }
   if (deps.odds) jobs.push(pollOdds(db, deps.odds, { now: at }).then(() => publishSlate(db, { now: at })).then(() => npcCalls(db, { now: at })));
   const moderation = deps.moderation;
   if (moderation) jobs.push(import("./moderation").then(({ runModerationJob }) => runModerationJob(db, moderation, deps.rooms ? { rooms: deps.rooms } : {})));

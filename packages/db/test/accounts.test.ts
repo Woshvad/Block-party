@@ -16,6 +16,7 @@ import {
   signInWithIdentity,
   signInWithPrivy,
   signInWithTelegram,
+  sweepSessions,
 } from "../src";
 import { raceAt } from "./helpers";
 
@@ -108,6 +109,28 @@ describe("sessions", () => {
     await revokeAllSessions(db, a.userId);
     expect(await resolveSession(db, a.sessionToken)).toBeNull();
     expect(await resolveSession(db, b.sessionToken)).toBeNull();
+  });
+
+  it("the sweep deletes sessions that ended over a week ago, a bounded batch at a time, and keeps the rest", async () => {
+    const g = await createGuest(db, { ageAck: true });
+    // Back-dated far before any other test's clock, so only these are old enough.
+    const plant = async (expiresAt: string, revokedAt: string | null) =>
+      ((await client`INSERT INTO sessions (user_id, token_hash, expires_at, revoked_at) VALUES (${g.userId}, ${randomUUID()}, ${expiresAt}, ${revokedAt}) RETURNING id`)[0]!.id as string);
+    const now = new Date("1990-06-01T00:00:00Z");
+    const gone: string[] = [];
+    for (let i = 0; i < 5; i++) gone.push(await plant("1990-01-01T00:00:00Z", null)); // expired months ago
+    for (let i = 0; i < 2; i++) gone.push(await plant("1990-09-01T00:00:00Z", "1990-05-01T00:00:00Z")); // signed out a month ago
+    const kept = [
+      await plant("1990-05-30T00:00:00Z", null), // expired 2 days ago
+      await plant("1990-09-01T00:00:00Z", "1990-05-29T00:00:00Z"), // signed out 3 days ago
+      await plant("1990-09-01T00:00:00Z", null), // still live
+    ];
+    expect(await sweepSessions(db, { now, batch: 3, maxBatches: 2 })).toBe(6);
+    expect(await sweepSessions(db, { now, batch: 3, maxBatches: 2 })).toBe(1);
+    expect(await sweepSessions(db, { now, batch: 3, maxBatches: 2 })).toBe(0);
+    const left = await client`SELECT id FROM sessions WHERE id IN ${client([...gone, ...kept])}`;
+    expect(left.map((r) => r.id as string).sort()).toEqual([...kept].sort());
+    expect(await resolveSession(db, g.sessionToken)).not.toBeNull();
   });
 });
 
