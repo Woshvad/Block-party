@@ -1,9 +1,11 @@
+import "dotenv/config";
 import { defineConfig } from "vitest/config";
+import { apiTestDatabaseUrl } from "./test/db-url";
 
 export default defineConfig({
   test: {
     globalSetup: ["./test/global-setup.ts"],
-    env: { TEST_DATABASE_URL: "postgres://localhost:5432/blockparty_api_test" },
+    env: { TEST_DATABASE_URL: apiTestDatabaseUrl() },
     fileParallelism: false,
     testTimeout: 30_000,
   },

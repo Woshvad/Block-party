@@ -1,17 +1,17 @@
 name: ci
 
+# Every push (the default branch is feat/backend-bricks, not main) and every PR.
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       postgres:
-        image: postgres:16
+        image: postgres:15
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -33,7 +33,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22  # vitest 5 needs ^22.12; miniflare needs >=22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
@@ -41,3 +41,7 @@ jobs:
       # Core, the database (races, loops and lock audits), the API (fuzzer and
       # the bundle on workerd), and the rooms on workerd.
       - run: pnpm test
+      # The city has to build for production, not just typecheck.
+      - run: pnpm --filter @bp/city build
+        env:
+          NEXT_PUBLIC_API_URL: https://api.ci.invalid

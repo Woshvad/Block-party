@@ -1,5 +1,6 @@
 import { pickForMe, seededRandomInt, signTelegramInitData } from "@bp/core";
 import { userInfo } from "node:os";
+import { fileURLToPath } from "node:url";
 import { Miniflare } from "miniflare";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -22,7 +23,7 @@ function withUser(raw: string) {
 beforeAll(async () => {
   mf = new Miniflare({
     modules: true,
-    scriptPath: new URL("../dist/worker.js", import.meta.url).pathname,
+    scriptPath: fileURLToPath(new URL("../dist/worker.js", import.meta.url)),
     compatibilityDate: "2026-07-01",
     compatibilityFlags: ["nodejs_compat"],
     bindings: {

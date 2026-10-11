@@ -1,5 +1,6 @@
 import { signRoomTicket } from "@bp/core";
 import { Miniflare } from "miniflare";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // The real Worker, running in workerd through Miniflare, over real WebSockets.
@@ -14,7 +15,7 @@ let mf: Miniflare;
 beforeAll(async () => {
   mf = new Miniflare({
     modules: true,
-    scriptPath: new URL("../dist/worker.js", import.meta.url).pathname,
+    scriptPath: fileURLToPath(new URL("../dist/worker.js", import.meta.url)),
     compatibilityDate: "2026-07-01",
     durableObjects: { ROOMS: "RoomDO", DIRECTORY: "DirectoryDO" },
     bindings: { TICKET_SECRET, INTERNAL_SECRET, API_URL: "https://api.test" },
