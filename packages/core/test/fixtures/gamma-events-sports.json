@@ -1,0 +1,49 @@
+[
+  {
+    "slug": "nfl-sf-sea-2026-10-11",
+    "markets": [
+      {
+        "id": "4024680",
+        "question": "49ers vs. Seahawks",
+        "outcomes": "[\"49ers\", \"Seahawks\"]",
+        "outcomePrices": "[\"0.395\", \"0.605\"]",
+        "endDate": "2026-10-11T20:25:00Z",
+        "gameStartTime": "2026-10-11 20:25:00+00",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "5304665",
+        "question": "Exact Margin: 49ers by 1-6",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.335\", \"0.665\"]",
+        "endDate": "2026-10-11T20:25:00Z",
+        "gameStartTime": "2026-10-11 20:25:00+00",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  },
+  {
+    "slug": "ballon-dor-winner-2026",
+    "markets": [
+      {
+        "id": "608540",
+        "question": "Will Kylian Mbappé win the 2026 Ballon d'Or?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.018\", \"0.982\"]",
+        "endDate": "2027-01-01T04:59:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "608573",
+        "question": "Will [Placeholder W] win the 2026 Ballon d'Or?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "endDate": "2026-10-31T00:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  }
+]

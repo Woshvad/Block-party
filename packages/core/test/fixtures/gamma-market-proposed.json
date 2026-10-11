@@ -1,0 +1,13 @@
+[
+  {
+    "id": "5227663",
+    "question": "Ethereum above 2,710 on October 3, 5AM ET?",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"0\", \"1\"]",
+    "endDate": "2026-10-03T09:00:00Z",
+    "gameStartTime": "2026-10-03 09:00:00+00",
+    "closed": true,
+    "acceptingOrders": false,
+    "umaResolutionStatus": "proposed"
+  }
+]

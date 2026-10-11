@@ -1,0 +1,13 @@
+[
+  {
+    "id": "5046295",
+    "question": "Will El Qanah Club vs. El Masry SC end in a draw?",
+    "outcomes": "[\"Yes\", \"No\"]",
+    "outcomePrices": "[\"1\", \"0\"]",
+    "endDate": "2026-10-11T14:00:00Z",
+    "gameStartTime": "2026-10-11 14:00:00+00",
+    "closed": true,
+    "acceptingOrders": false,
+    "umaResolutionStatus": "resolved"
+  }
+]

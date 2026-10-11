@@ -81,11 +81,18 @@ export type FeedMarket = {
   price: number; // YES, whole percent
   resolved: boolean | null; // null: not yet; true/false: YES/NO happened
   voided: boolean;
+  closed?: boolean; // trading has stopped: frozen from now on, until the result is final
 };
+
+// A market the database holds that isn't final yet, as we last stored it.
+export type KnownMarket = Omit<FeedMarket, "resolved" | "voided" | "closed">;
 
 export interface OddsProvider {
   readonly source: string;
-  fetch(now: Date): Promise<FeedMarket[]>;
+  // `known` is this source's markets we still hold open or frozen. A feed that
+  // only lists what's trading (Polymarket) looks those up again by id, so a
+  // market that has left its listing can still close, resolve or void.
+  fetch(now: Date, known?: readonly KnownMarket[]): Promise<FeedMarket[]>;
 }
 
 // --- A deterministic mock feed (development and tests) -------------------------
