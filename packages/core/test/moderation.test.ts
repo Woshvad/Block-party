@@ -289,6 +289,11 @@ describe("bare names: any real ending, or anything shaped like an address, is a 
     expect(v.ok && v.text, link).toBe("go to [link removed] now");
   });
 
+  it("a long chain of subdomains is still caught", () => {
+    const v = checkMessage("go to a.b.c.d.e.f.g.h.i.j.k.l.gm-drop.xyz now", NEW);
+    expect(v.ok && v.text).not.toContain("gm-drop");
+  });
+
   it.each(["e.g. the roof", "i.e. tonight", "lol.ok see you", "lol.no way", "ok.so who's in", "end.Next time", "done.thanks ser", "Mr.Smith says gm", "v1.2.3 is out", "pi is 3.14", "U.S.A"])(
     "a sentence that lost a space is not one: %s",
     (msg) => {

@@ -198,10 +198,12 @@ function unDisguise(text: string): string {
 // Anything with a scheme or www. is a link. So is a bare name like
 // "gm-drop.sbs", "telegra.ph" or "claim.example.foo", judged by countsAsLink
 // below. Labels may be in any script ("gm-drор.xyz" with a Cyrillic о and р
-// is a real, registrable name).
+// is a real, registrable name). At most 10 labels before the ending: real
+// names never need more, and an unbounded run lets a message of one-letter
+// labels ("ж.ж.ж...") make the match backtrack for a quarter of a second.
 const LABEL = "[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?";
 const LINK = new RegExp(
-  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|(?<![\\p{L}\\p{N}_-])(?:${LABEL}\\.)+(?:\\p{L}{2,24}|xn--[a-z0-9-]{1,59})(?![\\p{L}\\p{N}_-])(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
+  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|(?<![\\p{L}\\p{N}_-])(?:${LABEL}\\.){1,10}(?:\\p{L}{2,24}|xn--[a-z0-9-]{1,59})(?![\\p{L}\\p{N}_-])(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
   "giu",
 );
 
