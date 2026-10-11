@@ -3,7 +3,7 @@ export const PON = {
   minAccountDays: 3,
   neighboursNeeded: 5,
   overlapSeconds: 60, // sharing a room means being there together for a minute
-  openVisitCapHours: 6, // a visit whose end was never reported counts for at most this long
+  openVisitCapHours: 6, // a visit whose end was never reported counts for at most this long (for neighbours, every visit does)
   codeTtlMinutes: 10,
   codeAttempts: 5,
   startsPerHour: 3,

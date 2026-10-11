@@ -169,6 +169,35 @@ describe("sharing rooms in person", () => {
     expect(await sharedNeighbours(db, a)).toBe(0);
   });
 
+  it("any visit counts for its first 6 hours at most: arriving 7 hours into a long one isn't time together", async () => {
+    const [a, b] = [await makeResident(db), await makeResident(db)];
+    const r = room();
+    const H = 60 * MIN;
+    const t = new Date(Date.now() - 20 * H);
+    await recordVisit(db, { userId: a, room: r, event: "start", at: t });
+    await recordVisit(db, { userId: a, room: r, event: "end", at: new Date(t.getTime() + 9 * H) }); // a 9-hour visit
+    await recordVisit(db, { userId: b, room: r, event: "start", at: new Date(t.getTime() + 7 * H) });
+    await recordVisit(db, { userId: b, room: r, event: "end", at: new Date(t.getTime() + 8 * H) });
+    expect(await sharedNeighbours(db, a)).toBe(0);
+    expect(await sharedNeighbours(db, b)).toBe(0);
+  });
+
+  it("the last minute of those 6 hours still counts, seen from either visit", async () => {
+    const [a, b, c] = [await makeResident(db), await makeResident(db), await makeResident(db)];
+    const r = room();
+    const H = 60 * MIN;
+    const t = new Date(Date.now() - 20 * H);
+    await recordVisit(db, { userId: a, room: r, event: "start", at: t });
+    await recordVisit(db, { userId: a, room: r, event: "end", at: new Date(t.getTime() + 10 * H) });
+    await recordVisit(db, { userId: b, room: r, event: "start", at: new Date(t.getTime() + 6 * H - MIN) }); // one minute before a's 6 hours are up
+    await recordVisit(db, { userId: b, room: r, event: "end", at: new Date(t.getTime() + 7 * H) });
+    await recordVisit(db, { userId: c, room: r, event: "start", at: new Date(t.getTime() + 6 * H - 30_000) }); // only 30 seconds before
+    await recordVisit(db, { userId: c, room: r, event: "end", at: new Date(t.getTime() + 7 * H) });
+    expect(await sharedNeighbours(db, a)).toBe(1);
+    expect(await sharedNeighbours(db, b)).toBe(2); // a, and c (an hour together)
+    expect(await sharedNeighbours(db, c)).toBe(1); // b only
+  });
+
   it("a reconnect without an end closes the old visit, and junk visits are refused", async () => {
     const a = await makeResident(db);
     const r = room();
@@ -197,6 +226,18 @@ describe("the checklist", () => {
     expect(done).toMatchObject({ neighbours: 5, proofOfNeighbour: true });
     const [u] = await client`SELECT proof_of_neighbour_at FROM users WHERE id = ${me}`;
     expect(u!.proof_of_neighbour_at).not.toBeNull();
+  });
+
+  it("once the mark is set it stays, and the rooms aren't counted again", async () => {
+    const me = await makeResident(db);
+    await client`UPDATE users SET created_at = now() - interval '4 days' WHERE id = ${me}`;
+    await verifyPhone(me);
+    const r = room();
+    const t = new Date(Date.now() - 30 * MIN);
+    await recordVisit(db, { userId: me, room: r, event: "start", at: t });
+    for (let i = 0; i < 5; i++) await recordVisit(db, { userId: await makeResident(db), room: r, event: "start", at: t });
+    expect(await ponStatus(db, me)).toMatchObject({ neighbours: 5, proofOfNeighbour: true });
+    expect(await ponStatus(db, me)).toMatchObject({ ageOk: true, verified: ["phone"], neighbours: null, proofOfNeighbour: true });
   });
 
   it("a brand-new account waits 3 days, even verified with 5 neighbours", async () => {

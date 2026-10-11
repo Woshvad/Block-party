@@ -353,7 +353,8 @@ export type Moods = {
 // A Mod Shift as the server sees it: the queue only while it can be answered;
 // pay null until it's decided (handed in, or the answer window missed).
 export type ShiftNow = { shiftId: string; items: { text: string }[] | null; answerBy: string; endsAt: string; answered: boolean; score: number | null; pay: number | null; collectable: boolean };
-export type Pon = { ageOk: boolean; verified: string[]; neighbours: number; neighboursNeeded: number; proofOfNeighbour: boolean; since: string | null };
+// neighbours is null once proven: the mark is kept for good, so rooms aren't counted again.
+export type Pon = { ageOk: boolean; verified: string[]; neighboursNeeded: number; since: string | null } & ({ proofOfNeighbour: false; neighbours: number } | { proofOfNeighbour: true; neighbours: null });
 export type Prefs = { timeZone: string; quietStart: number; quietEnd: number; alerts: string[]; bell2h: boolean; pushOff: boolean };
 export type Restriction = { id: string; kind: string; reason: string; startsAt: string; endsAt: string | null };
 export type Law = { id: string; name: string; touches: string[]; effects: Record<string, unknown> };

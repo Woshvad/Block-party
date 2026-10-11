@@ -142,17 +142,23 @@ export async function recordVisit(db: Db, input: { userId: string; room: string;
 }
 
 // Distinct residents you've been in the same room copy with for a minute or more.
+// Every visit counts for its first 6 hours at most (PON.openVisitCapHours, the
+// same cap as a visit whose end never arrived), so two visits can only overlap
+// if they started less than 6 hours apart. That bound is spelled out on
+// joined_at, so the (room, joined_at) index reads those hours of a room copy's
+// history rather than every visit it has ever had (copies are reused forever).
 export async function sharedNeighbours(db: Db, userId: string, now = new Date()): Promise<number> {
   const cap = `${PON.openVisitCapHours} hours`;
   const [r] = await db.execute<{ n: number }>(sql`
     SELECT count(DISTINCT v2.user_id)::int AS n
     FROM room_visits v1
     JOIN room_visits v2 ON v2.room = v1.room AND v2.user_id <> v1.user_id
+      AND v2.joined_at > v1.joined_at - ${cap}::interval AND v2.joined_at < v1.joined_at + ${cap}::interval
     JOIN residents res ON res.user_id = v2.user_id
     WHERE v1.user_id = ${userId}
       AND LEAST(
-            COALESCE(v1.left_at, LEAST(${now.toISOString()}::timestamptz, v1.joined_at + ${cap}::interval)),
-            COALESCE(v2.left_at, LEAST(${now.toISOString()}::timestamptz, v2.joined_at + ${cap}::interval)))
+            LEAST(COALESCE(v1.left_at, ${now.toISOString()}::timestamptz), v1.joined_at + ${cap}::interval),
+            LEAST(COALESCE(v2.left_at, ${now.toISOString()}::timestamptz), v2.joined_at + ${cap}::interval))
           - GREATEST(v1.joined_at, v2.joined_at) >= make_interval(secs => ${PON.overlapSeconds})`);
   return r?.n ?? 0;
 }
@@ -166,10 +172,11 @@ export async function ponStatus(db: Db, userId: string, opts: { now?: Date } = {
   if (!u) throw new PonError("INVALID_INPUT", "no such resident");
   const verified = (await db.select({ kind: verifiedIdentities.kind }).from(verifiedIdentities).where(eq(verifiedIdentities.userId, userId))).map((v) => v.kind);
   const ageDays = (now.getTime() - u.createdAt.getTime()) / 86_400_000;
-  const neighbours = await sharedNeighbours(db, userId, now);
+  // The mark is kept for good, so once it's set the rooms aren't counted again (null).
+  const neighbours = u.pon ? null : await sharedNeighbours(db, userId, now);
   const checks = { ageOk: ageDays >= PON.minAccountDays, verified, neighbours, neighboursNeeded: PON.neighboursNeeded };
   let since = u.pon;
-  if (!since && checks.ageOk && verified.length > 0 && neighbours >= PON.neighboursNeeded) {
+  if (!since && checks.ageOk && verified.length > 0 && neighbours !== null && neighbours >= PON.neighboursNeeded) {
     await db.update(users).set({ proofOfNeighbourAt: now }).where(and(eq(users.id, userId), isNull(users.proofOfNeighbourAt)));
     since = now;
   }
