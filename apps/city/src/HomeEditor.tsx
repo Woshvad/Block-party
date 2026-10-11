@@ -2,7 +2,8 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { useRef, useState } from "react";
-import { ApiError, type Api, type Home, type Placement, newKey } from "./api";
+import { ActionKeys } from "./actionKeys";
+import { ApiError, type Api, type Home, type Placement } from "./api";
 import { countdown, useNow } from "./clock";
 import { RoomCamera, RoomLighting } from "./RoomLighting";
 import { HomeRoom } from "./HomeRoom";
@@ -28,7 +29,7 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   const [sheet, setSheet] = useState<Sheet>(null);
   const [msg, setMsg] = useToast<{ text: string; bad: boolean }>();
   const busy = useRef(false);
-  const buyKeys = useRef(new Map<string, string>());
+  const [buyKeys] = useState(() => new ActionKeys());
   const catalogue = useLoad(() => (sheet === "shop" ? api.catalogue() : Promise.resolve(null)), [api, sheet]);
   const now = useNow(1000);
 
@@ -220,13 +221,8 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
                               disabled={(p.price ?? 0) > gm}
                               onClick={() => {
                                 // Same tap retried: same key, never charged twice.
-                                const key = buyKeys.current.get(p.id) ?? newKey();
-                                buyKeys.current.set(p.id, key);
-                                void run(() => api.buy(p.id, key), `${itemLabel(p.id)} is in your storage`).then((ok) => {
-                                  if (ok) {
-                                    buyKeys.current.delete(p.id);
-                                    onGm();
-                                  }
+                                void run(() => buyKeys.send(p.id, (key) => api.buy(p.id, key)), `${itemLabel(p.id)} is in your storage`).then((ok) => {
+                                  if (ok) onGm();
                                 });
                               }}
                             >

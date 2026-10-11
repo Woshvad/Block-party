@@ -1,7 +1,8 @@
 "use client";
 import { ALERT_KINDS, GM, GOALS, RENT, TRAITS } from "@bp/core";
-import { useEffect, useRef, useState } from "react";
-import { type Api, type Me, newKey } from "../api";
+import { useEffect, useState } from "react";
+import { ActionKeys } from "../actionKeys";
+import { type Api, type Me } from "../api";
 import { toggleTrait } from "../draft";
 import { label, plural } from "../palette";
 import { Loading, Page, useAction } from "../ui";
@@ -31,7 +32,7 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
   const [name, setName] = useState(r.name);
   const [traits, setTraits] = useState<string[]>(r.traits);
   const [appeal, setAppeal] = useState<Record<string, string>>({});
-  const keys = useRef({ copium: newKey(), hodl: newKey() });
+  const [keys] = useState(() => new ActionKeys());
   useEffect(() => {
     setTraits(r.traits);
   }, [r.traits]);
@@ -120,8 +121,7 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
                 className="btn light"
                 disabled={act.pending}
                 onClick={() =>
-                  act.run(() => api.copium(keys.current.copium), (x) => ((x as { paid?: boolean }).paid ? "Copium taken: feeling better" : "Free Copium taken")).then((x) => {
-                    keys.current.copium = newKey();
+                  act.run(() => keys.send("copium", (key) => api.copium(key)), (x) => ((x as { paid?: boolean }).paid ? "Copium taken: feeling better" : "Free Copium taken")).then((x) => {
                     if (x) {
                       void moods.reload();
                       onChanged();
@@ -158,8 +158,7 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
                 className="btn light"
                 disabled={act.pending || today.data.hodlDays >= GM.hodlDayMax || me.gm < GM.hodlDayPrice}
                 onClick={() =>
-                  act.run(() => api.hodlDay(keys.current.hodl), "Hodl Day saved").then((x) => {
-                    keys.current.hodl = newKey();
+                  act.run(() => keys.send("hodl", (key) => api.hodlDay(key)), "Hodl Day saved").then((x) => {
                     if (x) {
                       void today.reload();
                       onChanged();
