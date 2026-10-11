@@ -9,6 +9,7 @@ import {
   createInvite,
   crewTable,
   depositToPot,
+  dissolveCrew,
   ensureSystemAccounts,
   getBalance,
   makeCall,
@@ -22,6 +23,7 @@ import {
   setPrefs,
   shakeSyndicate,
   stakeCity,
+  supplyStats,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -130,6 +132,45 @@ describe("a syndicate on a City market", () => {
     await resolveCityMarket(db, s, m.id, "yes");
     await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] });
     expect(await getBalance(db, crewPotAccountId(crewId))).toBe(100 + 50); // stake back + the rival's 50 (a win of exactly 50 pays no bell burn)
+  });
+
+  it("two syndicates going live at once share the pot instead of both spending it", async () => {
+    const d0 = freshDay();
+    const s = await staffer();
+    const [m1, m2] = await Promise.all([1, 2].map((i) => createCityMarket(db, s, { question: `Shared pot market ${i}?`, kind: "manual", bellDay: dayOf(d0) }, { now: new Date(d0) })));
+    const { people, crewId } = await crewOfSize(8);
+    for (const u of people) await sayGm(db, u, { now: new Date(d0 + H) }); // 2 shakes needed
+    await depositToPot(db, people[0]!, 50, `pot:${randomUUID()}`);
+    const at = new Date(d0 + 10 * H);
+    const p1 = await proposeSyndicate(db, people[0]!, { cityMarketId: m1!.id, side: "yes", perShake: 30 }, { now: at });
+    const p2 = await proposeSyndicate(db, people[1]!, { cityMarketId: m2!.id, side: "yes", perShake: 30 }, { now: at });
+    // Both go live together: each wants 60 from a pot of 50.
+    const res = await releaseTogether(client, "SELECT 1 FROM gm_accounts WHERE id = $1 FOR UPDATE", [crewPotAccountId(crewId)], 2, [
+      () => shakeSyndicate(db, people[2]!, p1.id, {}, { now: at }),
+      () => shakeSyndicate(db, people[3]!, p2.id, {}, { now: at }),
+    ]);
+    expect(res.map((r) => (r.ok ? r.v.status : String(r.e)))).toEqual(["live", "live"]);
+    expect((await getBalance(db, cityAccountId(m1!.id))) + (await getBalance(db, cityAccountId(m2!.id)))).toBe(50);
+    expect(await getBalance(db, crewPotAccountId(crewId))).toBe(0);
+  });
+
+  it("a crew that dissolves with a syndicate stake open: its winnings burn, nothing lands in the dead pot", async () => {
+    const d0 = freshDay();
+    const s = await staffer();
+    const m = await createCityMarket(db, s, { question: "Will the crew outlive it?", kind: "manual", bellDay: dayOf(d0) }, { now: new Date(d0) });
+    const { people, crewId } = await crewOfSize(4); // nobody said gm: 1 shake needed
+    await depositToPot(db, people[0]!, 100, `pot:${randomUUID()}`);
+    const at = new Date(d0 + 10 * H);
+    await proposeSyndicate(db, people[0]!, { cityMarketId: m.id, side: "yes", perShake: 30 }, { now: at });
+    const rival = await makeResident(db);
+    await stakeCity(db, rival, { marketId: m.id, side: "no", stake: 50 }, { now: at });
+    expect(await dissolveCrew(db, people[0]!)).toEqual({ burned: 70 });
+    await resolveCityMarket(db, s, m.id, "yes");
+    const burned0 = (await supplyStats(db)).destroyed;
+    await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] });
+    expect(await getBalance(db, crewPotAccountId(crewId))).toBe(0);
+    expect(await getBalance(db, cityAccountId(m.id))).toBe(0);
+    expect((await supplyStats(db)).destroyed - burned0).toBe(30 + 50); // its stake back plus the rival's 50, burned
   });
 
   it("racing shakes at the threshold stake exactly once each", async () => {

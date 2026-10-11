@@ -1,10 +1,10 @@
 import { CITY, type CityDay, PLACE_RE, PON, SEASON_EPOCH, SEASON_LENGTH_DAYS, addDays, cityAccountId, cityDay, cityStakeCap, crewPotAccountId, seasonOf, settleCity, userAccountId } from "@bp/core";
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { burn, getBalance, openEscrowAccount, transfer } from "./ledger";
 import { moodState } from "./moods";
 import { isStaff } from "./safety";
-import { cityMarkets, cityPositions, residents, users } from "./schema";
+import { cityMarkets, cityPositions, crews, residents, users } from "./schema";
 import { spendTicket } from "./tower";
 
 export class CityMarketError extends Error {
@@ -148,11 +148,27 @@ export async function settleCityMarkets(db: Db, bellDay: CityDay, now: Date) {
               positions.map((p) => ({ id: p.id, side: p.side, stake: p.stake })),
               result,
             );
+      // A crew's syndicate stake pays back into its pot, unless the crew has
+      // dissolved since: its pot was burned, so what it would get burns too
+      // (pot GM never goes back to members). The share lock, taken before any
+      // ledger lock, keeps a dissolve from landing between check and payout.
+      const crewIds = [...new Set(positions.flatMap((p) => (p.crewId ? [p.crewId] : [])))].sort();
+      const dissolved = new Set(
+        crewIds.length
+          ? (await tx.select({ id: crews.id, dissolvedAt: crews.dissolvedAt }).from(crews).where(inArray(crews.id, crewIds)).orderBy(asc(crews.id)).for("share"))
+              .filter((c) => c.dissolvedAt)
+              .map((c) => c.id)
+          : [],
+      );
       for (const p of positions) {
         const amount = plan.payouts.get(p.id) ?? 0;
-        // A crew's syndicate stake pays back into its pot.
-        const to = p.crewId ? crewPotAccountId(p.crewId) : userAccountId(p.userId!);
-        if (amount > 0) await transfer(tx, { from: cityAccountId(m.id), to, amount, kind: result === null ? "city_refund" : "city_payout", idempotencyKey: `city:${m.id}:${p.crewId ?? p.userId}:payout` });
+        const key = `city:${m.id}:${p.crewId ?? p.userId}:payout`;
+        if (amount > 0 && p.crewId && dissolved.has(p.crewId)) {
+          await burn(tx, { accountId: cityAccountId(m.id), amount, kind: "crew_dissolve", idempotencyKey: key, meta: { crewId: p.crewId } });
+        } else if (amount > 0) {
+          const to = p.crewId ? crewPotAccountId(p.crewId) : userAccountId(p.userId!);
+          await transfer(tx, { from: cityAccountId(m.id), to, amount, kind: result === null ? "city_refund" : "city_payout", idempotencyKey: key });
+        }
         await tx.update(cityPositions).set({ payout: amount }).where(eq(cityPositions.id, p.id));
       }
       if (plan.burned > 0) await burn(tx, { accountId: cityAccountId(m.id), amount: plan.burned, kind: "city_bell_burn", idempotencyKey: `city:${m.id}:bell_burn` });

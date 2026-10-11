@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { crewPotAccountId, lightsAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LightsError, bidLights, createCrew, createDb, createInvite, depositToPot, ensureSystemAccounts, getBalance, lightsBoard, lightsWinner, redeemInvite, reel, runBell, setDeputy, settleLights, supplyStats } from "../src";
+import { LightsError, bidLights, createCrew, createDb, createInvite, depositToPot, dissolveCrew, ensureSystemAccounts, getBalance, lightsBoard, lightsWinner, redeemInvite, reel, runBell, setDeputy, settleLights, supplyStats } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
 const { db, client, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 30 });
@@ -95,6 +95,49 @@ describe("Tower Lights", () => {
     expect(await pot(b.id)).toBe(500);
     expect(await getBalance(db, lightsAccountId(dayOf(d0)))).toBe(0);
     expect(await lightsWinner(db, dayOf(d0))).toEqual({ crew: b.name, amount: 1300 });
+  });
+
+  it("a crew that dissolves after bidding: its refund burns, nothing lands in the dead pot", async () => {
+    const d0 = freshDay();
+    await settleLights(db, dayOf(d0 - D)); // only this test's bids
+    const at = new Date(d0 + 10 * H);
+    const [a, b] = [await crew(), await crew()];
+    await bidLights(db, a.lead, 1100, { now: at });
+    await bidLights(db, b.lead, 1300, { now: at });
+    expect(await dissolveCrew(db, a.lead)).toEqual({ burned: 700 });
+    const burned0 = (await supplyStats(db)).destroyed;
+    await runBell(db, { now: new Date(d0 + D + 60_000), only: ["tower"] });
+    expect(await pot(a.id)).toBe(0);
+    expect(await pot(b.id)).toBe(500);
+    expect(await getBalance(db, lightsAccountId(dayOf(d0)))).toBe(0);
+    expect((await supplyStats(db)).destroyed - burned0).toBe(1300 + 1100);
+  });
+
+  it("a dissolve racing a bid: the bid leaves first and the dissolve burns what's left, no error", async () => {
+    const d0 = freshDay();
+    const at = new Date(d0 + 10 * H);
+    const c = await crew(); // 1800 in the pot
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM gm_accounts WHERE id = ${crewPotAccountId(c.id)} FOR UPDATE`;
+    const waiting = async (n: number) => {
+      for (let i = 0; i < 300; i++) {
+        const [w] = await client`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+        if (w!.n >= n) return;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      throw new Error("racers never queued");
+    };
+    const settled = (p: Promise<unknown>) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e: String(e) }));
+    const bid = settled(bidLights(db, c.lead, 1200, { now: at })); // queues first on the pot
+    await waiting(1);
+    const dissolve = settled(dissolveCrew(db, c.lead));
+    await waiting(2);
+    await barrier`COMMIT`;
+    barrier.release();
+    expect(await bid).toEqual({ ok: true, v: { cityDay: dayOf(d0), amount: 1200 } });
+    expect(await dissolve).toEqual({ ok: true, v: { burned: 600 } });
+    expect(await pot(c.id)).toBe(0);
   });
 
   it("racing bids from two crews: the books always balance", async () => {

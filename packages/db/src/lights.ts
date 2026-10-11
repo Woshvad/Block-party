@@ -98,10 +98,17 @@ async function settleLightsDay(db: Db, day: CityDay) {
     const bids = await tx.select().from(lightBids).where(and(eq(lightBids.cityDay, day), eq(lightBids.status, "open")));
     const top = topBid(bids.map((b) => ({ ...b, at: b.at.getTime() })));
     if (!top) return null;
+    // A crew that dissolved after bidding has no pot to go home to (it was
+    // burned): its refund burns instead. The share lock, taken before any
+    // ledger lock, keeps a dissolve from landing between check and refund.
+    const crewRows = await tx.select({ id: crews.id, dissolvedAt: crews.dissolvedAt }).from(crews).where(inArray(crews.id, bids.map((b) => b.crewId))).orderBy(asc(crews.id)).for("share");
+    const dissolved = new Set(crewRows.filter((c) => c.dissolvedAt).map((c) => c.id));
     await burn(tx, { accountId: lightsAccountId(day), amount: top.amount, kind: "tower_lights", idempotencyKey: `lights:${day}:burn` });
     for (const b of bids) {
       if (b.crewId === top.crewId) continue;
-      await transfer(tx, { from: lightsAccountId(day), to: crewPotAccountId(b.crewId), amount: b.amount, kind: "lights_refund", idempotencyKey: `lights:${day}:${b.crewId}:refund` });
+      const key = `lights:${day}:${b.crewId}:refund`;
+      if (dissolved.has(b.crewId)) await burn(tx, { accountId: lightsAccountId(day), amount: b.amount, kind: "crew_dissolve", idempotencyKey: key, meta: { crewId: b.crewId } });
+      else await transfer(tx, { from: lightsAccountId(day), to: crewPotAccountId(b.crewId), amount: b.amount, kind: "lights_refund", idempotencyKey: key });
     }
     await tx.update(lightBids).set({ status: sql`CASE WHEN ${lightBids.crewId} = ${top.crewId} THEN 'won'::light_bid_status ELSE 'refunded'::light_bid_status END` }).where(and(eq(lightBids.cityDay, day), inArray(lightBids.crewId, bids.map((b) => b.crewId))));
     return { crewId: top.crewId, amount: top.amount };

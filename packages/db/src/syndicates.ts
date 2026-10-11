@@ -1,9 +1,9 @@
 import { SYNDICATE, cityAccountId, cityDay, crewPotAccountId, shakesNeeded, sliderStart } from "@bp/core";
 import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { getBalance, transfer } from "./ledger";
+import { lockAccounts, transfer } from "./ledger";
 import { notify } from "./notify";
-import { calls, cityMarkets, cityPositions, crewMembers, dailyGm, markets, residents, syndicateShakes, syndicates } from "./schema";
+import { calls, cityMarkets, cityPositions, crewMembers, crews, dailyGm, markets, residents, syndicateShakes, syndicates } from "./schema";
 import { makeCall } from "./tower";
 
 export class SyndicateError extends Error {
@@ -124,9 +124,15 @@ export async function shakeSyndicate(db: Db, userId: string, syndicateId: unknow
     }
     // A live City syndicate stakes perShake per shaker from the pot (as far as the pot goes).
     if (status === "live" && cur!.cityMarketId) {
+      // The crew first (shared, so a dissolve can't burn the pot under us),
+      // then the pot under the ledger's own lock, in its order: two shakes at
+      // once each see what the other left, rather than both spending it.
+      const [crew] = await tx.select({ dissolvedAt: crews.dissolvedAt }).from(crews).where(eq(crews.id, cur!.crewId)).for("share");
+      if (!crew || crew.dissolvedAt) throw new SyndicateError("NOT_IN_CREW", "that crew has dissolved");
       const pot = crewPotAccountId(cur!.crewId);
       const want = (cur!.status === "proposed" ? n!.n : 1) * cur!.perShake!;
-      const amount = Math.min(want, await getBalance(tx, pot));
+      const inPot = (await lockAccounts(tx, [pot, cityAccountId(cur!.cityMarketId)])).get(pot) ?? 0;
+      const amount = Math.min(want, inPot);
       if (amount > 0) {
         await transfer(tx, { from: pot, to: cityAccountId(cur!.cityMarketId), amount, kind: "syndicate_stake", idempotencyKey: `syndicate:${s.id}:${userId}` });
         const [pos] = await tx
