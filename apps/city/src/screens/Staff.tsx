@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Api } from "../api";
 import { label } from "../palette";
 import { Loading, Page, useAction } from "../ui";
+import { RESTRICT_FOR, itemPlace, resolveProblem, reviewChoices } from "../staffForms";
 import { useLoad } from "../useLoad";
 import { handleOf, useWho } from "../who";
 
@@ -13,19 +14,20 @@ type Any = Record<string, unknown>;
 const RESTRICTIONS = ["chat_mute", "suspended"] as const;
 
 export default function Staff({ api, onBack }: { api: Api; onBack: () => void }) {
-  const [tab, setTab] = useState<"reports" | "appeals" | "markets" | "alts" | "controls">("reports");
+  const [tab, setTab] = useState<"reports" | "flagged" | "appeals" | "markets" | "alts" | "controls">("reports");
   const act = useAction();
   return (
     <Page title="Staff" onBack={onBack}>
       {act.toast}
       <div className="chips">
-        {(["reports", "appeals", "markets", "alts", "controls"] as const).map((t) => (
+        {(["reports", "flagged", "appeals", "markets", "alts", "controls"] as const).map((t) => (
           <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
             {label(t)}
           </button>
         ))}
       </div>
       {tab === "reports" && <Reports api={api} act={act} />}
+      {tab === "flagged" && <Flagged api={api} act={act} />}
       {tab === "appeals" && <Appeals api={api} act={act} />}
       {tab === "markets" && <Markets api={api} act={act} />}
       {tab === "alts" && <Alts api={api} />}
@@ -41,6 +43,9 @@ function Reports({ api, act }: { api: Api; act: Act }) {
   const sla = useLoad(() => api.sla(new Date(Date.now() - 7 * 86_400_000).toISOString(), new Date().toISOString()).catch(() => null), [api]);
   const [note, setNote] = useState<Record<string, string>>({});
   const [kind, setKind] = useState<Record<string, string>>({});
+  // The reason the resident reads, separate from the staff note.
+  const [reason, setReason] = useState<Record<string, string>>({});
+  const [hours, setHours] = useState<Record<string, number | null>>({});
   useWho(api, (reports.data ?? []).flatMap((r) => [String(r.targetUserId ?? ""), String(r.reporterId ?? "")]).filter(Boolean));
   if (!reports.data) return <Loading error={reports.error} retry={reports.reload} />;
   return (
@@ -50,6 +55,10 @@ function Reports({ api, act }: { api: Api; act: Act }) {
       {reports.data.map((r) => {
         const id = String(r.id);
         const target = String(r.targetUserId ?? "");
+        const forHours = hours[id] === undefined ? RESTRICT_FOR[0]!.hours : hours[id]!;
+        const dismissBlocked = resolveProblem({ action: "dismiss", note: note[id] ?? "" });
+        const restrictBlocked = resolveProblem({ action: "restrict", note: note[id] ?? "", kind: kind[id], reason: reason[id] });
+        const forLabel = RESTRICT_FOR.find((d) => d.hours === forHours)?.label ?? "";
         return (
           <section className="card" key={id}>
             <p>
@@ -76,21 +85,79 @@ function Reports({ api, act }: { api: Api; act: Act }) {
                 </button>
               ))}
             </div>
+            {kind[id] && (
+              <>
+                <label className="field">
+                  Reason the resident reads
+                  <input value={reason[id] ?? ""} onChange={(e) => setReason({ ...reason, [id]: e.target.value })} />
+                </label>
+                <div className="chips">
+                  {RESTRICT_FOR.map((d) => (
+                    <button key={d.label} className={forHours === d.hours ? "on" : ""} onClick={() => setHours({ ...hours, [id]: d.hours })}>
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {note[id]?.trim() && (kind[id] ? restrictBlocked : dismissBlocked) && <p className="muted">{kind[id] ? restrictBlocked : dismissBlocked}</p>}
             <div className="btnrow">
-              <button className="btn light" disabled={!note[id]?.trim()} onClick={() => act.run(() => api.resolveReport(id, { action: "dismiss", note: note[id]! }), "Dismissed").then(() => reports.reload())}>
+              <button className="btn light" disabled={!!dismissBlocked} onClick={() => act.run(() => api.resolveReport(id, { action: "dismiss", note: note[id]!.trim() }), "Dismissed").then(() => reports.reload())}>
                 Dismiss
               </button>
               <button
                 className="btn danger"
-                disabled={!note[id]?.trim() || !kind[id]}
-                onClick={() => act.run(() => api.resolveReport(id, { action: "restrict", note: note[id]!, restriction: { kind: kind[id]!, hours: 24, reason: note[id]! } }), "Restricted for 24 h").then(() => reports.reload())}
+                disabled={!!restrictBlocked}
+                onClick={() =>
+                  act
+                    .run(
+                      () =>
+                        api.resolveReport(id, {
+                          action: "restrict",
+                          note: note[id]!.trim(),
+                          restriction: { kind: kind[id]!, reason: reason[id]!.trim(), ...(forHours === null ? {} : { hours: forHours }) },
+                        }),
+                      `Restricted: ${forLabel}`,
+                    )
+                    .then(() => reports.reload())
+                }
               >
-                Restrict 24 h
+                Restrict{kind[id] ? `: ${forLabel}` : ""}
               </button>
             </div>
           </section>
         );
       })}
+    </>
+  );
+}
+
+// What the AI check flagged (already taken down) or couldn't check (still
+// up), oldest first, waiting for a person to decide.
+function Flagged({ api, act }: { api: Api; act: Act }) {
+  const items = useLoad(() => api.staffModeration(), [api]);
+  useWho(api, (items.data ?? []).map((i) => i.authorId ?? "").filter(Boolean));
+  if (!items.data) return <Loading error={items.error} retry={items.reload} />;
+  return (
+    <>
+      {items.data.length === 0 && <p className="muted">Nothing flagged.</p>}
+      {items.data.map((item) => (
+        <section className="card" key={item.id}>
+          <p>
+            <b>{itemPlace(item)}</b>
+            {item.authorId ? ` by ${handleOf(item.authorId)}` : ""} · {item.status === "error" ? "the AI check couldn't read it; still up" : `flagged: ${item.categories.map(label).join(", ") || "no category"}; taken down`}
+          </p>
+          <p className="notice">"{item.text}"</p>
+          {item.authorId && <p className="muted">Resident id: {item.authorId}</p>}
+          <div className="btnrow">
+            {reviewChoices(item).map((c) => (
+              <button key={c.verdict} className={c.verdict === "remove" ? "btn danger" : "btn light"} onClick={() => act.run(() => api.reviewModeration(item.id, c.verdict), c.label).then(() => items.reload())}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
     </>
   );
 }

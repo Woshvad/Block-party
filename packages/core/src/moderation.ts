@@ -11,6 +11,11 @@ export const MODERATION = {
   newAccountDmThreadsPerDay: 5,
   reportDueHours: 24,
   reportsPerDay: 20,
+  // Staff notes (closing a report, deciding an appeal) and appeals need 10
+  // characters; a restriction needs a longer reason, which the player reads
+  // (the EU statement of reasons).
+  noteMinChars: 10,
+  reasonMinChars: 20,
 } as const;
 
 export const LINK_ALLOWLIST = [

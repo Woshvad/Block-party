@@ -271,6 +271,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     resolveCityMarket: (id: string, result: "yes" | "no" | "void") => request<Record<string, unknown>>("POST", `/v1/staff/city-markets/${encodeURIComponent(id)}/resolve`, { result }),
     hideRatio: (id: string) => request<{ hidden: boolean }>("POST", `/v1/staff/ratio/${encodeURIComponent(id)}/hide`),
     altFlags: () => request<Record<string, unknown>[]>("GET", "/v1/staff/alt-flags"),
+    staffModeration: () => request<Array<{ id: string; kind: string; ref: string; authorId: string | null; text: string; status: string; categories: string[]; createdAt: string }>>("GET", "/v1/staff/moderation"),
+    reviewModeration: (id: string, verdict: "restore" | "remove") => request<Record<string, unknown>>("POST", `/v1/staff/moderation/${encodeURIComponent(id)}/review`, { verdict }),
     countrySwitch: (code: string, on: boolean) => request<Record<string, unknown>>("PUT", `/v1/staff/countries/${encodeURIComponent(code)}`, { on }),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };

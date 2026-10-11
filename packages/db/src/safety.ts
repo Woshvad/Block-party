@@ -203,7 +203,7 @@ export async function restrictUser(
   const userId = await requireUser(db, input.userId);
   if (input.kind !== "chat_mute" && input.kind !== "suspended") throw new SafetyError("INVALID_INPUT", "kind must be chat_mute or suspended");
   // The EU statement of reasons: the player gets to read why.
-  const reason = reasonText(input.reason, 20, "a restriction's reason");
+  const reason = reasonText(input.reason, MODERATION.reasonMinChars, "a restriction's reason");
   let endsAt: Date | null = null;
   if (input.hours !== undefined && input.hours !== null) {
     if (typeof input.hours !== "number" || !Number.isFinite(input.hours) || input.hours <= 0 || input.hours > 24 * 3650) {
@@ -229,7 +229,7 @@ export async function resolveReport(
   const now = opts.now ?? new Date();
   if (typeof reportId !== "string" || !UUID.test(reportId)) throw new SafetyError("NO_SUCH_REPORT", "no such report");
   if (input.action !== "dismiss" && input.action !== "restrict") throw new SafetyError("INVALID_INPUT", "action must be dismiss or restrict");
-  const note = reasonText(input.note, 10, "a resolution note");
+  const note = reasonText(input.note, MODERATION.noteMinChars, "a resolution note");
   return db.transaction(async (tx) => {
     const [rep] = await tx.select().from(reports).where(eq(reports.id, reportId)).for("no key update");
     if (!rep || rep.status !== "open") throw new SafetyError("NO_SUCH_REPORT", "no open report");
@@ -265,7 +265,7 @@ export async function isRestricted(db: Db, userId: string, kind: "chat_mute" | "
 export async function appealRestriction(db: Db, userId: string, restrictionId: unknown, text: unknown, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
   if (typeof restrictionId !== "string" || !UUID.test(restrictionId)) throw new SafetyError("NO_SUCH_RESTRICTION", "no such restriction");
-  const body = reasonText(text, 10, "an appeal");
+  const body = reasonText(text, MODERATION.noteMinChars, "an appeal");
   const [r] = await db.select().from(restrictions).where(and(eq(restrictions.id, restrictionId), eq(restrictions.userId, userId)));
   if (!r) throw new SafetyError("NO_SUCH_RESTRICTION", "no such restriction");
   const [a] = await db.insert(appeals).values({ restrictionId: r.id, userId, text: body, createdAt: now }).onConflictDoNothing().returning();
@@ -283,7 +283,7 @@ export async function decideAppeal(db: Db, staffId: string, appealId: unknown, i
   const now = opts.now ?? new Date();
   if (typeof appealId !== "string" || !UUID.test(appealId)) throw new SafetyError("NO_SUCH_APPEAL", "no such appeal");
   if (typeof input.overturn !== "boolean") throw new SafetyError("INVALID_INPUT", "overturn must be true or false");
-  const note = reasonText(input.note, 10, "a decision note");
+  const note = reasonText(input.note, MODERATION.noteMinChars, "a decision note");
   return db.transaction(async (tx) => {
     const [a] = await tx.select().from(appeals).where(eq(appeals.id, appealId)).for("no key update");
     if (!a || a.status !== "open") throw new SafetyError("NO_SUCH_APPEAL", "no open appeal");
