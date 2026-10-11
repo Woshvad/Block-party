@@ -850,8 +850,17 @@ export const moderationItems = pgTable(
     attempts: integer("attempts").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
+    // Staff's look at a flagged or failed item: "restored" (it was fine, put
+    // it back) or "removed" (it stays down).
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedBy: uuid("reviewed_by").references(() => users.id),
+    review: text("review"),
   },
-  (t) => [index("moderation_items_pending").on(t.createdAt).where(sql`${t.status} = 'pending'`)],
+  (t) => [
+    index("moderation_items_pending").on(t.createdAt).where(sql`${t.status} = 'pending'`),
+    index("moderation_items_for_staff").on(t.createdAt).where(sql`${t.status} IN ('flagged', 'error') AND ${t.reviewedAt} IS NULL`),
+    check("moderation_items_review", sql`(${t.reviewedAt} IS NULL) = (${t.review} IS NULL) AND (${t.review} IS NULL OR ${t.review} IN ('restored', 'removed'))`),
+  ],
 );
 
 // --- Frens and persistent chat ----------------------------------------------

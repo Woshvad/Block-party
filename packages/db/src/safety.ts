@@ -4,11 +4,29 @@ import {
   OPENAI_MODERATION_BATCH,
   REPORT_REASONS,
   type ReportReason,
+  crewNameKey,
 } from "@bp/core";
-import { and, asc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
-import { appeals, bestFrens, blocks, frenTaps, frens, moderationItems, mutes, reports, restrictions, rivalries, staff, users } from "./schema";
+import {
+  appeals,
+  bestFrens,
+  blocks,
+  candidates,
+  crews,
+  frenTaps,
+  frens,
+  messages,
+  moderationItems,
+  mutes,
+  ratioEntries,
+  reports,
+  restrictions,
+  rivalries,
+  staff,
+  users,
+} from "./schema";
 
 export type SafetyErrorCode =
   | "INVALID_INPUT"
@@ -21,7 +39,8 @@ export type SafetyErrorCode =
   | "ALREADY_APPEALED"
   | "NO_SUCH_APPEAL"
   | "RESTRICTED"
-  | "DM_LIMIT";
+  | "DM_LIMIT"
+  | "NO_SUCH_ITEM";
 
 export class SafetyError extends Error {
   constructor(
@@ -322,11 +341,11 @@ export const MAX_MODERATION_ATTEMPTS = 5;
 export async function runModerationBatch(
   db: Db,
   provider: ModerationProvider,
-  opts: { batchSize?: number; now?: Date; onFlagged?: (item: { id: string; kind: string; ref: string; authorId: string | null; categories: string[] }) => Promise<void> } = {},
+  opts: { batchSize?: number; now?: Date; onFlagged?: (item: FlaggedItem) => Promise<void> } = {},
 ) {
   const size = Math.min(opts.batchSize ?? OPENAI_MODERATION_BATCH, OPENAI_MODERATION_BATCH);
   const now = opts.now ?? new Date();
-  const flaggedItems: Array<{ id: string; kind: string; ref: string; authorId: string | null; categories: string[] }> = [];
+  const flaggedItems: FlaggedItem[] = [];
   const outcome = await db.transaction(async (tx) => {
     const batch = await tx
       .select()
@@ -358,12 +377,144 @@ export async function runModerationBatch(
         .where(eq(moderationItems.id, b.id));
       if (r.flagged) {
         flagged++;
-        flaggedItems.push({ id: b.id, kind: b.kind, ref: b.ref, authorId: b.authorId, categories: r.categories });
+        flaggedItems.push({ id: b.id, kind: b.kind, ref: b.ref, authorId: b.authorId, text: b.text, categories: r.categories });
       }
     }
     return { checked: batch.length, flagged, failed: 0 };
   });
-  // Hooks run after commit (hide the message, open a staff case).
+  // Hooks run after commit (take the text down where it lives). Staff see
+  // every flagged and failed item in moderationQueue.
   for (const f of flaggedItems) await opts.onFlagged?.(f);
   return outcome;
+}
+
+export type FlaggedItem = { id: string; kind: string; ref: string; authorId: string | null; text: string; categories: string[] };
+
+// --- Flagged text: down until staff look at it --------------------------------
+
+// What a flagged Mayor pitch or crew name shows until staff have reviewed it.
+// The original stays in its moderation item, for staff to read and restore.
+export const PITCH_UNDER_REVIEW = "This pitch is waiting for a moderator.";
+export const CREW_NAME_UNDER_REVIEW = "Crew name under review";
+
+const PITCH_REF = /^(\d{4}-\d{2}-\d{2}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+type Takeable = { id?: string; kind: string; ref: string; text: string };
+
+// Takes flagged text down where it lives: board, crew and DM messages and
+// Ratio headlines are hidden; a pitch or crew name is swapped for the
+// placeholder above, but only while it still says what was flagged (a newer
+// pitch or a rename is checked on its own). Room lines live in the rooms
+// Worker, so the API takes those down. Resident names stay up: the handle is
+// fixed by a database guard, and staff deal with the resident instead.
+export async function takeDownFlagged(db: Db, item: Takeable) {
+  const { kind, ref, text } = item;
+  if (typeof ref !== "string" || typeof text !== "string") return;
+  if (kind === "board" && ref.startsWith("ratio:")) {
+    if (UUID.test(ref.slice(6))) await db.update(ratioEntries).set({ hidden: true }).where(eq(ratioEntries.id, ref.slice(6).toLowerCase()));
+  } else if (kind === "board" || kind === "crew" || kind === "dm") {
+    if (UUID.test(ref)) await db.update(messages).set({ hidden: true }).where(eq(messages.id, ref.toLowerCase()));
+  } else if (kind === "pitch") {
+    const m = PITCH_REF.exec(ref);
+    if (m) {
+      await db
+        .update(candidates)
+        .set({ pitch: PITCH_UNDER_REVIEW })
+        .where(and(eq(candidates.week, m[1]!), eq(candidates.userId, m[2]!.toLowerCase()), eq(candidates.pitch, text)));
+    }
+  } else if (kind === "crew_name") {
+    // The name key stays, so nobody else can take the name while it's under review.
+    if (UUID.test(ref)) await db.update(crews).set({ name: CREW_NAME_UNDER_REVIEW }).where(and(eq(crews.id, ref.toLowerCase()), eq(crews.name, text)));
+  }
+}
+
+// Staff found it was fine: the text goes back up. A pitch or crew name comes
+// back only if it still shows the placeholder and nothing newer has been
+// written there since.
+async function putBack(tx: Db, item: Takeable & { id: string }) {
+  const { kind, ref, text } = item;
+  // Compared in the database: a JavaScript Date drops the microseconds.
+  const newer = async () => {
+    const [n] = await tx
+      .select({ id: moderationItems.id })
+      .from(moderationItems)
+      .where(
+        and(
+          eq(moderationItems.kind, kind),
+          eq(moderationItems.ref, ref),
+          sql`${moderationItems.createdAt} > (SELECT m.created_at FROM moderation_items m WHERE m.id = ${item.id})`,
+        ),
+      )
+      .limit(1);
+    return !!n;
+  };
+  if (kind === "board" && ref.startsWith("ratio:")) {
+    if (UUID.test(ref.slice(6))) await tx.update(ratioEntries).set({ hidden: false }).where(eq(ratioEntries.id, ref.slice(6).toLowerCase()));
+  } else if (kind === "board" || kind === "crew" || kind === "dm") {
+    if (UUID.test(ref)) await tx.update(messages).set({ hidden: false }).where(eq(messages.id, ref.toLowerCase()));
+  } else if (kind === "pitch") {
+    const m = PITCH_REF.exec(ref);
+    if (m && !(await newer())) {
+      await tx
+        .update(candidates)
+        .set({ pitch: text })
+        .where(and(eq(candidates.week, m[1]!), eq(candidates.userId, m[2]!.toLowerCase()), eq(candidates.pitch, PITCH_UNDER_REVIEW)));
+    }
+  } else if (kind === "crew_name") {
+    if (UUID.test(ref) && !(await newer())) {
+      await tx
+        .update(crews)
+        .set({ name: text })
+        .where(and(eq(crews.id, ref.toLowerCase()), eq(crews.name, CREW_NAME_UNDER_REVIEW), eq(crews.nameKey, crewNameKey(text))));
+    }
+  }
+}
+
+// The staff queue: everything the AI check flagged, and everything it
+// couldn't check after 5 tries, that no one has reviewed yet. Oldest first.
+export async function moderationQueue(db: Db, staffId: string) {
+  await requireStaff(db, staffId);
+  return db
+    .select({
+      id: moderationItems.id,
+      kind: moderationItems.kind,
+      ref: moderationItems.ref,
+      authorId: moderationItems.authorId,
+      text: moderationItems.text,
+      status: moderationItems.status,
+      categories: moderationItems.categories,
+      attempts: moderationItems.attempts,
+      createdAt: moderationItems.createdAt,
+      checkedAt: moderationItems.checkedAt,
+    })
+    .from(moderationItems)
+    .where(and(inArray(moderationItems.status, ["flagged", "error"]), isNull(moderationItems.reviewedAt)))
+    .orderBy(asc(moderationItems.createdAt))
+    .limit(200);
+}
+
+// Staff's decision on one queued item: "restore" puts flagged text back (it
+// was fine); "remove" keeps it down, or takes down text the AI check never
+// managed to read. Returns the item as reviewed. Room lines can't come back;
+// the API takes a removed one down in the room.
+export async function reviewModerationItem(db: Db, staffId: string, itemId: unknown, verdict: unknown, opts: { now?: Date } = {}) {
+  await requireStaff(db, staffId);
+  const now = opts.now ?? new Date();
+  if (typeof itemId !== "string" || !UUID.test(itemId)) throw new SafetyError("NO_SUCH_ITEM", "no such item");
+  if (verdict !== "restore" && verdict !== "remove") throw new SafetyError("INVALID_INPUT", "verdict must be restore or remove");
+  return db.transaction(async (tx) => {
+    const [item] = await tx.select().from(moderationItems).where(eq(moderationItems.id, itemId.toLowerCase())).for("no key update");
+    if (!item || (item.status !== "flagged" && item.status !== "error") || item.reviewedAt) throw new SafetyError("NO_SUCH_ITEM", "nothing to review there");
+    if (verdict === "restore") {
+      if (item.status === "flagged") await putBack(tx, item);
+    } else {
+      await takeDownFlagged(tx, item);
+    }
+    const [done] = await tx
+      .update(moderationItems)
+      .set({ reviewedAt: now, reviewedBy: staffId, review: verdict === "restore" ? "restored" : "removed" })
+      .where(eq(moderationItems.id, item.id))
+      .returning();
+    return done!;
+  });
 }
