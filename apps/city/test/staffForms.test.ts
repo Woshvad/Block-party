@@ -1,6 +1,6 @@
 import { MODERATION } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { RESTRICT_FOR, itemPlace, resolveProblem, reviewChoices } from "../src/staffForms";
+import { RESTRICT_FOR, itemPlace, itemState, resolveProblem, reviewChoices } from "../src/staffForms";
 
 describe("closing a report from the staff console", () => {
   const note = "spam links ok"; // 13 characters: enough for a note, too short for a reason
@@ -39,5 +39,13 @@ describe("the flagged queue", () => {
     expect(verdicts("room", "flagged")).toEqual(["remove"]); // a room line can't come back
     expect(verdicts("board", "error")).toEqual(["restore", "remove"]);
     expect(reviewChoices({ kind: "board", status: "error" })[1]!.label).toBe("Take it down"); // still up: nothing was taken down yet
+  });
+});
+
+describe("where a flagged item stands", () => {
+  it("says what is down and what is still up", () => {
+    expect(itemState({ kind: "board", status: "flagged", categories: ["harassment", "hate_threatening"] })).toBe("flagged: harassment, hate threatening; taken down");
+    expect(itemState({ kind: "resident_name", status: "flagged", categories: ["hate"] })).toBe("flagged: hate; still shown");
+    expect(itemState({ kind: "pitch", status: "error", categories: [] })).toBe("the AI check couldn't read it; still up");
   });
 });

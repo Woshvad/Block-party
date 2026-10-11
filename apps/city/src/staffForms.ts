@@ -37,6 +37,15 @@ export function itemPlace(item: Pick<ModerationItem, "kind" | "ref">): string {
   return item.kind;
 }
 
+// Where a queued item stands: flagged text is down (a resident's handle and
+// name can't be taken down, so they stay shown); text the check couldn't
+// read is still up.
+export function itemState(item: Pick<ModerationItem, "kind" | "status" | "categories">): string {
+  if (item.status === "error") return "the AI check couldn't read it; still up";
+  const why = `flagged: ${item.categories.join(", ").replace(/_/g, " ") || "no category"}`;
+  return item.kind === "resident_name" ? `${why}; still shown` : `${why}; taken down`;
+}
+
 // The buttons a queued item gets. Flagged text is already down: staff put it
 // back or keep it down. Text the AI check never read is still up: staff pass
 // it or take it down. A room line can't come back once taken down, and a

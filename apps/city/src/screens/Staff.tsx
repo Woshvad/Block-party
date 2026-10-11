@@ -2,8 +2,8 @@
 import { useState } from "react";
 import type { Api } from "../api";
 import { label } from "../palette";
+import { RESTRICT_FOR, itemPlace, itemState, resolveProblem, reviewChoices } from "../staffForms";
 import { Loading, Page, useAction } from "../ui";
-import { RESTRICT_FOR, itemPlace, resolveProblem, reviewChoices } from "../staffForms";
 import { useLoad } from "../useLoad";
 import { handleOf, useWho } from "../who";
 
@@ -145,7 +145,7 @@ function Flagged({ api, act }: { api: Api; act: Act }) {
         <section className="card" key={item.id}>
           <p>
             <b>{itemPlace(item)}</b>
-            {item.authorId ? ` by ${handleOf(item.authorId)}` : ""} · {item.status === "error" ? "the AI check couldn't read it; still up" : `flagged: ${item.categories.map(label).join(", ") || "no category"}; taken down`}
+            {item.authorId ? ` by ${handleOf(item.authorId)}` : ""} · {itemState(item)}
           </p>
           <p className="notice">"{item.text}"</p>
           {item.authorId && <p className="muted">Resident id: {item.authorId}</p>}
