@@ -4,11 +4,8 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 
 ## Read this first: the state of the repo
 
-- **Branch `feat/backend-bricks`, local only.** There is no git remote yet and nothing has been pushed. Choose a host (GitHub or another) and push before anyone else clones the repo.
-- **A lot of work is uncommitted, and it belongs to two different people:**
-  - **Backend room-access work** (another developer): `apps/api/src/app.ts`, `apps/api/test/api.test.ts`, `apps/rooms/src/worker.ts`, `apps/rooms/test/rooms.test.ts`, `packages/core/src/{room,ticket}.ts`, `packages/core/test/room.test.ts`, `packages/db/src/{accounts,chat,real-money}.ts` and their tests. It adds `roomAccess` and `POST /internal/rooms/access`, and the rooms Worker now refreshes safety permissions before joins and actions.
-  - **Frontend polish pass** (the new frontend developer): the many modified and new files under `apps/city`, including the `*-preview` routes, `CityAtmosphere`, `CityWater`, `CityStreetGlow`, `RoomLighting`, `DinerQuarter` and `TodayView`.
-  - Review and commit each set on its own. Don't sweep them into one commit.
+- **Repo:** https://github.com/isaac-richie/Block-party, branch `feat/backend-bricks` (the default). The repo is **public**, so never commit `.env` or the product plan.
+- **Everything is committed.** The latest two commits are the room-access backend (`roomAccess`, `POST /internal/rooms/access`, visitor homes, binder and headcount routes) and the frontend polish pass (navigation, Today, onboarding, social and crew, the trophy wall and TV, the city atmosphere, water, the diner quarter, and the `*-preview` routes).
 - **`apps/api/src/app.ts` was rebuilt once.** On 10 October it was accidentally emptied while uncommitted, then rebuilt from the dev server's compiled cache. Its compiled output matches the lost version byte for byte, and it typechecks again. Any comments the room-access developer wrote in the room-ticket route and `/internal/rooms/access` were lost, so they should re-read both.
 - **Local settings:** the shared `.env` (symlinked as `apps/api/.env`) has `ODDS_SOURCE=polymarket`, so the local API polls live Polymarket. Use `mock` to work offline.
 - **Running it:** `.claude/launch.json` starts the city on :3100, the API on :8787 (set `LOCAL_CRON=1` for the minute cron) and rooms on :8788. To sign in, a dev button on the guest screen says "claim as a Telegram tester". `?perf` on the city shows draw calls, triangles and memory.
@@ -31,7 +28,7 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 
 ### 1. Build next (frontend and API)
 
-Done since this file was first written. All are in the working tree and not yet committed:
+Done since this file was first written:
 
 - [x] **The trophy wall and TV.** `GET /v1/homes/:id/binder` (the Receipt Binder) and `api.binder()`, drawn by `HomeDisplay.tsx`, with a `/home-display-preview` route.
 - [x] **Visitors see your furniture.** `GET /v1/homes/:id` returns placed furniture and finishes, never storage, when the door is open and nobody has blocked the other.
@@ -41,7 +38,6 @@ Done since this file was first written. All are in the working tree and not yet 
 
 Still open:
 
-- [ ] **Commit the work above.** It is still uncommitted in the working tree.
 - [ ] **Performance on a real mid-range phone inside Telegram.** This hasn't been measured; PERFORMANCE_BASELINE.md says how to do it. Desktop is already near the top of the budget, so check before adding more geometry.
 - [ ] **Not yet checked:** map labels at full zoom-in and at night, and the Watch Party and Diner screens in the browser.
 
