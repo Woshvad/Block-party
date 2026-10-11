@@ -207,11 +207,14 @@ function Strollers() {
   );
 }
 
-export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe, showcase = false }: { showcase?: boolean; api: Pick<Api, "cityHall" | "slate"> & Partial<Pick<Api, "headcounts">>; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
+// `active` false keeps the board mounted but hidden and not drawing, under
+// another screen (App.tsx), so coming back to it doesn't rebuild the city.
+export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe, showcase = false, active = true }: { showcase?: boolean; active?: boolean; api: Pick<Api, "cityHall" | "slate"> & Partial<Pick<Api, "headcounts">>; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
   const tier = deviceTier();
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  // Headcounts are polled only while the board shows.
   useEffect(() => {
-    if (!api.headcounts) return;
+    if (!api.headcounts || !active) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -221,9 +224,19 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
     };
     void poll();
     return () => { live = false; clearTimeout(timer); };
-  }, [api]);
+  }, [api, active]);
   const hall = useLoad(() => api.cityHall(), [api]);
   const slate = useLoad(() => api.slate(), [api]);
+  // Back on the board after another screen: the Mayor, the Law and the
+  // Slate's calls may have changed meanwhile.
+  const shown = useRef(active);
+  useEffect(() => {
+    if (active && !shown.current) {
+      void hall.reload();
+      void slate.reload();
+    }
+    shown.current = active;
+  }, [active]);
   const now = useNow(1000);
   const h = hall.data;
   const s = slate.data;
@@ -236,13 +249,21 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   const mapAction = (action: MapCommand["action"]) => setCommand((c) => ({ action, n: c.n + 1 }));
   useEffect(() => { if (showcase) mapAction("diner"); else mapAction("reset"); }, [showcase]);
   const perf = useRef<HTMLDivElement>(null);
+  // Hidden under another screen: close the place list and the place card,
+  // as leaving the board always has.
+  useEffect(() => {
+    if (!active) {
+      setGuide(false);
+      setPicked(null);
+    }
+  }, [active]);
   useBackLayer(guide, () => setGuide(false));
   useBackLayer(picked !== null, () => setPicked(null));
   useEffect(() => {
     initTelegram();
   }, []);
   return (
-    <>
+    <div className="city-board" hidden={!active}>
       {/* Mock values until the API is wired in phase 1. */}
       <button className="banner" onClick={onOpenHall} disabled={!onOpenHall} aria-label="Open City Hall">
         {h?.mayor ? (
@@ -313,7 +334,8 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
       )}
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
         <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
-          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }}>
+          {/* Hidden, it draws nothing ("never") but keeps everything it built. */}
+          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }}>
             <CityAtmosphere night={night} />
             <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
             {/* The sun, casting real shadows over the whole city. */}
@@ -376,6 +398,6 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
           </Canvas>
         </SceneBoundary>
       </div>
-    </>
+    </div>
   );
 }

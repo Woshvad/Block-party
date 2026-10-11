@@ -12,6 +12,7 @@ import { cityDetails } from "./cityDetails";
 import { CITY_SIZE, GRID, LANDMARKS, type Lot, SOON, SQUARE, blockRect, districtOf, fillCity, roads, zoneOf } from "./citygen";
 import Kit, { useBaked } from "./Kit";
 import { KIT, cityPlacements } from "./kitcity";
+import { due } from "./clock";
 import { type Car, type Lane, type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
 import { type Part, ball, box, colored, cyl, darker, prism } from "./geo";
 
@@ -484,9 +485,9 @@ function Billboards({ night }: { night: boolean }) {
   const textures = useMemo(() => canvases.map((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }), [canvases]);
   const series = useRef(boards.map((b) => Array.from({ length: 24 }, (_, k) => 64 + (b.up ? -k : k) * 1.4)));
   useEffect(() => () => textures.forEach((t) => t.dispose()), [textures]);
-  const last = useRef(0);
+  const last = useRef<number | null>(null);
   useFrame(({ clock }) => {
-    if (clock.elapsedTime - last.current < 1.2 && last.current) return;
+    if (!due(last.current, clock.elapsedTime, 1.2)) return;
     last.current = clock.elapsedTime;
     canvases.forEach((c, i) => {
       const g0 = c.getContext("2d")!;

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { backStack, useBackLayer } from "./back";
 import { type Screen, boot, screenFor } from "./boot";
+import { boardMode } from "./boardMode";
 import { type Launch, TELEGRAM_APP_URL, inviteLink, readLaunch, withoutLaunch } from "./launch";
 import type { PageId } from "./screens/More";
 import { initTelegram, launchData, startParam, telegram } from "./telegram";
@@ -230,11 +231,14 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
         </button>
       </div>
     ) : null;
+  // The city board stays mounted, hidden, under the flat screens, and is let
+  // go under the home editor and in a room (see boardMode.ts).
+  const board = boardMode({ tab, page: pageView !== null, room: room !== null });
   return (
     <>
       {pageView}
       {!pageView && tab === "more" && <More me={me} open={setPage} />}
-      {!pageView && tab === "city" && <CityBoard api={api} me={me} onOpenToday={() => go("today")} onPlace={(place, ridesFree) => setTrip({ place, ridesFree })} onOpenHall={() => setPage("cityhall")} onOpenMe={() => setPage("me")} />}
+      {board !== "released" && <CityBoard active={board === "shown"} api={api} me={me} onOpenToday={() => go("today")} onPlace={(place, ridesFree) => setTrip({ place, ridesFree })} onOpenHall={() => setPage("cityhall")} onOpenMe={() => setPage("me")} />}
       {trip && (
         <Travel
           api={api}
