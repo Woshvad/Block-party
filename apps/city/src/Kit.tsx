@@ -1,6 +1,6 @@
 "use client";
 import { useGLTF } from "@react-three/drei";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { bake } from "./kitGeometry";
 export { bake } from "./kitGeometry";
@@ -114,7 +114,9 @@ function KitModel({ url, items, shadows, night }: { url: string; items: Placemen
   return <instancedMesh ref={ref} args={[baked.geometry, baked.material, items.length]} castShadow={shadows} receiveShadow />;
 }
 
-// Everything placed, grouped by model.
+// Everything placed, grouped by model. Each model waits for its own download
+// only, so the city fills in as models arrive (roads are asked for first)
+// instead of showing nothing until the last one lands.
 export default function Kit({ placements, shadows = true, night = false }: { placements: Placement[]; shadows?: boolean; night?: boolean }) {
   const byUrl = useMemo(() => {
     const m = new Map<string, Placement[]>();
@@ -124,7 +126,9 @@ export default function Kit({ placements, shadows = true, night = false }: { pla
   return (
     <>
       {byUrl.map(([url, items]) => (
-        <KitModel key={url} url={url} items={items} shadows={shadows} night={night} />
+        <Suspense key={url} fallback={null}>
+          <KitModel url={url} items={items} shadows={shadows} night={night} />
+        </Suspense>
       ))}
     </>
   );

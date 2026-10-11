@@ -1,5 +1,5 @@
 "use client";
-import { Html, MapControls } from "@react-three/drei";
+import { Html, MapControls, useProgress } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -259,6 +259,8 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   }, [active]);
   useBackLayer(guide, () => setGuide(false));
   useBackLayer(picked !== null, () => setPicked(null));
+  // Models still downloading: the roads come first, then the buildings.
+  const loading = useProgress((p) => p.active);
   useEffect(() => {
     initTelegram();
   }, []);
@@ -303,6 +305,11 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
         <button className="pill" onClick={() => setNight((n) => !n)}>
           {night ? "Show day" : "Show night"}
         </button>
+        {loading && (
+          <div className="pill muted" role="status">
+            Loading the city…
+          </div>
+        )}
         {SHOW_PERF && (
           <div className="perf" ref={perf}>
             measuring…

@@ -592,9 +592,8 @@ export default function CityScape({ night, lamps = true }: { night: boolean; lam
         <planeGeometry args={[CITY_SIZE + 30, CITY_SIZE + 30]} />
         <meshStandardMaterial color="#81956a" roughness={1} />
       </mesh>
-      <Suspense fallback={null}>
-        <Kit placements={placements} night={night} />
-      </Suspense>
+      {/* Each model shows as soon as it arrives (see Kit.tsx): roads first. */}
+      <Kit placements={placements} night={night} />
       <mesh geometry={built.city} material={mat} castShadow receiveShadow />
       <mesh geometry={details} material={mat} castShadow receiveShadow />
       <DinerQuarter night={night} />
