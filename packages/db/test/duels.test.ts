@@ -234,6 +234,17 @@ describe("the guards", () => {
     expect(await code(snap(db, s.b, "nope", { now: s.at }))).toBe("NO_SUCH_DUEL");
   });
 
+  it("no Snap against a tilted opponent either: it would double their stake past the cap", async () => {
+    const s = await scene();
+    const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });
+    await respond(db, s.b, d.id, true, { now: s.at });
+    await grantMood(db, s.b, "tilted", { now: s.at });
+    const [b0, e0] = [await bal(s.b), await escrow(d.id)];
+    expect(await code(snap(db, s.a, d.id, { now: new Date(s.at.getTime() + MIN) }))).toBe("TILTED");
+    expect([await bal(s.b), await escrow(d.id)]).toEqual([b0, e0]);
+    expect((await client`SELECT stake_opponent FROM duels WHERE id = ${d.id}`)[0]!.stake_opponent).toBe(10);
+  });
+
   it("a Snap the other side can't cover is refused, and nothing moves", async () => {
     const s = await scene();
     const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });
