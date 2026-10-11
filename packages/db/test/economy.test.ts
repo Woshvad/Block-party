@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { SHIFT, SYS_PURSE, addDays, cityDay, cityWeekday, shiftPuzzle, userAccountId } from "@bp/core";
+import { SHIFT, SYS_PURSE, addDays, cityDay, cityWeekday, shiftPay, shiftPuzzle, userAccountId } from "@bp/core";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -10,6 +10,7 @@ import {
   collectShift,
   createCrew,
   createDb,
+  currentShift,
   economyReport,
   ensureSystemAccounts,
   getBalance,
@@ -251,6 +252,46 @@ describe("Mod Shift", () => {
     const [row] = await client`SELECT id FROM shifts WHERE user_id = ${u}`;
     await Promise.all(Array.from({ length: 5 }, () => collectShift(db, u, row!.id, { now: new Date(t.getTime() + 20 * MIN) })));
     expect(await bal(u)).toBe(1010);
+  });
+
+  it("the current shift comes back after leaving: the queue while it can be answered, never the answers", async () => {
+    const u = await makeResident(db);
+    const t = at(1, 10);
+    expect(await currentShift(db, u, { now: t })).toBeNull();
+    const s = await startShift(db, u, { now: t, seed: 77 });
+    const back = await currentShift(db, u, { now: new Date(t.getTime() + 20_000) });
+    expect(back).toEqual({ shiftId: s.shiftId, items: s.items, answerBy: s.answerBy, endsAt: s.endsAt, answered: false, score: null, pay: null, collectable: false });
+    expect(JSON.stringify(back)).not.toContain("answers");
+    // Handed in from the resumed queue: the score and pay, then Collect once it ends.
+    await submitShift(db, u, back!.shiftId, answersWithWrong(77, 2), { now: new Date(t.getTime() + 30_000) });
+    // Still inside the answer window, the queue is gone once it's handed in.
+    expect(await currentShift(db, u, { now: new Date(t.getTime() + 35_000) })).toMatchObject({ items: null, answered: true, score: 8, pay: 11, collectable: false });
+    expect(await currentShift(db, u, { now: new Date(t.getTime() + 5 * MIN) })).toMatchObject({ items: null, answered: true, score: 8, pay: 11, collectable: false });
+    expect(await currentShift(db, u, { now: new Date(t.getTime() + 15 * MIN) })).toMatchObject({ shiftId: s.shiftId, collectable: true });
+    expect(await collectShift(db, u, s.shiftId, { now: new Date(t.getTime() + 15 * MIN) })).toEqual({ pay: 11, replayed: false });
+    expect(await currentShift(db, u, { now: new Date(t.getTime() + 16 * MIN) })).toBeNull();
+  });
+
+  it("a missed answer window still shows the outcome: the base pay, to collect when the shift ends", async () => {
+    const u = await makeResident(db);
+    const t = at(1, 10);
+    const s = await startShift(db, u, { now: t, seed: 5 });
+    const missed = await currentShift(db, u, { now: new Date(t.getTime() + SHIFT.answerWindowSeconds * 1000 + 1000) });
+    expect(missed).toMatchObject({ shiftId: s.shiftId, items: null, answered: false, score: null, pay: shiftPay(null), collectable: false });
+    const done = await currentShift(db, u, { now: new Date(t.getTime() + SHIFT.minutes * MIN) });
+    expect(done).toMatchObject({ collectable: true });
+    expect((await collectShift(db, u, s.shiftId, { now: new Date(t.getTime() + SHIFT.minutes * MIN) })).pay).toBe(done!.pay);
+  });
+
+  it("a shift started just before the bell comes back after it; older ones, away shifts and other people's don't", async () => {
+    const [u, other] = [await makeResident(db), await makeResident(db)];
+    const s = await startShift(db, u, { now: at(1, 23, 55), seed: 3 }); // ends at 00:10, the next city day
+    expect((await currentShift(db, u, { now: at(2, 0, 20) }))?.shiftId).toBe(s.shiftId);
+    expect(await currentShift(db, other, { now: at(2, 0, 20) })).toBeNull();
+    expect(await currentShift(db, u, { now: at(3, 12) })).toBeNull(); // two city days on
+    // An away shift has no queue to come back to, collected or not.
+    await client`INSERT INTO shifts (user_id, city_day, slot, kind, started_at, ends_at, pay) VALUES (${other}, ${cityDay(at(2))}, 1, 'away', ${at(2, 9).toISOString()}, ${at(2, 9).toISOString()}, 5)`;
+    expect(await currentShift(db, other, { now: at(2, 10) })).toBeNull();
   });
 
   it("no sequence of starts, answers and collects beats 2 shifts and 24 GM a day (property)", async () => {

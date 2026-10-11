@@ -223,6 +223,37 @@ export async function collectShift(db: Db, userId: string, shiftId: unknown, opt
   });
 }
 
+// The shift to come back to after leaving the Shifts view or reloading: the
+// newest Mod Shift not yet collected, from today or yesterday (one started
+// just before the bell ends after it). It carries what the city needs to pick
+// up where the player left off: the queue while it can still be answered
+// (never the answers), the score once handed in, the pay (by the score, or
+// the base rate once the answer window has passed unanswered; null while it
+// can still be answered), and whether the shift has ended so the pay can be
+// collected. null when there's nothing to come back to.
+export async function currentShift(db: Db, userId: string, opts: { now?: Date } = {}) {
+  const now = opts.now ?? new Date();
+  const [s] = await db
+    .select()
+    .from(shifts)
+    .where(and(eq(shifts.userId, userId), eq(shifts.kind, "active"), isNull(shifts.collectedTx), gte(shifts.cityDay, addDays(cityDay(now), -1))))
+    .orderBy(desc(shifts.startedAt))
+    .limit(1);
+  if (!s) return null;
+  const answerBy = new Date(s.startedAt.getTime() + SHIFT.answerWindowSeconds * 1000);
+  const answerable = !s.submittedAt && now >= s.startedAt && now <= answerBy;
+  return {
+    shiftId: s.id,
+    items: answerable ? shiftPuzzle(s.seed!).items : null,
+    answerBy,
+    endsAt: s.endsAt,
+    answered: !!s.submittedAt,
+    score: s.score,
+    pay: answerable ? null : shiftPay(s.score),
+    collectable: now >= s.endsAt,
+  };
+}
+
 // The away shift: Proof of Neighbour only, needs a gm in the last 24 hours,
 // collected by hand, and takes one of the 2 daily slots at half pay.
 export async function collectAwayShift(db: Db, userId: string, opts: { now?: Date } = {}) {

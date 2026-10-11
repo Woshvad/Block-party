@@ -34,6 +34,7 @@ import {
   createGuest,
   createInvite,
   createResident,
+  currentShift,
   decideJoinRequest,
   depositToPot,
   dissolveCrew,
@@ -898,6 +899,8 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/shifts/away", auth, async (c) => c.json(await collectAwayShift(db, c.get("userId"), opts())));
   app.post("/v1/shifts/:id/answers", auth, async (c) => c.json(await submitShift(db, c.get("userId"), uuid(c, "id"), (await body(c)).answers, opts())));
   app.post("/v1/shifts/:id/collect", auth, async (c) => c.json(await collectShift(db, c.get("userId"), uuid(c, "id"), opts())));
+  // The shift to come back to (or null), so leaving the Shifts view never loses its pay.
+  app.get("/v1/shifts/current", auth, async (c) => c.json(await currentShift(db, c.get("userId"), opts())));
 
   // --- The Prediction Tower --------------------------------------------------
 
