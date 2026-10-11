@@ -3,7 +3,7 @@ import { entropyToMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { checkMessage, containsWalletAddress, findLinks, looksLikePrivateKey, looksLikeSeedPhrase } from "../src";
+import { checkMessage, containsWalletAddress, findLinks, looksLikePrivateKey, looksLikeSeedPhrase, parseBlockedWords } from "../src";
 
 // Seeded phrases, so these tests can never flake on a rare unlucky draw.
 function phrases(n: number, seed: number) {
@@ -241,5 +241,92 @@ describe("shape", () => {
       }),
       { numRuns: 3000 },
     );
+  });
+});
+
+// Characters spelled by code point, so the test reads the same in any editor.
+const ch = (...cps: number[]) => String.fromCodePoint(...cps);
+// Cyrillic а, е, о and р: lookalikes of a, e, o and p.
+const CY = { a: ch(0x430), e: ch(0x435), o: ch(0x43e), p: ch(0x440) };
+const FIRST_DM = { ...OLD, firstDm: true };
+const NEW_FIRST_DM = { ...NEW, firstDm: true };
+
+describe("invisible characters can't hide a link", () => {
+  // Variation selectors, a supplementary variation selector, a musical format
+  // character and a shorthand format control: all default-ignorable.
+  const hiders = [ch(0xfe0f), ch(0xfe0e), ch(0xe0100), ch(0x1d173), ch(0x1bca0), ch(0x200d, 0x200d), ch(0xfe0f, 0xfe0f)];
+
+  it.each(hiders.map((h) => [h.codePointAt(0)!.toString(16), h]))("U+%s between the name and the dot", (_cp, h) => {
+    const v = checkMessage(`claim your GM at gm-drop${h}.xyz now`, NEW);
+    expect(v.ok && v.text).toBe("claim your GM at [link removed] now");
+    expect(reason(`hi! gm-drop${h}.xyz`, FIRST_DM)).toBe("FIRST_DM_LINK");
+  });
+
+  it("emoji keep the joiners and selectors that make them render", () => {
+    for (const e of [ch(0x2764, 0xfe0f), ch(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467), ch(0x1f3f3, 0xfe0f, 0x200d, 0x1f308), ch(0x1f469, 0x1f3fd, 0x200d, 0x1f4bb), ch(0x31, 0xfe0f, 0x20e3)]) {
+      const v = checkMessage(`gm ${e} frens`, OLD);
+      expect(v.ok && v.text, e).toBe(`gm ${e} frens`);
+    }
+  });
+});
+
+describe("bare names: any real ending, or anything shaped like an address, is a link", () => {
+  it.each([
+    "telegra.ph/abc",
+    "telegra.ph",
+    "x.sbs",
+    "gm-drop.sbs",
+    "free-gm.icu",
+    "airdrop.cyou",
+    "claim.bond",
+    "gm-drop.whatever",
+    "claim.gm.whatever",
+    "gmdrop.whatever/claim",
+    `gm-dr${CY.o}${CY.p}.xyz`,
+  ])("%s", (link) => {
+    expect(findLinks(`go to ${link} now`), link).toHaveLength(1);
+    const v = checkMessage(`go to ${link} now`, NEW);
+    expect(v.ok && v.text, link).toBe("go to [link removed] now");
+  });
+
+  it.each(["e.g. the roof", "i.e. tonight", "lol.ok see you", "lol.no way", "ok.so who's in", "end.Next time", "done.thanks ser", "Mr.Smith says gm", "v1.2.3 is out", "pi is 3.14", "U.S.A"])(
+    "a sentence that lost a space is not one: %s",
+    (msg) => {
+      expect(findLinks(msg), msg).toEqual([]);
+      expect(reason(msg, NEW_FIRST_DM), msg).toBe("OK");
+      const v = checkMessage(msg, NEW);
+      expect(v.ok && v.strippedLinks, msg).toBe(0);
+    },
+  );
+});
+
+describe("lookalike letters don't hide scam bait", () => {
+  it.each([`c${CY.o}nnect your wallet to claim`, `verify y${CY.o}ur w${CY.a}llet`, "vérify your wallet"])("%s", (msg) => {
+    expect(reason(msg)).toBe("SCAM");
+  });
+});
+
+describe("staff's blocked words", () => {
+  it("parse from BLOCKED_WORDS: commas or new lines, case-folded, no blanks or repeats", () => {
+    expect(parseBlockedWords(" BadWord ,\nother  word\r\n\n,badword,")).toEqual(["badword", "other word"]);
+    expect(parseBlockedWords(undefined)).toEqual([]);
+    expect(parseBlockedWords("")).toEqual([]);
+    expect(parseBlockedWords(" , ,\n!!")).toEqual([]);
+  });
+
+  it("match whole words through leetspeak, lookalikes, dots and spacing", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("badword,kill yourself") };
+    for (const msg of ["you are a b4dw0rd", `you are a b${CY.a}dword`, "b.a.d.w.o.r.d", "b a d w o r d", "BADWORD!!!", "go k1ll yourself", "go killyourself"]) {
+      expect(reason(msg, ctx), msg).toBe("BLOCKED_WORD");
+    }
+    for (const msg of ["notbadwordish is fine", "bad word, good word", "skill yourself up", "kill the lights, yourself included"]) {
+      expect(reason(msg, ctx), msg).toBe("OK");
+    }
+  });
+
+  it("an entry in another script matches as written", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("сука") };
+    expect(reason("ты сука", ctx)).toBe("BLOCKED_WORD");
+    expect(reason("cyka blyat is a meme", ctx)).toBe("OK");
   });
 });
