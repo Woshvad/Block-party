@@ -555,7 +555,8 @@ function Billboards({ night }: { night: boolean }) {
   );
 }
 
-export default function CityScape({ night }: { night: boolean }) {
+// `lamps` false leaves out the two night point lights (the low quality tier).
+export default function CityScape({ night, lamps = true }: { night: boolean; lamps?: boolean }) {
   const built = useMemo(() => {
     const b: Built = { city: [], windows: [], lamps: [], neon: [] };
     blocks(b);
@@ -597,7 +598,7 @@ export default function CityScape({ night }: { night: boolean }) {
       <mesh geometry={details} material={mat} castShadow receiveShadow />
       <DinerQuarter night={night} />
       <CityWater night={night} />
-      <CityStreetGlow night={night} />
+      <CityStreetGlow night={night} lamps={lamps} />
       <mesh geometry={built.windows}>
         <meshStandardMaterial color={night ? "#bd9d68" : "#688995"} emissive={night ? "#ffb84d" : "#000000"} emissiveIntensity={night ? 0.9 : 0} roughness={0.19} metalness={0.48} envMapIntensity={1.3} />
       </mesh>

@@ -14,6 +14,7 @@ import { itemLabel, label } from "./palette";
 import { haptic, useClosingConfirmation } from "./telegram";
 import { Loading } from "./ui";
 import { useLoad } from "./useLoad";
+import { deviceTier } from "./quality";
 import { useToast } from "./useToast";
 
 // Your home: tap a piece to move, turn, recolour or store it; place things
@@ -88,13 +89,14 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   };
 
   const nap = h.placed.find((p) => pieceOf(p.pieceId)?.mood === "rested");
+  const tier = deviceTier();
   const running = action.data?.action;
 
   return (
     <>
       <div className="stage">
         <SceneBoundary what="your home" note="Storage, the shop, and the walls and floor still work.">
-          <Canvas shadows dpr={[1, 1.5]} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: true }}>
+          <Canvas shadows={tier.shadows} dpr={tier.dpr} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: tier.antialias }}>
             <RoomLighting span={Math.max(size.w, size.d)} />
             <RoomCamera w={size.w} h={size.d} />
             <HomeRoom

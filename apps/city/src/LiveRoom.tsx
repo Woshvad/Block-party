@@ -31,6 +31,7 @@ import { EMOTE_ICON } from "./emoteIcons";
 import RoomPanel, { type RoomAction } from "./RoomPanel";
 import SceneBoundary from "./SceneBoundary";
 import { roomSeatActions } from "./roomActions";
+import { deviceTier } from "./quality";
 export { EMOTE_ICON } from "./emoteIcons";
 
 const CAP = 64; // 60 here plus a few drawn away residents and NPCs
@@ -324,11 +325,12 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   for(const kind of ["trophy_wall","tv"] as const) if(home?.placed.some(p=>p.pieceId===kind)) actions.push({id:kind,label:kind==='tv'?'Watch TV':'Trophy wall',run:()=>setDisplay(kind)});
   if(mine&&home){const bed=home.placed.find(p=>pieceOf(p.pieceId)?.mood==='rested');if(bed)actions.push({id:'nap',label:'Take a nap',run:()=>{void api.nap(bed.itemId).then(a=>{setNapMsg(`Napping until ${new Date(a.endsAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. You’ll wake up Rested.`);}).catch(e=>setNapMsg(e instanceof ApiError?e.message:'Couldn’t nap. Try again.'));}});}
   const span = Math.max(size.w, size.h);
+  const tier = deviceTier();
   return (
     <>
       <div className={`stage room-stage social-live-stage ${clean ? "is-clean" : ""}`}>
         <SceneBoundary what="this room" note="The chat, the people here and reactions still work.">
-          <Canvas shadows dpr={[1, 1.5]} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: true }}>
+          <Canvas shadows={tier.shadows} dpr={tier.dpr} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: tier.antialias }}>
             <RoomLighting span={span} outdoor={place === "roof"} />
             {home ? (
               <HomeRoom

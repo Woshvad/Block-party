@@ -16,6 +16,7 @@ import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
+import { deviceTier } from "./quality";
 import { haptic, initTelegram } from "./telegram";
 
 // The city board, SimCity style: an isometric view over a street grid of
@@ -207,6 +208,7 @@ function Strollers() {
 }
 
 export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe, showcase = false }: { showcase?: boolean; api: Pick<Api, "cityHall" | "slate"> & Partial<Pick<Api, "headcounts">>; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
+  const tier = deviceTier();
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   useEffect(() => {
     if (!api.headcounts) return;
@@ -311,7 +313,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
       )}
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
         <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
-          <Canvas shadows orthographic dpr={[1, 1.5]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
+          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }}>
             <CityAtmosphere night={night} />
             <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
             {/* The sun, casting real shadows over the whole city. */}
@@ -319,7 +321,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
               position={[-28, 42, 24]}
               color={night ? "#b1c7f7" : "#fff1d9"}
               intensity={night ? 0.7 : 2.5}
-              castShadow
+              castShadow={tier.shadows}
               shadow-mapSize={[2048, 2048]}
               shadow-camera-left={-62}
               shadow-camera-right={62}
@@ -329,9 +331,9 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
               shadow-bias={-0.0004}
               shadow-normalBias={0.03}
             />
-            <CityScape night={night} />
+            <CityScape night={night} lamps={tier.nightLamps} />
             <TowerTop night={night} />
-            <Strollers />
+            {tier.strollers && <Strollers />}
             <Pins counts={counts}
               onTap={(p) => {
                 haptic("light");
@@ -370,7 +372,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
                 }
               }}
             />
-            {SHOW_PERF && <PerfProbe target={perf} />}
+            {SHOW_PERF && <PerfProbe target={perf} quality={tier.quality} />}
           </Canvas>
         </SceneBoundary>
       </div>
