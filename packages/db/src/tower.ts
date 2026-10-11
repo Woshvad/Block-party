@@ -116,6 +116,9 @@ const validFeed = (m: FeedMarket) =>
 // it. One poller at a time (an advisory lock); a second one just skips.
 export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
+  // Checked first: the source goes into a query, and postgres.js can stall the
+  // pool on an undefined parameter.
+  if (typeof provider?.source !== "string") throw new TypeError("pollOdds needs an odds provider");
   // Our markets from this feed that aren't final yet, soonest to freeze
   // first: a feed that only lists what's trading looks these up to say what
   // became of the ones it no longer lists.
