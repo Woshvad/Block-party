@@ -36,10 +36,11 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   await settleCalls(db, { now });
   // Duels settle at the bell too: the bell is the reveal.
   const duelsSettled = (await settleDuels(db, { now })).settled;
-  const grudgesSettled = (await settleGrudges(db, bellDay, now)).settled;
+  const grudges = await settleGrudges(db, bellDay, now);
   const cityMarketsSettled = (await settleCityMarkets(db, bellDay, now)).settled;
   await settleRatio(db, bellDay);
   const lights = await settleLights(db, bellDay);
+  const lightsBurned = lights.reduce((a, l) => a + l.amount, 0);
   const from = dayStart(bellDay);
   const to = dayStart(addDays(bellDay, 1));
   const receipts = await db
@@ -136,7 +137,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
       .values({ bellDay, crewId, chips: t.chips, longShots: t.longShots, chainDays, scoreMilli: bellScoreMilli({ ...t, chainDays }) })
       .onConflictDoNothing();
   }
-  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled, cityMarketsSettled, lightsBurned: lights?.amount ?? 0 };
+  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled: grudges.settled, grudgesWaiting: grudges.waiting, cityMarketsSettled, lightsBurned };
 }
 
 // --- Bell Stamps ------------------------------------------------------------------------

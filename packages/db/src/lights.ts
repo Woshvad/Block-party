@@ -1,5 +1,5 @@
 import { type CityDay, addDays, cityDay, crewPotAccountId, lightsAccountId, lightsReserve, topBid } from "@bp/core";
-import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { burn, openEscrowAccount, transfer } from "./ledger";
 import { crewMembers, crews, lightBids } from "./schema";
@@ -74,19 +74,36 @@ export async function lightsBoard(db: Db, crewId: string | null, opts: { now?: D
   };
 }
 
-// At the bell: the top bid burns and lights the Tower; every other bid goes home.
+// At the bell: the top bid burns and lights the Tower; every other bid goes
+// home. Every day up to and including bellDay that still has open bids, so a
+// day whose bell never ran is settled by the next one rather than leaving its
+// bids in escrow for good. Returns what burned, day by day.
 export async function settleLights(db: Db, bellDay: CityDay) {
+  const days = await db
+    .selectDistinct({ day: lightBids.cityDay })
+    .from(lightBids)
+    .where(and(lte(lightBids.cityDay, bellDay), eq(lightBids.status, "open")))
+    .orderBy(asc(lightBids.cityDay));
+  const out: Array<{ cityDay: CityDay; crewId: string; amount: number }> = [];
+  for (const { day } of days) {
+    const won = await settleLightsDay(db, day);
+    if (won) out.push({ cityDay: day, ...won });
+  }
+  return out;
+}
+
+async function settleLightsDay(db: Db, day: CityDay) {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`lights:${bellDay}`}))`);
-    const bids = await tx.select().from(lightBids).where(and(eq(lightBids.cityDay, bellDay), eq(lightBids.status, "open")));
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`lights:${day}`}))`);
+    const bids = await tx.select().from(lightBids).where(and(eq(lightBids.cityDay, day), eq(lightBids.status, "open")));
     const top = topBid(bids.map((b) => ({ ...b, at: b.at.getTime() })));
     if (!top) return null;
-    await burn(tx, { accountId: lightsAccountId(bellDay), amount: top.amount, kind: "tower_lights", idempotencyKey: `lights:${bellDay}:burn` });
+    await burn(tx, { accountId: lightsAccountId(day), amount: top.amount, kind: "tower_lights", idempotencyKey: `lights:${day}:burn` });
     for (const b of bids) {
       if (b.crewId === top.crewId) continue;
-      await transfer(tx, { from: lightsAccountId(bellDay), to: crewPotAccountId(b.crewId), amount: b.amount, kind: "lights_refund", idempotencyKey: `lights:${bellDay}:${b.crewId}:refund` });
+      await transfer(tx, { from: lightsAccountId(day), to: crewPotAccountId(b.crewId), amount: b.amount, kind: "lights_refund", idempotencyKey: `lights:${day}:${b.crewId}:refund` });
     }
-    await tx.update(lightBids).set({ status: sql`CASE WHEN ${lightBids.crewId} = ${top.crewId} THEN 'won'::light_bid_status ELSE 'refunded'::light_bid_status END` }).where(and(eq(lightBids.cityDay, bellDay), inArray(lightBids.crewId, bids.map((b) => b.crewId))));
+    await tx.update(lightBids).set({ status: sql`CASE WHEN ${lightBids.crewId} = ${top.crewId} THEN 'won'::light_bid_status ELSE 'refunded'::light_bid_status END` }).where(and(eq(lightBids.cityDay, day), inArray(lightBids.crewId, bids.map((b) => b.crewId))));
     return { crewId: top.crewId, amount: top.amount };
   });
 }

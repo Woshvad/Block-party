@@ -1,10 +1,10 @@
 import { type CityDay, GRUDGE, NPC_IDS, addDays, cityDay, grudgeAccountId, grudgeWinner, userAccountId } from "@bp/core";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, lte, or } from "drizzle-orm";
 import type { Db } from "./client";
 import { isFlaggedPair } from "./alts";
 import { openEscrowAccount, transfer } from "./ledger";
 import { isBlockedEitherWay } from "./safety";
-import { calls, grudgeMatches, inviters, slateCards } from "./schema";
+import { calls, grudgeMatches, inviters, markets, slateCards } from "./schema";
 
 export class GrudgeError extends Error {
   constructor(
@@ -90,14 +90,19 @@ export async function cancelGrudge(db: Db, newcomerId: string, matchId: unknown,
 }
 
 // At the day's bell: higher Slate Aura takes the pot; a tie gives both back;
-// an unanswered offer goes home.
+// an unanswered offer goes home. Every open match up to and including
+// bellDay, so a day whose bell never ran is settled by the next one.
+//
+// A match waits for its whole Slate: while a card has no result yet, or a
+// result whose calls aren't scored yet, it would count as 0 for both players
+// and could hand the pot to the wrong one. It carries to a later bell.
 export async function settleGrudges(db: Db, bellDay: CityDay, now: Date) {
   const due = await db
     .select({ id: grudgeMatches.id })
     .from(grudgeMatches)
-    .where(and(eq(grudgeMatches.cityDay, bellDay), inArray(grudgeMatches.status, ["offered", "active"])));
-  const cards = (await db.select({ id: slateCards.marketId }).from(slateCards).where(eq(slateCards.cityDay, bellDay))).map((c) => c.id);
+    .where(and(lte(grudgeMatches.cityDay, bellDay), inArray(grudgeMatches.status, ["offered", "active"])));
   let settled = 0;
+  let waiting = 0;
   for (const { id } of due) {
     await db.transaction(async (tx) => {
       const m = await lockMatch(tx, id);
@@ -107,12 +112,27 @@ export async function settleGrudges(db: Db, bellDay: CityDay, now: Date) {
         return;
       }
       if (m.status !== "active") return;
+      const cards = await tx
+        .select({ id: markets.id, status: markets.status })
+        .from(slateCards)
+        .innerJoin(markets, eq(markets.id, slateCards.marketId))
+        .where(eq(slateCards.cityDay, m.cityDay));
+      if (cards.some((c) => c.status !== "resolved" && c.status !== "void")) {
+        waiting++;
+        return;
+      }
       const rows = cards.length
         ? await tx
-            .select({ userId: calls.userId, aura: calls.auraCenti })
+            .select({ userId: calls.userId, aura: calls.auraCenti, status: markets.status })
             .from(calls)
-            .where(and(inArray(calls.marketId, cards), eq(calls.status, "locked"), eq(calls.onSlate, true), or(eq(calls.userId, m.newcomerId), eq(calls.userId, m.inviterId))))
+            .innerJoin(markets, eq(markets.id, calls.marketId))
+            .where(and(inArray(calls.marketId, cards.map((c) => c.id)), eq(calls.status, "locked"), eq(calls.onSlate, true), or(eq(calls.userId, m.newcomerId), eq(calls.userId, m.inviterId))))
         : [];
+      // A void card scores nobody; a resolved one must be scored before it counts.
+      if (rows.some((r) => r.status === "resolved" && r.aura === null)) {
+        waiting++;
+        return;
+      }
       const total = (u: string) => rows.filter((r) => r.userId === u).reduce((a, r) => a + (r.aura ?? 0), 0);
       const winner = grudgeWinner({ id: m.newcomerId, auraCenti: total(m.newcomerId) }, { id: m.inviterId, auraCenti: total(m.inviterId) });
       if (winner) {
@@ -126,7 +146,7 @@ export async function settleGrudges(db: Db, bellDay: CityDay, now: Date) {
       settled++;
     });
   }
-  return { settled };
+  return { settled, waiting };
 }
 
 export async function myGrudges(db: Db, userId: string) {

@@ -18,6 +18,7 @@ import {
   redeemInvite,
   respondGrudge,
   runBell,
+  settleGrudges,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -44,6 +45,16 @@ async function pair() {
   const newcomer = await makeResident(db);
   await createCrew(db, inviter, { name: `Grudge ${randomUUID().slice(0, 6)}` });
   await redeemInvite(db, newcomer, (await createInvite(db, inviter)).code);
+  return { inviter, newcomer };
+}
+// The same pair with no crew between them: just the record of who invited
+// whom, which is all a Grudge Match reads. Without a crew, the bell's Bell
+// Scores don't have to catch a crew chain up from today to these far-off test
+// days, which takes many seconds.
+async function crewlessPair() {
+  const inviter = await makeResident(db);
+  const newcomer = await makeResident(db);
+  await client`INSERT INTO inviters (user_id, inviter_id) VALUES (${newcomer}, ${inviter})`;
   return { inviter, newcomer };
 }
 // Tomorrow's Slate (relative to `offerDay`), with both sides' calls.
@@ -121,6 +132,71 @@ describe("the Grudge Match", () => {
     expect(await staked()).toEqual([10, 10]);
     await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] }); // nobody called: a tie
     expect(await staked()).toEqual([0, 0]);
+  });
+
+  it("a day whose bell never ran: the next bell still settles its matches", async () => {
+    const d0 = freshDay();
+    const p1 = await crewlessPair();
+    const p2 = await crewlessPair();
+    const [a0, b0, c0] = [await bal(p1.newcomer), await bal(p1.inviter), await bal(p2.newcomer)];
+    const g1 = await offerGrudge(db, p1.newcomer, { now: new Date(d0 - 12 * H) });
+    await respondGrudge(db, p1.inviter, g1.id, true, { now: new Date(d0 - 11 * H) });
+    const g2 = await offerGrudge(db, p2.newcomer, { now: new Date(d0 - 12 * H) });
+    // d0's bell never runs (the cron was down all day); the next night's does.
+    await runBell(db, { now: new Date(d0 + 2 * D + 5 * MIN), only: ["tower"] });
+    expect((await client`SELECT status FROM grudge_matches WHERE id = ${g1.id}`)[0]!.status).toBe("tied");
+    expect((await client`SELECT status FROM grudge_matches WHERE id = ${g2.id}`)[0]!.status).toBe("expired");
+    expect([await getBalance(db, grudgeAccountId(g1.id)), await getBalance(db, grudgeAccountId(g2.id))]).toEqual([0, 0]);
+    expect([await bal(p1.newcomer), await bal(p1.inviter), await bal(p2.newcomer)]).toEqual([a0, b0, c0]);
+  });
+
+  it("waits for the whole Slate: a card still without a result holds the match to a later bell", async () => {
+    const d0 = freshDay();
+    const { inviter, newcomer } = await crewlessPair();
+    const g = await offerGrudge(db, newcomer, { now: new Date(d0 - 12 * H) });
+    await respondGrudge(db, inviter, g.id, true, { now: new Date(d0 - 11 * H) });
+    const s = await slateFor(d0);
+    const marketOf = async (id: string) => (await client`SELECT question, price FROM markets WHERE id = ${id}`)[0]!;
+    const card = await marketOf(s.ids[1]!);
+    const p = card.price as number;
+    const longShot = await marketOf(s.ids[5]!);
+    const ls = longShot.price as number;
+    const at = new Date(d0 + 9 * H);
+    // The Coin Flip goes NO tonight: the inviter is right there. The Long Shot
+    // hits, which the newcomer called, but its result only comes the next day.
+    await makeCall(db, newcomer, { marketId: s.ids[1], side: "yes", chance: p + 10, seenPrice: p }, { now: at });
+    await makeCall(db, inviter, { marketId: s.ids[1], side: "no", chance: p - 10, seenPrice: p }, { now: at });
+    await makeCall(db, newcomer, { marketId: s.ids[5], side: "yes", chance: ls + 22, seenPrice: ls }, { now: at });
+    await makeCall(db, inviter, { marketId: s.ids[5], side: "no", chance: ls - 3, seenPrice: ls }, { now: at });
+    await pollOdds(db, s.provider, { now: new Date(at.getTime() + MIN) });
+    const late = s.ms.find((m) => m.question === longShot.question)!;
+    for (const m of s.ms) m.resolved = m === late ? null : false;
+    await pollOdds(db, s.provider, { now: new Date(d0 + 21 * H) });
+    // Counting the Long Shot as 0 would hand the inviter the pot. It waits.
+    const first = await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] });
+    expect(first.ran.tower).toMatchObject({ grudgesSettled: 0, grudgesWaiting: 1 });
+    expect((await client`SELECT status FROM grudge_matches WHERE id = ${g.id}`)[0]!.status).toBe("active");
+    expect(await getBalance(db, grudgeAccountId(g.id))).toBe(20);
+    // The Long Shot hits the next day. While the newcomer's call on it is
+    // still unscored (settleCalls skips a call someone else has locked), the
+    // match keeps waiting.
+    const [mine] = await client`SELECT id FROM calls WHERE market_id = ${s.ids[5]!} AND user_id = ${newcomer}`;
+    const holder = await client.reserve();
+    await holder`BEGIN`;
+    await holder`SELECT 1 FROM calls WHERE id = ${mine!.id} FOR NO KEY UPDATE`;
+    try {
+      late.resolved = true;
+      await pollOdds(db, s.provider, { now: new Date(d0 + D + 12 * H) });
+      expect(await settleGrudges(db, new Date(d0 + D).toISOString().slice(0, 10), new Date(d0 + D + 13 * H))).toEqual({ settled: 0, waiting: 1 });
+    } finally {
+      await holder`COMMIT`;
+      holder.release();
+    }
+    // The next bell scores it and settles on the full Slate.
+    const second = await runBell(db, { now: new Date(d0 + 2 * D + 5 * MIN), only: ["tower"] });
+    expect(second.ran.tower).toMatchObject({ grudgesSettled: 1, grudgesWaiting: 0 });
+    expect((await client`SELECT status, winner_id FROM grudge_matches WHERE id = ${g.id}`)[0]).toEqual({ status: "settled", winner_id: newcomer });
+    expect(await getBalance(db, grudgeAccountId(g.id))).toBe(0);
   });
 
   it("tonight's bell leaves tomorrow's match alone", async () => {

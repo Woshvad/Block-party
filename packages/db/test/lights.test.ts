@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { crewPotAccountId, lightsAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LightsError, bidLights, createCrew, createDb, createInvite, depositToPot, ensureSystemAccounts, getBalance, lightsBoard, redeemInvite, reel, runBell, setDeputy, supplyStats } from "../src";
+import { LightsError, bidLights, createCrew, createDb, createInvite, depositToPot, ensureSystemAccounts, getBalance, lightsBoard, lightsWinner, redeemInvite, reel, runBell, setDeputy, settleLights, supplyStats } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
 const { db, client, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 30 });
@@ -64,6 +64,9 @@ describe("Tower Lights", () => {
 
   it("at the bell the top bid burns and lights the Tower; the rest go home", async () => {
     const d0 = freshDay();
+    // Earlier tests leave their days' bids open, and the bell settles every
+    // open day up to its own: settle those first so only tonight's count here.
+    await settleLights(db, dayOf(d0 - D));
     const at = new Date(d0 + 10 * H);
     const [a, b] = [await crew(), await crew()];
     await bidLights(db, a.lead, 1100, { now: at });
@@ -76,6 +79,22 @@ describe("Tower Lights", () => {
     expect((await supplyStats(db)).destroyed - burned0).toBe(1300);
     expect(await getBalance(db, lightsAccountId(dayOf(d0)))).toBe(0);
     expect((await reel(db, a.lead, { now: new Date(d0 + D + 120_000) }))!.towerLights).toEqual({ crew: b.name, amount: 1300 });
+  });
+
+  it("a day whose bell never ran is settled by the next bell, not left in escrow", async () => {
+    const d0 = freshDay();
+    await settleLights(db, dayOf(d0 - D)); // as above: only this test's bids
+    const at = new Date(d0 + 10 * H);
+    const [a, b] = [await crew(), await crew()];
+    await bidLights(db, a.lead, 1100, { now: at });
+    await bidLights(db, b.lead, 1300, { now: at });
+    // d0's bell never runs (the cron was down all day); the next night's does.
+    const r = await runBell(db, { now: new Date(d0 + 2 * D + 60_000), only: ["tower"] });
+    expect(r.ran.tower).toMatchObject({ lightsBurned: 1300 });
+    expect(await pot(a.id)).toBe(1800);
+    expect(await pot(b.id)).toBe(500);
+    expect(await getBalance(db, lightsAccountId(dayOf(d0)))).toBe(0);
+    expect(await lightsWinner(db, dayOf(d0))).toEqual({ crew: b.name, amount: 1300 });
   });
 
   it("racing bids from two crews: the books always balance", async () => {
