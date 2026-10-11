@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  BOARDS,
   CHAT,
   ChatError,
   DM_NOTICE,
@@ -157,22 +158,39 @@ describe("DMs", () => {
   });
 });
 
+// Boards are shared by every test, so each test posts at its own far-future
+// hour (out of reach of slow mode and of the cast's lines on their home
+// Boards) and reads back only its own rows.
+const hour = (n: number) => Date.UTC(2031, 0, 1) + n * 3_600_000;
+
 describe("Boards and crew chat", () => {
   it("posts persist, newest first, and page with `before`", async () => {
     const a = await makeResident(db);
-    const place = `board${randomUUID().slice(0, 6)}`;
-    const t0 = Date.now();
+    const place = "watch_party";
+    const t0 = hour(1);
     for (let i = 0; i < 3; i++) await postToBoard(db, a, place, `post ${i}`, { now: new Date(t0 + i * 1000) });
-    const all = await readBoard(db, a, place);
-    expect(all.map((m) => m.text)).toEqual(["post 2", "post 1", "post 0"]);
-    expect((await readBoard(db, a, place, { before: new Date(t0 + 1500).toISOString() })).map((m) => m.text)).toEqual(["post 1", "post 0"]);
+    const mine = (ms: Array<{ authorId: string; text: string }>) => ms.filter((m) => m.authorId === a).map((m) => m.text);
+    expect(mine(await readBoard(db, a, place))).toEqual(["post 2", "post 1", "post 0"]);
+    expect(mine(await readBoard(db, a, place, { before: new Date(t0 + 1500).toISOString() }))).toEqual(["post 1", "post 0"]);
     expect(await code(readBoard(db, a, place, { before: "not a date" }))).toBe("INVALID_INPUT");
     expect(await code(readBoard(db, a, "home:x"))).toBe("INVALID_INPUT"); // private places have no Board
   });
 
+  it("only the city's places have Boards: no made-up channels", async () => {
+    const a = await makeResident(db);
+    expect([...BOARDS].sort()).toEqual(["city_hall", "crew_row", "diner", "faucet", "gm_wall", "roof", "tower", "watch_party"]);
+    for (const fake of ["xyz123", "meet-me-here", "street", "home", `crew_house:${a}`, `bunker:${randomUUID()}:yes`]) {
+      expect(await code(postToBoard(db, a, fake, "meet me here", { now: new Date(hour(2)) })), fake).toBe("INVALID_INPUT");
+      expect(await code(readBoard(db, a, fake)), fake).toBe("INVALID_INPUT");
+      expect(await code(followBoard(db, a, fake)), fake).toBe("INVALID_INPUT");
+    }
+    const [n] = await client`SELECT count(*)::int AS n FROM messages WHERE author_id = ${a}`;
+    expect(n!.n).toBe(0);
+  });
+
   it("slow mode when a Board is busy", async () => {
-    const place = `busy${randomUUID().slice(0, 6)}`;
-    const now = new Date();
+    const place = "gm_wall";
+    const now = new Date(hour(3));
     for (let i = 0; i < CHAT.slowModeBusyPosts; i++) await postToBoard(db, await makeResident(db), place, `p${i}`, { now });
     const late = await makeResident(db);
     await postToBoard(db, late, place, "first", { now });
@@ -181,29 +199,52 @@ describe("Boards and crew chat", () => {
 
   it("10 posts a minute per resident, across chats", async () => {
     const a = await makeResident(db);
-    const now = new Date();
+    const now = new Date(hour(4));
     const out = [];
-    for (let i = 0; i < 11; i++) out.push(await code(postToBoard(db, a, `rl${i}`, `m${i}`, { now })));
+    for (let i = 0; i < 11; i++) out.push(await code(postToBoard(db, a, "crew_row", `m${i}`, { now })));
     expect(out.filter((o) => o === "OK")).toHaveLength(10);
     expect(out.at(-1)).toBe("TOO_FAST");
   });
 
   it("blocked and muted authors disappear from what you read", async () => {
     const [reader, blocked, muted, ok] = [await makeResident(db), await makeResident(db), await makeResident(db), await makeResident(db)];
-    const place = `filter${randomUUID().slice(0, 6)}`;
-    for (const u of [blocked, muted, ok]) await postToBoard(db, u, place, `from ${u.slice(0, 4)}`);
+    const place = "city_hall";
+    for (const u of [blocked, muted, ok]) await postToBoard(db, u, place, `from ${u.slice(0, 4)}`, { now: new Date(hour(5)) });
     await blockUser(db, blocked, reader); // they blocked the reader: still hidden both ways
     await muteUser(db, reader, muted);
-    expect((await readBoard(db, reader, place)).map((m) => m.authorId)).toEqual([ok]);
+    const seen = (await readBoard(db, reader, place)).map((m) => m.authorId).filter((id) => [blocked, muted, ok].includes(id));
+    expect(seen).toEqual([ok]);
+  });
+
+  it("a muted spammer can't push everyone else off the page", async () => {
+    const [reader, spammer, ok] = [await makeResident(db), await makeResident(db), await makeResident(db)];
+    const place = "crew_row";
+    const t0 = hour(6);
+    await postToBoard(db, ok, place, "the real conversation", { now: new Date(t0) });
+    // A full page and more of newer spam, written straight in (past the rate limits).
+    for (let i = 1; i <= CHAT.pageSize + 10; i++) {
+      await client`INSERT INTO messages (kind, channel, author_id, text, created_at) VALUES ('board', ${place}, ${spammer}, ${`spam ${i}`}, ${new Date(t0 + i * 1000).toISOString()})`;
+    }
+    await muteUser(db, reader, spammer);
+    const page = await readBoard(db, reader, place);
+    expect(page.some((m) => m.authorId === spammer)).toBe(false);
+    expect(page.map((m) => m.text)).toContain("the real conversation");
+    // Unmuted, or once a timed mute runs out, the spam is what fills the page.
+    expect((await readBoard(db, ok, place)).filter((m) => m.authorId === spammer)).toHaveLength(CHAT.pageSize);
+    await muteUser(db, reader, spammer, { hours: 1, now: new Date(Date.now() - 2 * 3_600_000) });
+    expect((await readBoard(db, reader, place)).filter((m) => m.authorId === spammer)).toHaveLength(CHAT.pageSize);
   });
 
   it("follow up to 12 Boards", async () => {
     const a = await makeResident(db);
-    for (let i = 0; i < 12; i++) await followBoard(db, a, `f${i}`);
-    await followBoard(db, a, "f0"); // already following: fine
-    expect(await code(followBoard(db, a, "f12"))).toBe("FOLLOW_LIMIT");
-    await unfollowBoard(db, a, "f0");
-    expect(await code(followBoard(db, a, "f12"))).toBe("OK");
+    for (const p of BOARDS) await followBoard(db, a, p);
+    await followBoard(db, a, "diner"); // already following: fine
+    await unfollowBoard(db, a, "diner");
+    // The cap still holds if the list ever grows past it.
+    for (let i = 0; i < 12 - (BOARDS.length - 1); i++) await client`INSERT INTO board_follows (user_id, place) VALUES (${a}, ${`old${i}`})`;
+    expect(await code(followBoard(db, a, "diner"))).toBe("FOLLOW_LIMIT");
+    await client`DELETE FROM board_follows WHERE user_id = ${a} AND place = 'old0'`;
+    expect(await code(followBoard(db, a, "diner"))).toBe("OK");
   });
 
   it("crew chat is for members only", async () => {
@@ -227,12 +268,28 @@ describe("Boards and crew chat", () => {
 describe("moderation follow-through", () => {
   it("every post is queued for the AI check; a flagged one disappears", async () => {
     const a = await makeResident(db);
-    const place = `mod${randomUUID().slice(0, 6)}`;
-    const m = await postToBoard(db, a, place, "borderline");
+    const place = "watch_party";
+    const m = await postToBoard(db, a, place, "borderline", { now: new Date(hour(7)) });
     const [q] = await client`SELECT kind FROM moderation_items WHERE ref = ${m.id}`;
     expect(q!.kind).toBe("board");
+    expect((await readBoard(db, a, place)).map((x) => x.id)).toContain(m.id);
     await hideMessage(db, m.id);
-    expect(await readBoard(db, a, place)).toEqual([]);
+    expect((await readBoard(db, a, place)).map((x) => x.id)).not.toContain(m.id);
+  });
+
+  it("staff's blocked words stop a message on every chat send path", async () => {
+    const [a, b] = await frenPair();
+    const lead = await makeResident(db);
+    await createCrew(db, lead, { name: `Words ${randomUUID().slice(0, 6)}` });
+    const blockedWords = ["badword"];
+    const now = new Date(hour(8));
+    expect(await code(postToBoard(db, a, "city_hall", "you b4dw0rd", { now, blockedWords }))).toBe("MODERATED:BLOCKED_WORD");
+    expect(await code(postToCrew(db, lead, "B.A.D.W.O.R.D", { now, blockedWords }))).toBe("MODERATED:BLOCKED_WORD");
+    expect(await code(sendDm(db, a, b, "you badword", { now, blockedWords }))).toBe("MODERATED:BLOCKED_WORD");
+    const [n] = await client`SELECT count(*)::int AS n FROM messages WHERE author_id IN (${a}, ${lead})`;
+    expect(n!.n).toBe(0);
+    // Without a list configured, the same words go through.
+    expect(await code(postToBoard(db, a, "city_hall", "you b4dw0rd", { now }))).toBe("OK");
   });
 
   it("report evidence comes from the stored conversation, only for someone in it", async () => {

@@ -475,7 +475,7 @@ describe("live rooms over HTTP", () => {
   it("flagged content comes down where it lives: hidden on a Board, taken down in a room", async () => {
     const { roomsState, client } = await import("./harness");
     const u = await resident();
-    const place = `fl${crypto.randomUUID().slice(0, 6)}`;
+    const place = "city_hall";
     const post = await call("POST", `/v1/boards/${place}`, { token: u.token, body: { text: "flag me please" } });
     await call("POST", "/internal/rooms/effects", { body: { place: "roof", copy: 2, effects: [{ kind: "moderate", line: { id: "zz", userId: u.userId, handle: "x", text: "flag me in the room", at: 1 } }] }, headers: { "x-internal-secret": SECRET } });
     await client`UPDATE moderation_items SET status = 'clean' WHERE status = 'pending' AND author_id <> ${u.userId}`;
