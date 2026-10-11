@@ -97,5 +97,7 @@ export function holdClosing(): () => void {
 }
 
 export function useClosingConfirmation(active: boolean) {
-  useEffect(() => (active ? holdClosing() : undefined), [active]);
+  useEffect(() => {
+    if (active) return holdClosing();
+  }, [active]);
 }
