@@ -174,7 +174,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 
 1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
 2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc`.
-3. Secrets on both Workers (`wrangler secret put`): `INTERNAL_SECRET` and `TICKET_SECRET` (the same on both), plus the API's `TELEGRAM_BOT_TOKEN`, and when ready `OPENAI_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`.
+3. Secrets on both Workers (`wrangler secret put`): `INTERNAL_SECRET` and `TICKET_SECRET` (the same on both), plus the API's `TELEGRAM_BOT_TOKEN`, and when ready `OPENAI_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`. Set the API's `CITY_URL` var to the city's https address, so pushes carry an Open button that marks them opened (playing within 6 hours of a push counts as opening it too).
 4. `wrangler deploy` in `apps/api`, then in `apps/rooms` (each runs its own build). Check `/health` says the schema is up to date. Rooms require the API's `/internal/rooms/access` endpoint to refresh safety permissions before joins and actions; if it is unavailable, those actions are refused.
 
 ## Notes for later bricks
