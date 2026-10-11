@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { TICKET_MAX_LIST, TicketError, signRoomTicket, verifyRoomTicket } from "../src";
+import { TICKET_MAX_FRENS, TicketError, signRoomTicket, verifyRoomTicket } from "../src";
 
 const SECRET = "r".repeat(40);
-const base = { u: "u1", h: "roof_rat", crew: "c1", place: "diner", hidden: ["b"], frens: ["f"], chat: true, age: 12 };
+const base = { u: "u1", h: "roof_rat", crew: "c1", place: "diner", frens: ["f"], age: 12 };
 const reason = async (p: Promise<unknown>) => {
   try {
     await p;
@@ -34,8 +34,19 @@ describe("room tickets", () => {
   it("never signs with a weak secret or a bad place, and caps long lists", async () => {
     await expect(signRoomTicket(base, "short")).rejects.toThrow();
     await expect(signRoomTicket({ ...base, place: "../etc" }, SECRET)).rejects.toThrow();
-    const big = await signRoomTicket({ ...base, hidden: Array.from({ length: 900 }, (_, i) => `h${i}`) }, SECRET);
-    expect((await verifyRoomTicket(big, SECRET)).hidden).toHaveLength(TICKET_MAX_LIST);
+    const frens = Array.from({ length: 900 }, () => crypto.randomUUID());
+    const big = await signRoomTicket({ ...base, frens }, SECRET);
+    expect((await verifyRoomTicket(big, SECRET)).frens).toEqual(frens.slice(0, TICKET_MAX_FRENS));
+    // Small enough for a URL whoever you are (the edge's limit is 16 KB).
+    expect(encodeURIComponent(big).length).toBeLessThan(4096);
+  });
+
+  it("carries no safety lists: nobody can read who blocked them out of their own ticket", async () => {
+    const leaky = { ...base, hidden: ["blocker"], blocked: ["blocker"], chat: false } as typeof base;
+    const t = await signRoomTicket(leaky, SECRET);
+    const body = JSON.parse(atob(t.split(".")[0]!.replace(/-/g, "+").replace(/_/g, "/")));
+    expect(Object.keys(body).sort()).toEqual(["age", "crew", "exp", "frens", "h", "place", "u", "v"]);
+    expect(JSON.stringify(body)).not.toContain("blocker");
   });
 
   it("every malformed token is refused as MALFORMED or BAD_SIGNATURE, never accepted", async () => {

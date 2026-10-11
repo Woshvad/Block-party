@@ -396,7 +396,7 @@ describe("live rooms over HTTP", () => {
     expect(r.status).toBe(200);
     expect(r.body.url).toMatch(/^https:\/\/rooms\.test\/connect\?ticket=/);
     const t = await verifyRoomTicket(r.body.ticket, TICKET_SECRET);
-    expect(t).toMatchObject({ u: u.userId, h: u.handle, place: "diner", chat: true });
+    expect(t).toMatchObject({ u: u.userId, h: u.handle, place: "diner" });
     const g = await call("POST", "/v1/auth/guest", { body: { ageAck: true } });
     expect((await ticketFor(g.body.sessionToken, "diner")).status).toBe(404);
     for (const bad of ["narnia:x", "../etc", "", "HOME:x"]) expect([400, 404]).toContain((await ticketFor(u.token, bad)).status);
@@ -405,6 +405,8 @@ describe("live rooms over HTTP", () => {
   it("homes: yours always; others' only with the door open and no block", async () => {
     const [a, b] = [await resident(), await resident()];
     expect((await ticketFor(a.token, `home:${a.userId}`)).status).toBe(200);
+    // One home, one room: anything after the owner would open another private room.
+    for (const extra of [`home:${a.userId}:2`, `home:${a.userId}:`, `home:${a.userId}:x:y`]) expect((await ticketFor(a.token, extra)).status).toBe(404);
     expect((await ticketFor(b.token, `home:${a.userId}`)).body.error.code).toBe("DOOR_CLOSED");
     await call("PATCH", "/v1/home", { token: a.token, body: { doorOpen: true } });
     expect((await ticketFor(b.token, `home:${a.userId}`)).status).toBe(200);
@@ -416,10 +418,11 @@ describe("live rooms over HTTP", () => {
     const [lead, outsider] = [await resident(), await resident()];
     const crew = await call("POST", "/v1/crews", { token: lead.token, body: { name: `Room ${crypto.randomUUID().slice(0, 6)}` } });
     expect((await ticketFor(lead.token, `crew_house:${crew.body.id}`)).status).toBe(200);
+    expect((await ticketFor(lead.token, `crew_house:${crew.body.id}:annex`)).status).toBe(404);
     expect((await ticketFor(outsider.token, `crew_house:${crew.body.id}`)).status).toBe(403);
   });
 
-  it("the ticket carries blocks both ways, mutes, frens and the chat restriction", async () => {
+  it("the ticket never lists who blocked or muted you: the room asks for that itself", async () => {
     const { verifyRoomTicket } = await import("@bp/core");
     const { TICKET_SECRET, client } = await import("./harness");
     const [me, blockedByMe, blockedMe, muted, mod] = [await resident(), await resident(), await resident(), await resident(), await resident()];
@@ -429,9 +432,11 @@ describe("live rooms over HTTP", () => {
     await client`INSERT INTO staff (user_id, role) VALUES (${mod.userId}, 'moderator')`;
     await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: me.userId, kind: "chat_mute", hours: 2, reason: "Flooding the Diner with copy-pasta all morning." } });
     await arrive(me.userId, "roof");
-    const t = await verifyRoomTicket((await ticketFor(me.token, "roof")).body.ticket, TICKET_SECRET);
-    expect(new Set(t.hidden)).toEqual(new Set([blockedByMe.userId, blockedMe.userId, muted.userId]));
-    expect(t.chat).toBe(false);
+    const r = await ticketFor(me.token, "roof");
+    const t = await verifyRoomTicket(r.body.ticket, TICKET_SECRET);
+    expect(Object.keys(t).sort()).toEqual(["age", "crew", "exp", "frens", "h", "place", "u", "v"]);
+    for (const other of [blockedByMe, blockedMe, muted]) expect(JSON.stringify(t)).not.toContain(other.userId);
+    expect(r.body.url.length).toBeLessThan(4096);
   });
 
   it("room effects become moods and moderation items; only with the secret", async () => {

@@ -44,7 +44,7 @@ type Client = { ws: WebSocket; events: Array<Record<string, any>>; next: (t: str
 
 async function connect(u: string, over: Partial<{ crew: string | null; place: string; hidden: string[]; chat: boolean; age: number; frens: string[] }> = {}): Promise<Client> {
   if (!access.has(u)) access.set(u, { userId: u, hidden: over.hidden ?? [], blocked: over.hidden ?? [], chat: over.chat ?? true, suspended: false });
-  const ticket = await signRoomTicket({ u, h: `h_${u}`, crew: null, place: "diner", hidden: [], frens: [], chat: true, age: 30, ...over }, TICKET_SECRET);
+  const ticket = await signRoomTicket({ u, h: `h_${u}`, crew: over.crew ?? null, place: over.place ?? "diner", frens: over.frens ?? [], age: over.age ?? 30 }, TICKET_SECRET);
   const res = await mf.dispatchFetch(`http://rooms.test/connect?ticket=${encodeURIComponent(ticket)}`, { headers: { upgrade: "websocket" } });
   const ws = res.webSocket as unknown as WebSocket;
   if (!ws) throw new Error(`no socket: ${res.status} ${await res.text()}`);
@@ -82,12 +82,12 @@ describe("connecting", () => {
   it("refuses missing, forged and expired tickets, and non-websocket requests", async () => {
     const r1 = await mf.dispatchFetch("http://rooms.test/connect?ticket=nope", { headers: { upgrade: "websocket" } });
     expect(r1.status).toBe(401);
-    const forged = await signRoomTicket({ u: "x", h: "x", crew: null, place: "diner", hidden: [], frens: [], chat: true, age: 1 }, "f".repeat(40));
+    const forged = await signRoomTicket({ u: "x", h: "x", crew: null, place: "diner", frens: [], age: 1 }, "f".repeat(40));
     expect((await mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`, { headers: { upgrade: "websocket" } })).status).toBe(401);
-    const old = await signRoomTicket({ u: "x", h: "x", crew: null, place: "diner", hidden: [], frens: [], chat: true, age: 1 }, TICKET_SECRET, new Date(Date.now() - 120_000));
+    const old = await signRoomTicket({ u: "x", h: "x", crew: null, place: "diner", frens: [], age: 1 }, TICKET_SECRET, new Date(Date.now() - 120_000));
     expect((await mf.dispatchFetch(`http://rooms.test/connect?ticket=${old}`, { headers: { upgrade: "websocket" } })).status).toBe(401);
     expect((await mf.dispatchFetch("http://rooms.test/connect?ticket=x")).status).toBe(426);
-    const nowhere = await signRoomTicket({ u: "x", h: "x", crew: null, place: "narnia", hidden: [], frens: [], chat: true, age: 1 }, TICKET_SECRET);
+    const nowhere = await signRoomTicket({ u: "x", h: "x", crew: null, place: "narnia", frens: [], age: 1 }, TICKET_SECRET);
     expect((await mf.dispatchFetch(`http://rooms.test/connect?ticket=${nowhere}`, { headers: { upgrade: "websocket" } })).status).toBe(404);
   });
 

@@ -1,7 +1,11 @@
-// Room tickets: the API signs who you are, the rooms Worker checks the
-// signature and trusts nothing else. Short-lived, so a leaked one is useless
-// within a minute, and it carries everything the room needs (no database in
-// the room's hot path).
+// Room tickets: the API signs who you are and where you may go, the rooms
+// Worker checks the signature and trusts nothing else. Short-lived, so a
+// leaked one is useless within a minute.
+//
+// No safety lists in here: blocks, mutes and restrictions are asked of the
+// API by the room itself (and kept fresh while you're inside). A ticket is
+// plain base64 in a URL, so it must never show you who blocked you, and it
+// has to stay well under the edge's URL limit however many frens you have.
 
 export type RoomTicket = {
   v: 1;
@@ -9,16 +13,13 @@ export type RoomTicket = {
   h: string; // handle
   crew: string | null;
   place: string;
-  hidden: string[]; // blocks either way plus this resident's mutes
-  blocked?: string[]; // blocks only; mutes must never suppress outgoing lines
-  frens: string[];
-  chat: boolean; // false under a chat mute or suspension
+  frens: string[]; // a few frens, so the directory can seat you near them
   age: number; // account age in days (link rules)
   exp: number; // unix seconds
 };
 
 export const TICKET_TTL_SECONDS = 60;
-export const TICKET_MAX_LIST = 500;
+export const TICKET_MAX_FRENS = 50;
 
 export class TicketError extends Error {
   constructor(readonly reason: "MALFORMED" | "BAD_SIGNATURE" | "EXPIRED") {
@@ -44,12 +45,15 @@ export const PLACE_RE = /^[a-z0-9_:-]{1,64}$/;
 export async function signRoomTicket(t: Omit<RoomTicket, "v" | "exp">, secret: string, now = new Date()): Promise<string> {
   if (!secret || secret.length < 32) throw new Error("room ticket secret must be 32+ characters");
   if (!PLACE_RE.test(t.place)) throw new Error("bad place");
+  // Only the fields a ticket has: nothing else a caller passes gets signed.
   const body: RoomTicket = {
     v: 1,
-    ...t,
-    hidden: t.hidden.slice(0, TICKET_MAX_LIST),
-    ...(t.blocked ? { blocked: t.blocked.slice(0, TICKET_MAX_LIST) } : {}),
-    frens: t.frens.slice(0, TICKET_MAX_LIST),
+    u: t.u,
+    h: t.h,
+    crew: t.crew,
+    place: t.place,
+    frens: t.frens.slice(0, TICKET_MAX_FRENS),
+    age: t.age,
     exp: Math.floor(now.getTime() / 1000) + TICKET_TTL_SECONDS,
   };
   const payload = b64url(enc.encode(JSON.stringify(body)));
@@ -72,7 +76,7 @@ export async function verifyRoomTicket(token: unknown, secret: string, now = new
   } catch {
     throw new TicketError("MALFORMED");
   }
-  if (t?.v !== 1 || typeof t.u !== "string" || typeof t.place !== "string" || !PLACE_RE.test(t.place) || !Array.isArray(t.hidden) || !Array.isArray(t.frens) || (t.blocked !== undefined && !Array.isArray(t.blocked))) {
+  if (t?.v !== 1 || typeof t.u !== "string" || typeof t.place !== "string" || !PLACE_RE.test(t.place) || !Array.isArray(t.frens)) {
     throw new TicketError("MALFORMED");
   }
   if (!Number.isSafeInteger(t.exp) || t.exp < Math.floor(now.getTime() / 1000)) throw new TicketError("EXPIRED");

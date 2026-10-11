@@ -756,7 +756,10 @@ export function createApp(cfg: AppConfig) {
     const userId = c.get("userId");
     const resident = await getResident(db, userId);
     if (!resident) throw new ApiError(404, "NO_RESIDENT", "move in first");
-    const [kind, owner] = place.split(":");
+    // One room per place id: "home:<id>" and nothing after it, or every extra
+    // segment would open another private room.
+    const [kind, owner, ...rest] = place.split(":");
+    if (kind !== "bunker" && rest.length) throw new ApiError(404, "NOT_FOUND", "no such place");
     // No teleporting: you have to have arrived in that part of the city.
     const area = areaOf(place);
     if (!area) throw new ApiError(404, "NOT_FOUND", "no such place");
@@ -781,19 +784,16 @@ export function createApp(cfg: AppConfig) {
     } else if (owner !== undefined) {
       throw new ApiError(404, "NOT_FOUND", "no such place");
     }
+    // Blocks, mutes and restrictions aren't in the ticket: the room asks for
+    // them itself (POST /internal/rooms/access) and keeps them fresh.
     const t = now();
-    const [access] = await roomAccess(db, [userId], t);
-    if (!access) throw new ApiError(403, "ACCESS_UNAVAILABLE", "room access could not be verified");
     const ticket = await signRoomTicket(
       {
         u: userId,
         h: resident.handle,
         crew: crew?.crew.id ?? null,
         place,
-        hidden: access.hidden,
-        blocked: access.blocked,
         frens: await frensOf(db, userId),
-        chat: access.chat,
         age: Math.floor(await accountAgeDays(db, userId, t)),
       },
       cfg.ticketSecret,
