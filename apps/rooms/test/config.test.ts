@@ -38,7 +38,7 @@ describe("the rooms wrangler config matches the code", () => {
 
   it("vars are ones the Worker reads; the runtime test uses the same date", () => {
     for (const k of Object.keys(cfg.vars)) expect(worker).toMatch(new RegExp(`\\b${k}\\??:`));
-    expect(read("./rooms.test.ts")).toContain(`compatibilityDate: "${cfg.compatibility_date}"`);
+    expect(read("./harness.ts")).toContain(`compatibilityDate: "${cfg.compatibility_date}"`);
     expect(cfg.main).toBe("dist/worker.js");
   });
 

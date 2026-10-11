@@ -1,7 +1,8 @@
 // The live rooms Worker: one Durable Object per room copy, plus a directory
 // per place. Deploy: pnpm --filter @bp/rooms build && wrangler deploy
 // Secrets (wrangler secret put ...): TICKET_SECRET, INTERNAL_SECRET (both the
-// same as the API's).
+// same as the API's). Optional: BLOCKED_WORDS, staff's blocked words for room
+// chat, comma- or newline-separated (the same list as the API's).
 {
   "name": "block-party-rooms",
   "main": "dist/worker.js",

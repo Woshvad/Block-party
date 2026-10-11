@@ -1,94 +1,32 @@
 import { signRoomTicket } from "@bp/core";
-import { Miniflare } from "miniflare";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type Client, type ConnectOptions, type Rooms, TICKET_SECRET, fakeApi, quiet, startRooms } from "./harness";
 
 // The real Worker, running in workerd through Miniflare, over real WebSockets.
-const TICKET_SECRET = "t".repeat(40);
-const INTERNAL_SECRET = "i".repeat(40);
-const effects: Array<{ place: string; copy: number; effects: Array<{ kind: string }> }> = [];
-type Access = { userId: string; hidden: string[]; blocked: string[]; chat: boolean; suspended: boolean };
-const access = new Map<string, Access>();
-let accessAvailable = true;
-let mf: Miniflare;
+const api = fakeApi();
+const { access, effects } = api;
+let rooms: Rooms;
 
 beforeAll(async () => {
-  mf = new Miniflare({
-    modules: true,
-    scriptPath: fileURLToPath(new URL("../dist/worker.js", import.meta.url)),
-    compatibilityDate: "2026-07-01",
-    durableObjects: { ROOMS: "RoomDO", DIRECTORY: "DirectoryDO" },
-    bindings: { TICKET_SECRET, INTERNAL_SECRET, API_URL: "https://api.test" },
-    // Stands in for the API: captures room effects the Worker posts.
-    outboundService: async (req: Request) => {
-      const path = new URL(req.url).pathname;
-      if (path === "/internal/rooms/access") {
-        if (!accessAvailable) return new Response("unavailable", { status: 503 });
-        const { userIds } = await req.json() as { userIds: string[] };
-        return Response.json(userIds.map((u) => access.get(u)));
-      }
-      if (path === "/internal/rooms/effects") effects.push(await req.json());
-      if (path === "/internal/rooms/away") {
-        // Two dimmed residents on the watch party floor; garbage elsewhere must not break a room.
-        if (new URL(req.url).searchParams.get("place") === "watch_party") return Response.json([{ userId: "zz1", handle: "away1" }, { userId: "zz2", handle: "away2" }]);
-        return new Response("not json at all");
-      }
-      return new Response("{}");
-    },
-  });
-  await mf.ready;
+  rooms = await startRooms(api);
 });
-afterAll(() => mf?.dispose());
+afterAll(() => rooms?.dispose());
 
-type Client = { ws: WebSocket; events: Array<Record<string, any>>; next: (t: string, ms?: number) => Promise<Record<string, any>>; send: (m: unknown) => void };
-
-async function connect(u: string, over: Partial<{ crew: string | null; place: string; hidden: string[]; chat: boolean; age: number; frens: string[] }> = {}): Promise<Client> {
-  if (!access.has(u)) access.set(u, { userId: u, hidden: over.hidden ?? [], blocked: over.hidden ?? [], chat: over.chat ?? true, suspended: false });
-  const ticket = await signRoomTicket({ u, h: `h_${u}`, crew: over.crew ?? null, place: over.place ?? "diner", frens: over.frens ?? [], age: over.age ?? 30 }, TICKET_SECRET);
-  const res = await mf.dispatchFetch(`http://rooms.test/connect?ticket=${encodeURIComponent(ticket)}`, { headers: { upgrade: "websocket" } });
-  const ws = res.webSocket as unknown as WebSocket;
-  if (!ws) throw new Error(`no socket: ${res.status} ${await res.text()}`);
-  (ws as any).accept();
-  const events: Array<Record<string, any>> = [];
-  const waiters: Array<{ t: string; resolve: (e: any) => void }> = [];
-  ws.addEventListener("message", (m: MessageEvent) => {
-    const e = JSON.parse(String(m.data));
-    const i = waiters.findIndex((w) => w.t === e.t);
-    if (i >= 0) waiters.splice(i, 1)[0]!.resolve(e);
-    else events.push(e);
-  });
-  const next = (t: string, ms = 3000) => {
-    const i = events.findIndex((e) => e.t === t);
-    if (i >= 0) return Promise.resolve(events.splice(i, 1)[0]!);
-    return new Promise<Record<string, any>>((resolve, reject) => {
-      const w = { t, resolve };
-      waiters.push(w);
-      setTimeout(() => {
-        const j = waiters.indexOf(w);
-        if (j >= 0) {
-          waiters.splice(j, 1);
-          reject(new Error(`no ${t} for ${u} within ${ms}ms (got ${events.map((e) => e.t).join(",")})`));
-        }
-      }, ms);
-    });
-  };
-  return { ws, events, next, send: (m) => ws.send(JSON.stringify(m)) };
-}
-const quiet = (ms = 300) => new Promise((r) => setTimeout(r, ms));
-const internal = (path: string, init: { method?: string; body?: string } = {}) =>
-  mf.dispatchFetch(`http://rooms.test${path}`, { ...init, headers: { "x-internal-secret": INTERNAL_SECRET } });
+const connect = (u: string, over: ConnectOptions = {}) => rooms.connect(u, over);
+const internal = (path: string, init: { method?: string; body?: string } = {}) => rooms.internal(path, init);
+const dispatch = (url: string, init?: RequestInit) => rooms.mf.dispatchFetch(url, init as never);
 
 describe("connecting", () => {
   it("refuses missing, forged and expired tickets, and non-websocket requests", async () => {
-    const r1 = await mf.dispatchFetch("http://rooms.test/connect?ticket=nope", { headers: { upgrade: "websocket" } });
+    const r1 = await dispatch("http://rooms.test/connect?ticket=nope", { headers: { upgrade: "websocket" } });
     expect(r1.status).toBe(401);
     const forged = await signRoomTicket({ u: "x", h: "x", crew: null, place: "diner", frens: [], age: 1 }, "f".repeat(40));
-    expect((await mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`, { headers: { upgrade: "websocket" } })).status).toBe(401);
+    expect((await dispatch(`http://rooms.test/connect?ticket=${forged}`, { headers: { upgrade: "websocket" } })).status).toBe(401);
     const old = await signRoomTicket({ u: "x", h: "x", crew: null, place: "diner", frens: [], age: 1 }, TICKET_SECRET, new Date(Date.now() - 120_000));
-    expect((await mf.dispatchFetch(`http://rooms.test/connect?ticket=${old}`, { headers: { upgrade: "websocket" } })).status).toBe(401);
-    expect((await mf.dispatchFetch("http://rooms.test/connect?ticket=x")).status).toBe(426);
+    expect((await dispatch(`http://rooms.test/connect?ticket=${old}`, { headers: { upgrade: "websocket" } })).status).toBe(401);
+    expect((await dispatch("http://rooms.test/connect?ticket=x")).status).toBe(426);
     const nowhere = await signRoomTicket({ u: "x", h: "x", crew: null, place: "narnia", frens: [], age: 1 }, TICKET_SECRET);
-    expect((await mf.dispatchFetch(`http://rooms.test/connect?ticket=${nowhere}`, { headers: { upgrade: "websocket" } })).status).toBe(404);
+    expect((await dispatch(`http://rooms.test/connect?ticket=${nowhere}`, { headers: { upgrade: "websocket" } })).status).toBe(404);
   });
 
   it("welcomes you with who's here, and tells them you arrived", async () => {
@@ -169,7 +107,7 @@ describe("talking", () => {
     expect(await a.next("removed")).toEqual({ t: "removed", lineId: line.id });
     const after = (await (await internal("/internal/evidence?place=city_hall&copy=0")).json()) as any[];
     expect(after.find((l: any) => l.id === line.id).text).toBe("[removed]");
-    expect((await mf.dispatchFetch("http://rooms.test/internal/evidence?place=city_hall&copy=0")).status).toBe(404); // no secret
+    expect((await dispatch("http://rooms.test/internal/evidence?place=city_hall&copy=0")).status).toBe(404); // no secret
     a.ws.close();
   });
 });
@@ -221,49 +159,8 @@ describe("presence and copies", () => {
   }, 60_000);
 });
 
-describe("live safety permissions", () => {
-  it("updates a reader's mute and block without reconnecting, then allows chat after unblocking", async () => {
-    const a = await connect("safety-a", { place: "faucet" });
-    const b = await connect("safety-b", { place: "faucet" });
-    await a.next("welcome"); await b.next("welcome");
-    access.set("safety-a", { userId: "safety-a", hidden: ["safety-b"], blocked: [], chat: true, suspended: false });
-    b.send({ t: "chat", text: "muted line" });
-    await b.next("chat");
-    await quiet();
-    expect(a.events.some((e) => e.t === "chat" && e.line.text === "muted line")).toBe(false);
-    a.send({ t: "chat", text: "outgoing still works" });
-    expect((await b.next("chat")).line.text).toBe("outgoing still works");
-    access.get("safety-a")!.blocked = ["safety-b"];
-    a.send({ t: "chat", text: "blocked outgoing" });
-    await quiet();
-    expect(b.events.some((e) => e.t === "chat" && e.line.text === "blocked outgoing")).toBe(false);
-    access.get("safety-a")!.hidden = []; access.get("safety-a")!.blocked = [];
-    b.send({ t: "chat", text: "unblocked line" });
-    expect((await a.next("chat")).line.text).toBe("outgoing still works"); // own earlier echo
-    expect((await a.next("chat")).line.text).toBe("blocked outgoing"); // own echo
-    expect((await a.next("chat")).line.text).toBe("unblocked line");
-    a.ws.close(); b.ws.close();
-  });
-
-  it("enforces staff restrictions on existing sockets and refuses actions when the API fails", async () => {
-    const a = await connect("restricted-live", { place: "gm_wall" });
-    await a.next("welcome");
-    access.get("restricted-live")!.chat = false;
-    a.send({ t: "chat", text: "cannot send this" });
-    expect((await a.next("error")).code).toBe("CHAT_RESTRICTED");
-    access.get("restricted-live")!.chat = true;
-    accessAvailable = false;
-    try {
-      a.send({ t: "chat", text: "cannot bypass outage" });
-      expect((await a.next("error")).code).toBe("ACCESS_UNAVAILABLE");
-    } finally { accessAvailable = true; }
-    const closed = new Promise<number>((resolve) => a.ws.addEventListener("close", (e: CloseEvent) => resolve(e.code)));
-    access.get("restricted-live")!.suspended = true;
-    a.send({ t: "move", to: { x: 1, y: 1 } });
-    expect(await closed).toBe(4000);
-    expect(await (await internal("/internal/presence?place=gm_wall&u=restricted-live")).json()).toEqual({ here: false, copy: null });
-  });
-});
+// Live safety changes (mutes, blocks, restrictions, an API outage) are in
+// hotpath.test.ts, which runs a room with a short access window.
 
 describe("hibernation", () => {
   it("a room that forgets its memory rebuilds who's here, where, seated, and its evidence", async () => {
@@ -349,11 +246,82 @@ describe("Proof of Neighbour visits", () => {
 
 it("headcounts require internal auth and follow actual connected residents", async () => {
   const path = "/internal/headcount?place=gm_wall";
-  expect((await mf.dispatchFetch(`http://rooms.test${path}`)).status).toBe(404);
+  expect((await dispatch(`http://rooms.test${path}`)).status).toBe(404);
   const a = await connect("headcount-a", { place: "gm_wall" });
   await a.next("welcome");
   const counts = await (await internal(path)).json() as Record<string, number>;
   expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(1);
   expect((await internal("/internal/headcount?place=home:private")).status).toBe(404);
   a.ws.close();
+});
+
+describe("the directory stays honest", () => {
+  const here = async (place: string, u: string) => (await internal(`/internal/presence?place=${place}&u=${u}`)).json();
+  // A ghost: listed by the directory with no socket behind it, the way a
+  // deploy that drops every socket leaves things.
+  const haunt = async (place: string, u: string) => {
+    const dir = await rooms.directoryStub(place);
+    await dir.fetch("https://dir/joined", { method: "POST", body: JSON.stringify({ copy: 0, u, crew: null }) });
+    expect(await here(place, u)).toEqual({ here: true, copy: 0 });
+  };
+  const ended = (u: string) => effects.flatMap((e) => e.effects).some((x) => x.kind === "visit_end" && x.userId === u);
+
+  it("a room that wakes tells the directory who's really there: a ghost goes, and their visit ends", async () => {
+    const first = await connect("honest-first", { place: "city_hall" });
+    await first.next("welcome");
+    await haunt("city_hall", "ghost-voter");
+    effects.length = 0;
+    await internal("/internal/forget?place=city_hall&copy=0", { method: "POST" });
+    const a = await connect("honest-a", { place: "city_hall" }); // wakes the room
+    await a.next("welcome");
+    await quiet(500);
+    expect(await here("city_hall", "ghost-voter")).toEqual({ here: false, copy: null });
+    expect(await here("city_hall", "honest-a")).toEqual({ here: true, copy: 0 });
+    expect(await here("city_hall", "honest-first")).toEqual({ here: true, copy: 0 });
+    expect(ended("ghost-voter")).toBe(true);
+    expect(ended("honest-first")).toBe(false);
+    first.ws.close();
+    a.ws.close();
+  });
+
+  it("a room told to drop someone it never had still clears them from the directory", async () => {
+    const someone = await connect("honest-b", { place: "faucet" });
+    await someone.next("welcome");
+    await haunt("faucet", "ghost-2");
+    effects.length = 0;
+    const room = await rooms.roomStub("faucet#0");
+    expect((await room.fetch("https://room/disconnect?u=ghost-2", { method: "POST" })).status).toBe(200);
+    expect(await here("faucet", "ghost-2")).toEqual({ here: false, copy: null });
+    await quiet(300);
+    expect(ended("ghost-2")).toBe(true);
+    someone.ws.close();
+  });
+});
+
+describe("room effects", () => {
+  it("effects the API can't take wait in the room, then arrive once each, with ids", async () => {
+    effects.length = 0;
+    const mine = () => effects.flatMap((e) => e.effects).filter((x) => x.userId === "outbox-a" || x.line?.userId === "outbox-a");
+    api.effectsAvailable = false;
+    const a = await connect("outbox-a", { place: "home:outbox" });
+    try {
+      await a.next("welcome");
+      a.send({ t: "chat", text: "held for later" });
+      await a.next("chat");
+      await quiet(500);
+      expect(api.effectsRefused).toBeGreaterThan(0);
+      expect(mine()).toEqual([]);
+    } finally {
+      api.effectsAvailable = true;
+    }
+    // Nobody does anything more: the room's alarm tries again by itself.
+    const deadline = Date.now() + 12_000;
+    // loop-bound: polls until the deadline
+    while (Date.now() < deadline && mine().length < 2) await quiet(250);
+    await quiet(500);
+    expect(mine().map((x) => x.kind).sort()).toEqual(["moderate", "visit_start"]);
+    expect(mine().every((x) => typeof x.id === "string")).toBe(true);
+    expect(new Set(mine().map((x) => x.id)).size).toBe(2);
+    a.ws.close();
+  }, 30_000);
 });
