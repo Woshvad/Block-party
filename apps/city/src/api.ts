@@ -247,6 +247,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     answerShift: (id: string, answers: boolean[]) => request<{ score: number; pay: number }>("POST", `/v1/shifts/${encodeURIComponent(id)}/answers`, { answers }),
     collectShift: (id: string) => request<{ pay: number; replayed: boolean }>("POST", `/v1/shifts/${encodeURIComponent(id)}/collect`),
     awayShift: () => request<Record<string, unknown>>("POST", "/v1/shifts/away"),
+    // The shift to come back to after leaving the view or reloading, or null.
+    currentShift: () => request<ShiftNow | null>("GET", "/v1/shifts/current"),
 
     // --- Real money (off until the legal opinion; never in the Mini App)
     realGate: (b: { marketId?: string; amountCents?: number; deviceLocationOk?: boolean; deviceCountry?: string } = {}) => request<{ ok: true } | { ok: false; reason: string }>("POST", "/v1/real/gate", b),
@@ -348,6 +350,9 @@ export type Moods = {
   play: { sessionMinutes: number };
   copium: { free: number; price: number };
 };
+// A Mod Shift as the server sees it: the queue only while it can be answered;
+// pay null until it's decided (handed in, or the answer window missed).
+export type ShiftNow = { shiftId: string; items: { text: string }[] | null; answerBy: string; endsAt: string; answered: boolean; score: number | null; pay: number | null; collectable: boolean };
 export type Pon = { ageOk: boolean; verified: string[]; neighbours: number; neighboursNeeded: number; proofOfNeighbour: boolean; since: string | null };
 export type Prefs = { timeZone: string; quietStart: number; quietEnd: number; alerts: string[]; bell2h: boolean; pushOff: boolean };
 export type Restriction = { id: string; kind: string; reason: string; startsAt: string; endsAt: string | null };
