@@ -19,6 +19,7 @@ import {
   cityDay,
   daysBetween,
   median,
+  oddsCredit,
   sideOpen,
   ticketsAfter,
   vibeGap,
@@ -451,17 +452,18 @@ export async function rightList(db: Db, opts: { now?: Date; season?: number; lim
   };
 }
 
-// "Network congested: odds paused at 20:41" once polls stop succeeding.
+// "Network congested: odds paused at 20:41" once polls stop succeeding. The
+// credit line names the feed the odds actually came from.
 export async function feedStatus(db: Db, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
   const [last] = await db
-    .select({ at: feedPolls.at })
+    .select({ at: feedPolls.at, source: feedPolls.source })
     .from(feedPolls)
     .where(and(eq(feedPolls.ok, true), lte(feedPolls.at, now)))
     .orderBy(desc(feedPolls.at))
     .limit(1);
   const paused = !last || now.getTime() - last.at.getTime() > TOWER.feedPausedAfterSeconds * 1000;
-  return { paused, lastTickAt: last?.at ?? null };
+  return { paused, lastTickAt: last?.at ?? null, credit: last ? oddsCredit(last.source) : null };
 }
 
 // --- Making a call ------------------------------------------------------------------
@@ -614,7 +616,7 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
     counts: blurred ? null : { city: cityCount, crew: crewCount },
     onSlate,
     mine: mine ? { id: mine.id, side: mine.side, chance: mine.chance, status: mine.status, lockedPrice: mine.lockedPrice } : null,
-    source: "Odds via Polymarket",
+    source: oddsCredit(m.source),
   };
 }
 

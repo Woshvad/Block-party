@@ -170,6 +170,14 @@ describe("the odds feed", () => {
     expect(listed).toContain(il);
     expect(listed).not.toContain(ie);
   });
+
+  it("the credit line names the feed the odds came from", async () => {
+    const t = fresh();
+    const f = feed();
+    f.add(t);
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    expect(await feedStatus(db, { now: new Date(t + MIN) })).toMatchObject({ paused: false, credit: "Sample odds · Not real" });
+  });
 });
 
 describe("making a call", () => {
@@ -694,6 +702,8 @@ describe("the live Polymarket feed, on recorded Gamma payloads", () => {
     const cc = await makeCall(db, c, { marketId: margin.id, side: "yes", chance: 50, seenPrice: 34 }, { now: new Date(at + 1000) });
     await pollOdds(db, provider, { now: new Date(at + MIN) });
     for (const x of [ca, cb, cc]) expect((await callRow(x.id)).status).toBe("locked");
+    expect(await marketView(db, a, btc.id, { now: new Date(at + MIN) })).toMatchObject({ source: "Odds via Polymarket · Not affiliated" });
+    expect((await feedStatus(db, { now: new Date(at + MIN) })).credit).toBe("Odds via Polymarket · Not affiliated");
 
     // They close: Gamma's records of a market that resolved YES, a fight
     // cancelled and paid 50/50, and a result still proposed, for the three.

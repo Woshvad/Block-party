@@ -157,8 +157,15 @@ export function mockProvider(specs: () => readonly MockMarketSpec[]): OddsProvid
   };
 }
 
+// The credit line under odds we show. Only Polymarket's own prices carry its
+// name; the sample feed's are made up, and say so.
+export function oddsCredit(source: string): string {
+  return source === "polymarket" ? "Odds via Polymarket · Not affiliated" : "Sample odds · Not real";
+}
+
 // A rolling set of sample markets for development and staging: each city day
 // gets a handful across the tiers and categories, so the Floor is never empty.
+// They're invented: shown under oddsCredit("mock"), never Polymarket's name.
 export function sampleMarkets(now: Date, days = 3): MockMarketSpec[] {
   const out: MockMarketSpec[] = [];
   const day0 = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
