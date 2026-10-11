@@ -89,7 +89,26 @@ describe("phone verification", () => {
       code(confirmPhoneCheck(db, b, { checkId: cb.checkId, phone, code: "123456" }, opts())),
     ]);
     expect(res.sort()).toEqual(["OK", "PHONE_TAKEN"]);
-    expect(await code(startPhoneCheck(db, await makeResident(db), phone, opts()))).toBe("PHONE_TAKEN");
+    // A third resident only learns the number is taken once they prove they hold it.
+    const c = await makeResident(db);
+    const { checkId } = await startPhoneCheck(db, c, phone, opts());
+    expect(await code(confirmPhoneCheck(db, c, { checkId, phone, code: "000000" }, opts()))).toBe("OK"); // wrong code: just "not verified"
+    expect(await code(confirmPhoneCheck(db, c, { checkId, phone, code: "123456" }, opts()))).toBe("PHONE_TAKEN");
+  });
+
+  it("starting a check never tells a taken number from a free one, and the limits come first", async () => {
+    const taken = newPhone();
+    await verifyPhone(await makeResident(db), taken);
+    const prober = await makeResident(db);
+    const t = new Date();
+    // The same answer, and the same SMS, for a registered number as for a fresh one.
+    const a = await startPhoneCheck(db, prober, taken, opts(t));
+    const b = await startPhoneCheck(db, prober, newPhone(), opts(t));
+    expect(Object.keys(a)).toEqual(Object.keys(b));
+    expect(sent.at(-2)).toBe(taken);
+    // Probing more numbers hits the hourly limit, taken or not.
+    expect(await code(startPhoneCheck(db, prober, newPhone(), opts(t)))).toBe("OK");
+    expect(await code(startPhoneCheck(db, prober, taken, opts(t)))).toBe("TOO_MANY_CODES");
   });
 
   it("codes expire after 10 minutes and allow 5 tries; the number must match", async () => {

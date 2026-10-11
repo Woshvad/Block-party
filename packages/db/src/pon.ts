@@ -66,8 +66,9 @@ export async function startPhoneCheck(db: Db, userId: string, phone: unknown, op
   const hash = await keyedHash(opts.pepper, phone);
   const [mine] = await db.select().from(verifiedIdentities).where(and(eq(verifiedIdentities.userId, userId), eq(verifiedIdentities.kind, "phone")));
   if (mine) throw new PonError("ALREADY_VERIFIED", "your phone is already verified");
-  const [taken] = await db.select().from(verifiedIdentities).where(and(eq(verifiedIdentities.kind, "phone"), eq(verifiedIdentities.subjectHash, hash)));
-  if (taken) throw new PonError("PHONE_TAKEN", "that number is already used by another resident");
+  // Whether the number already backs another resident is never said here:
+  // that would let anyone test numbers for membership without a code. A
+  // taken number gets a code like any other, and confirming it says so.
   const perUser = await hitRateLimit(db, `pon-start:${userId}`, { limit: PON.startsPerHour, windowSeconds: 3600, now });
   const perNumber = await hitRateLimit(db, `pon-number:${hash}`, { limit: PON.startsPerNumberPerDay, windowSeconds: 86_400, now });
   if (!perUser.allowed || !perNumber.allowed) throw new PonError("TOO_MANY_CODES", "too many codes; try again later");
