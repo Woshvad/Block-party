@@ -623,6 +623,21 @@ export const moods = pgTable(
   ],
 );
 
+// Grants that happen once per resident per occasion, such as the bell's
+// CALLED IT, REKT (with its free Copium) and grid tilt for one bell day. A bell
+// step that runs again after a crash finds the row and grants nothing more.
+export const moodGrants = pgTable(
+  "mood_grants",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    key: text("key").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
+
 // Free Copium earned from REKTs. Never bought, never transferred.
 export const copiumCredits = pgTable(
   "copium_credits",

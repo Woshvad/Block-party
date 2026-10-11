@@ -17,7 +17,7 @@ import { and, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { burn } from "./ledger";
 import { currentLaw } from "./politics";
-import { copiumCredits, copiumUses, moods, playSessions, residents } from "./schema";
+import { copiumCredits, copiumUses, moodGrants, moods, playSessions, residents } from "./schema";
 
 export class MoodError extends Error {
   constructor(
@@ -82,10 +82,18 @@ async function closeExpired(tx: Db, userId: string, now: Date) {
     .where(and(eq(moods.userId, userId), isNull(moods.clearedAt), lte(moods.endsAt, now)));
 }
 
-export async function grantMood(db: Db, userId: string, mood: Mood, opts: { now?: Date; source?: Record<string, unknown> } = {}) {
+// `once` names the occasion (the bell passes "bell:<day>:rekt" and so on): a
+// second grant with the same key does nothing, so a bell step that runs again
+// after a crash never hands out a second free Copium, and never re-tilts
+// someone who has since cleared it.
+export async function grantMood(db: Db, userId: string, mood: Mood, opts: { now?: Date; source?: Record<string, unknown>; once?: string } = {}) {
   const now = opts.now ?? new Date();
   return db.transaction(async (tx) => {
     await lockResident(tx, userId);
+    if (opts.once !== undefined) {
+      const first = await tx.insert(moodGrants).values({ userId, key: opts.once, grantedAt: now }).onConflictDoNothing().returning({ key: moodGrants.key });
+      if (first.length === 0) return;
+    }
     await closeExpired(tx, userId, now);
     const endsAt = defaultEnd(mood, now);
     const [open] = await tx.select().from(moods).where(and(eq(moods.userId, userId), eq(moods.mood, mood), isNull(moods.clearedAt)));
@@ -107,7 +115,7 @@ export async function grantMood(db: Db, userId: string, mood: Mood, opts: { now?
 }
 
 // The tilt triggers from calls and duels land here.
-export async function maybeTilt(db: Db, userId: string, signals: TiltSignals, opts: { now?: Date } = {}) {
+export async function maybeTilt(db: Db, userId: string, signals: TiltSignals, opts: { now?: Date; once?: string } = {}) {
   if (!tiltTriggered(signals)) return false;
   await grantMood(db, userId, "tilted", { ...opts, source: { ...signals } });
   return true;

@@ -3,6 +3,7 @@ import { type FeedMarket, type OddsProvider, addDays, userAccountId } from "@bp/
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   BellShowError,
+  bellStatus,
   claimBellStamp,
   createCrew,
   createDb,
@@ -16,6 +17,8 @@ import {
   redeemInvite,
   reel,
   runBell,
+  stepTower,
+  useCopium,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -115,6 +118,48 @@ describe("the bell's Tower step", () => {
     expect((await moodState(db, three, { now: at })).tilt.tilted).toBe(false);
     expect((await moodState(db, mild, { now: at })).tilt.tilted).toBe(false);
     expect((await moodState(db, early, { now: at })).tilt.tilted).toBe(false);
+  });
+
+  it("a later step failing leaves the Tower step done: it isn't run again, and no second free Copium", async () => {
+    const s = await slateDay();
+    const loser = await makeResident(db);
+    await makeCall(db, loser, { marketId: s.ids[1], side: "no", chance: 30, seenPrice: 50 }, { now: new Date(s.d0 + 9 * H) });
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 9 * H + MIN) });
+    s.ms[1]!.resolved = true;
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 21 * H) });
+    const bell = new Date(s.d0 + D + 5 * MIN);
+    const jam = (step: string) => {
+      if (step === "close") throw new Error("the paper jammed");
+    };
+    await expect(runBell(db, { now: bell, only: ["tower", "close"], onStep: jam })).rejects.toThrow("the paper jammed");
+    expect((await bellStatus(db, dayOf(s.d0))).map((r) => r.step)).toEqual(["tower"]);
+    // The next minute: the Tower step stays done; only the paper runs.
+    const again = await runBell(db, { now: new Date(bell.getTime() + MIN), only: ["tower", "close"] });
+    expect(again.ran.tower).toBe("already done");
+    expect(again.ran.close).not.toBe("already done");
+    expect((await moodState(db, loser, { now: new Date(bell.getTime() + 2 * MIN) })).copium.free).toBe(1);
+  });
+
+  it("a Tower step that runs twice (it crashed before being recorded) grants each mood once", async () => {
+    const s = await slateDay();
+    const u = await makeResident(db);
+    for (const [i, price] of [80, 50, 60, 30].entries()) await makeCall(db, u, { marketId: s.ids[i], side: "yes", chance: 99, seenPrice: price }, { now: new Date(s.d0 + 9 * H) });
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 9 * H + MIN) });
+    for (const m of s.ms) m.resolved = false;
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 21 * H) });
+    const bell = new Date(s.d0 + D + 5 * MIN);
+    await stepTower(db, dayOf(s.d0), bell);
+    const at = new Date(bell.getTime() + MIN);
+    const first = await moodState(db, u, { now: at });
+    expect(first.active.map((a) => a.mood).sort()).toEqual(["rekt", "tilted"]);
+    expect(first.copium.free).toBe(1);
+    // They spend the free Copium: REKT and Tilted clear.
+    await useCopium(db, u, randomUUID(), { now: at });
+    // The same step again, a minute later: no second free Copium, no fresh REKT or tilt.
+    await stepTower(db, dayOf(s.d0), new Date(at.getTime() + MIN));
+    const after = await moodState(db, u, { now: new Date(at.getTime() + 2 * MIN) });
+    expect(after.active).toEqual([]);
+    expect(after.copium.free).toBe(0);
   });
 
   it("Bell Scores: a chip per CALLED IT by a crewmate, ×1.5 for a Long Shot caught; crewless winners score nothing", async () => {

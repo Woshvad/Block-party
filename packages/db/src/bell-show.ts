@@ -56,15 +56,17 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
     else u.losses++;
     byUser.set(r.userId, u);
   }
+  // Each grant is keyed by the bell day: if this step fails partway and runs
+  // again, nobody gets a second free Copium or a fresh tilt.
   let calledIt = 0;
   let rekt = 0;
   for (const [userId, u] of byUser) {
     if (u.wins) {
-      await grantMood(db, userId, "called_it", { now, source: { bellDay } });
+      await grantMood(db, userId, "called_it", { now, source: { bellDay }, once: `bell:${bellDay}:called_it` });
       calledIt++;
     }
     if (u.losses) {
-      await grantMood(db, userId, "rekt", { now, source: { bellDay } });
+      await grantMood(db, userId, "rekt", { now, source: { bellDay }, once: `bell:${bellDay}:rekt` });
       rekt++;
     }
   }
@@ -85,7 +87,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   const reds = new Map<string, number>();
   for (const c of slateCalls) if (!NPC_IDS.includes(c.userId) && c.aura !== null && c.aura < -200) reds.set(c.userId, (reds.get(c.userId) ?? 0) + 1);
   let tilted = 0;
-  for (const [userId, n] of reds) if (await maybeTilt(db, userId, { rektSquares: n }, { now })) tilted++;
+  for (const [userId, n] of reds) if (await maybeTilt(db, userId, { rektSquares: n }, { now, once: `bell:${bellDay}:grid_tilt` })) tilted++;
 
   // Bell Scores: CALLED IT chips per crew, Long Shots caught, the gm chain.
   const longShot = slate.find((s) => s.tier === "long_shot")?.marketId;
