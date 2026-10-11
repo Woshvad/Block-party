@@ -325,7 +325,7 @@ export class RoomDO implements DurableObject {
     }
     e.loadEvidence((saved.get("evidence") as ChatLine[] | undefined) ?? []);
     this.engine = e;
-    if (this.place) void this.syncDirectory(e);
+    if (this.place) this.syncDirectory(e).catch((err) => console.error(`rooms: directory sync failed: ${String(err)}`));
     return e;
   }
 
