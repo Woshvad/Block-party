@@ -6,6 +6,7 @@ import { ActionKeys } from "./actionKeys";
 import { ApiError, type Api, type Home, type Placement } from "./api";
 import { countdown, useNow } from "./clock";
 import { RoomCamera, RoomLighting } from "./RoomLighting";
+import SceneBoundary from "./SceneBoundary";
 import { HomeRoom } from "./HomeRoom";
 import { FLOOR_COLORS, WALL_COLORS, checkPlacement, firstFreeSpot, homeSize, nextRot, pieceOf } from "./furniture";
 import { itemLabel, label } from "./palette";
@@ -86,27 +87,29 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   return (
     <>
       <div className="stage">
-        <Canvas shadows dpr={[1, 1.5]} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: true }}>
-          <RoomLighting span={Math.max(size.w, size.d)} />
-          <RoomCamera w={size.w} h={size.d} />
-          <HomeRoom
-            editing
-            w={size.w}
-            d={size.d}
-            wallFinish={h.wallFinish}
-            floorFinish={h.floorFinish}
-            placed={mode.kind === "placing" ? h.placed.filter((p) => p.itemId !== mode.itemId) : h.placed}
-            selected={selected?.itemId ?? null}
-            ghost={mode.kind === "placing" ? { pieceId: mode.pieceId, placement: mode.placement, ok: !ghostErr } : null}
-            onCell={onCell}
-            // Walls only take taps while placing a wall piece; otherwise the see-through
-            // front walls would swallow taps meant for the floor behind them.
-            onWall={mode.kind === "placing" && mode.placement.layer === "wall" ? onWall : undefined}
-            // While placing, taps go through furniture to the floor (to aim, even at a taken spot).
-            onPiece={mode.kind === "placing" ? undefined : (id) => setMode({ kind: "selected", itemId: id })}
-          />
-          <OrbitControls enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={Math.max(size.w, size.d) * 8} />
-        </Canvas>
+        <SceneBoundary what="your home" note="Storage, the shop, and the walls and floor still work.">
+          <Canvas shadows dpr={[1, 1.5]} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: true }}>
+            <RoomLighting span={Math.max(size.w, size.d)} />
+            <RoomCamera w={size.w} h={size.d} />
+            <HomeRoom
+              editing
+              w={size.w}
+              d={size.d}
+              wallFinish={h.wallFinish}
+              floorFinish={h.floorFinish}
+              placed={mode.kind === "placing" ? h.placed.filter((p) => p.itemId !== mode.itemId) : h.placed}
+              selected={selected?.itemId ?? null}
+              ghost={mode.kind === "placing" ? { pieceId: mode.pieceId, placement: mode.placement, ok: !ghostErr } : null}
+              onCell={onCell}
+              // Walls only take taps while placing a wall piece; otherwise the see-through
+              // front walls would swallow taps meant for the floor behind them.
+              onWall={mode.kind === "placing" && mode.placement.layer === "wall" ? onWall : undefined}
+              // While placing, taps go through furniture to the floor (to aim, even at a taken spot).
+              onPiece={mode.kind === "placing" ? undefined : (id) => setMode({ kind: "selected", itemId: id })}
+            />
+            <OrbitControls enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={Math.max(size.w, size.d) * 8} />
+          </Canvas>
+        </SceneBoundary>
       </div>
 
       <div className="roomtop">

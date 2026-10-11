@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { bake } from "./kitGeometry";
 export { bake } from "./kitGeometry";
 import type { Placement } from "./kitcity";
+import { failedAsset, noteModelAsked, noteModelLoaded, takeFailedModels } from "./sceneHealth";
 
 // Kenney's City Kit models (CC0, see public/assets/kenney/*/License.txt),
 // drawn the cheap way: each model becomes ONE instanced mesh holding every
@@ -45,8 +46,26 @@ function windowGlow(map: THREE.Texture | null): THREE.Texture | null {
   return t;
 }
 
-function KitModel({ url, items, shadows, night }: { url: string; items: Placement[]; shadows: boolean; night: boolean }) {
+// A kit model, noted so a failed download can be retried (see sceneHealth.ts).
+function useModel(url: string) {
+  noteModelAsked(url);
   const gltf = useGLTF(url);
+  noteModelLoaded(url);
+  return gltf;
+}
+
+// For the scene's Try again: the loader keeps a failed download's error for
+// good, so drop every model that never arrived (and the one the error names)
+// and the next mount downloads them again.
+export function clearFailedModels(error?: unknown) {
+  const urls = new Set(takeFailedModels());
+  const named = failedAsset(error);
+  if (named) urls.add(named);
+  for (const url of urls) useGLTF.clear(url);
+}
+
+function KitModel({ url, items, shadows, night }: { url: string; items: Placement[]; shadows: boolean; night: boolean }) {
+  const gltf = useModel(url);
   const baked0 = useMemo(() => bake(gltf.scene), [gltf]);
   // Our own copy of the material, with the window glow wired in.
   const baked = useMemo(() => {
@@ -109,7 +128,7 @@ export default function Kit({ placements, shadows = true, night = false }: { pla
 
 // A kit model baked once, for components that move their own instances (cars).
 export function useBaked(url: string) {
-  const gltf = useGLTF(url);
+  const gltf = useModel(url);
   const baked = useMemo(() => bake(gltf.scene), [gltf]);
   useEffect(() => () => { baked?.geometry.dispose(); }, [baked]);
   return baked;

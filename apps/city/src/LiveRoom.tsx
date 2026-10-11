@@ -29,6 +29,7 @@ import { type Board, type FeedKey, type FeedStatus, dinerBoard, feedAfter, hallB
 
 import { EMOTE_ICON } from "./emoteIcons";
 import RoomPanel, { type RoomAction } from "./RoomPanel";
+import SceneBoundary from "./SceneBoundary";
 import { roomSeatActions } from "./roomActions";
 export { EMOTE_ICON } from "./emoteIcons";
 
@@ -326,43 +327,45 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   return (
     <>
       <div className={`stage room-stage social-live-stage ${clean ? "is-clean" : ""}`}>
-        <Canvas shadows dpr={[1, 1.5]} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: true }}>
-          <RoomLighting span={span} outdoor={place === "roof"} />
-          {home ? (
-            <HomeRoom
-              w={homeSize(home.tier).w}
-              d={homeSize(home.tier).d}
-              wallFinish={home.wallFinish}
-              floorFinish={home.floorFinish}
-              placed={home.placed}
-              onPiece={(id) => { const p = home.placed.find((item) => item.itemId === id); if (p?.pieceId === "trophy_wall" || p?.pieceId === "tv") setDisplay(p.pieceId); }}
-              onCell={(x, y) => goTo(x - size.w / 2 + 0.5, y - size.h / 2 + 0.5)}
-            />
-          ) : layout ? (
-            <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} feeds={feeds} />
-          ) : (
-            <>
-              <mesh receiveShadow rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
-                <planeGeometry args={[size.w, size.h]} />
-                <meshStandardMaterial map={tiles} />
-              </mesh>
-              <mesh position={[0, 1.2, -size.h / 2 - 0.1]}>
-                <boxGeometry args={[size.w + 0.4, 2.4, 0.2]} />
-                <meshStandardMaterial color="#e8b99a" />
-              </mesh>
-              <mesh position={[-size.w / 2 - 0.1, 1.2, 0]}>
-                <boxGeometry args={[0.2, 2.4, size.h]} />
-                <meshStandardMaterial color="#efc6a8" />
-              </mesh>
-            </>
-          )}
-          <RoomCamera w={size.w} h={size.h} />
-          {!clean && <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />}
-          <Walk drawn={drawn} plan={plan} />
-          <ChibiCrowd people={drawn} cap={CAP} onPerson={(id) => id !== room.you && !id.startsWith("npc:") && setPerson(id)} />
-          {!clean && <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />}
-          <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 8} />
-        </Canvas>
+        <SceneBoundary what="this room" note="The chat, the people here and reactions still work.">
+          <Canvas shadows dpr={[1, 1.5]} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: true }}>
+            <RoomLighting span={span} outdoor={place === "roof"} />
+            {home ? (
+              <HomeRoom
+                w={homeSize(home.tier).w}
+                d={homeSize(home.tier).d}
+                wallFinish={home.wallFinish}
+                floorFinish={home.floorFinish}
+                placed={home.placed}
+                onPiece={(id) => { const p = home.placed.find((item) => item.itemId === id); if (p?.pieceId === "trophy_wall" || p?.pieceId === "tv") setDisplay(p.pieceId); }}
+                onCell={(x, y) => goTo(x - size.w / 2 + 0.5, y - size.h / 2 + 0.5)}
+              />
+            ) : layout ? (
+              <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} feeds={feeds} />
+            ) : (
+              <>
+                <mesh receiveShadow rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
+                  <planeGeometry args={[size.w, size.h]} />
+                  <meshStandardMaterial map={tiles} />
+                </mesh>
+                <mesh position={[0, 1.2, -size.h / 2 - 0.1]}>
+                  <boxGeometry args={[size.w + 0.4, 2.4, 0.2]} />
+                  <meshStandardMaterial color="#e8b99a" />
+                </mesh>
+                <mesh position={[-size.w / 2 - 0.1, 1.2, 0]}>
+                  <boxGeometry args={[0.2, 2.4, size.h]} />
+                  <meshStandardMaterial color="#efc6a8" />
+                </mesh>
+              </>
+            )}
+            <RoomCamera w={size.w} h={size.h} />
+            {!clean && <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />}
+            <Walk drawn={drawn} plan={plan} />
+            <ChibiCrowd people={drawn} cap={CAP} onPerson={(id) => id !== room.you && !id.startsWith("npc:") && setPerson(id)} />
+            {!clean && <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />}
+            <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 8} />
+          </Canvas>
+        </SceneBoundary>
       </div>
 
       <RoomPanel name={placeName(place)} room={room} status={status} text={text} pending={!!draft.pending} clean={clean}

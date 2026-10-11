@@ -6,6 +6,8 @@ import * as THREE from "three";
 import { ISO, ZOOM, clampTarget, shortCount, startZoom, zoomLevel } from "./camera";
 import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, SQUARE, blockRect, zoneOf } from "./citygen";
 import CityScape from "./CityScape";
+import { clearFailedModels } from "./Kit";
+import SceneBoundary from "./SceneBoundary";
 import CityAtmosphere from "./CityAtmosphere";
 import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
@@ -305,67 +307,69 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
         </div>
       )}
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
-        <Canvas shadows orthographic dpr={[1, 1.5]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
-          <CityAtmosphere night={night} />
-          <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
-          {/* The sun, casting real shadows over the whole city. */}
-          <directionalLight
-            position={[-28, 42, 24]}
-            color={night ? "#b1c7f7" : "#fff1d9"}
-            intensity={night ? 0.7 : 2.5}
-            castShadow
-            shadow-mapSize={[2048, 2048]}
-            shadow-camera-left={-62}
-            shadow-camera-right={62}
-            shadow-camera-top={62}
-            shadow-camera-bottom={-62}
-            shadow-camera-far={120}
-            shadow-bias={-0.0004}
-            shadow-normalBias={0.03}
-          />
-          <CityScape night={night} />
-          <TowerTop night={night} />
-          <Strollers />
-          <Pins counts={counts}
-            onTap={(p) => {
-              haptic("light");
-              // Residents go there; guests can only look.
-              if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
-              else setPicked(p);
-            }}
-          />
-          <SoonPins
-            onTap={(p) => {
-              haptic("light");
-              setPicked(p);
-            }}
-          />
-          <DistrictLabels />
-          <ZoomLevel />
-          <IsoRig command={command} />
-          <MapControls
-            makeDefault
-            enableRotate={false}
-            screenSpacePanning={false}
-            minZoom={ZOOM.min}
-            maxZoom={ZOOM.max}
-            onChange={(e) => {
-              // Keep the board under the player's thumb: shift camera and focus together.
-              const c = e?.target as unknown as { target: THREE.Vector3; object: THREE.Camera } | undefined;
-              if (!c) return;
-              const t = clampTarget(c.target.x, c.target.z);
-              const dx = t.x - c.target.x;
-              const dz = t.z - c.target.z;
-              if (dx || dz) {
-                c.target.x += dx;
-                c.target.z += dz;
-                c.object.position.x += dx;
-                c.object.position.z += dz;
-              }
-            }}
-          />
-          {SHOW_PERF && <PerfProbe target={perf} />}
-        </Canvas>
+        <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
+          <Canvas shadows orthographic dpr={[1, 1.5]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
+            <CityAtmosphere night={night} />
+            <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
+            {/* The sun, casting real shadows over the whole city. */}
+            <directionalLight
+              position={[-28, 42, 24]}
+              color={night ? "#b1c7f7" : "#fff1d9"}
+              intensity={night ? 0.7 : 2.5}
+              castShadow
+              shadow-mapSize={[2048, 2048]}
+              shadow-camera-left={-62}
+              shadow-camera-right={62}
+              shadow-camera-top={62}
+              shadow-camera-bottom={-62}
+              shadow-camera-far={120}
+              shadow-bias={-0.0004}
+              shadow-normalBias={0.03}
+            />
+            <CityScape night={night} />
+            <TowerTop night={night} />
+            <Strollers />
+            <Pins counts={counts}
+              onTap={(p) => {
+                haptic("light");
+                // Residents go there; guests can only look.
+                if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
+                else setPicked(p);
+              }}
+            />
+            <SoonPins
+              onTap={(p) => {
+                haptic("light");
+                setPicked(p);
+              }}
+            />
+            <DistrictLabels />
+            <ZoomLevel />
+            <IsoRig command={command} />
+            <MapControls
+              makeDefault
+              enableRotate={false}
+              screenSpacePanning={false}
+              minZoom={ZOOM.min}
+              maxZoom={ZOOM.max}
+              onChange={(e) => {
+                // Keep the board under the player's thumb: shift camera and focus together.
+                const c = e?.target as unknown as { target: THREE.Vector3; object: THREE.Camera } | undefined;
+                if (!c) return;
+                const t = clampTarget(c.target.x, c.target.z);
+                const dx = t.x - c.target.x;
+                const dz = t.z - c.target.z;
+                if (dx || dz) {
+                  c.target.x += dx;
+                  c.target.z += dz;
+                  c.object.position.x += dx;
+                  c.object.position.z += dz;
+                }
+              }}
+            />
+            {SHOW_PERF && <PerfProbe target={perf} />}
+          </Canvas>
+        </SceneBoundary>
       </div>
     </>
   );
