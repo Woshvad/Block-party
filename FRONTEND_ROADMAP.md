@@ -107,3 +107,61 @@ Mark implementation and verification separately. A passing preview proves presen
 - [ ] Complete service/provider configuration, operational monitoring and full resident lifecycle acceptance from the release checklist above.
 
 Validation: workspace typecheck and city production build passed; new visitor access integration test passed on Postgres; all 21 rooms tests passed. Trophy and TV previews visually inspected. Added fail-closed handling for missing room-access records exposed by typechecking. Home displays currently open as panels from the placed objects; receipts are not rendered as textures on the 3D wall itself.
+
+## 11 October — reference-inspired showcase apartment
+
+- [x] Added `/apartment-preview`: furnished cutaway apartment with parquet, sage kitchenette, island and stools, sectional lounge, media console, bedroom/wardrobe, bathroom, windows, plants and brass details.
+- [x] Day/evening lighting, orbit/zoom controls, reset, optional room labels and responsive camera framing.
+- [x] Combined static furniture/architecture into one vertex-coloured mesh with a separate ground mesh. Browser meter snapshot: 2 draw calls, 8.8k triangles; not a device performance guarantee.
+- [x] Typecheck and production build passed during implementation; final presentation edits typechecked. Day/evening visually reviewed in the actual 319 × 847 browser pane. Desktop viewport override did not take effect, so desktop visual sign-off remains open.
+- [ ] Convert approved architecture into editable room definitions and furniture catalogue entries with collision and navigation rules.
+- [ ] Integrate resident movement, persistent layout saves and interactive TV/trophy surfaces into this apartment layout.
+- This is a development-only visual prototype, not a replacement for existing resident homes. Screenshot: `screenshots/showcase-apartment.png`.
+
+## 11 October — interactive apartment build plan
+
+Plan recorded before implementation; completion status:
+- [x] Make the bed, lounge seating, coffee table, TV, lamp and plants selectable and movable on a quarter-unit grid, with rotation, undo and reset.
+- [x] Reject placements outside the apartment or intersecting fixtures/furniture; protect access between room entrances.
+- [x] Add a resident who follows collision-aware floor paths, plus accessible destination controls.
+- [x] Save this preview's layout locally with validation and explicit save feedback; preserve the separate production-home contract.
+- [x] Open simulated TV and receipt displays from apartment objects and keyboard-accessible controls.
+- [x] Verify layout/pathfinding with automated tests, typecheck/build and browser walkthrough; record the new rendering cost.
+
+Still required for a full resident apartment: a versioned apartment definition in the shared catalogue, server-authoritative placement/navigation validation, migration of existing home layouts, authenticated saving, multiplayer movement/visitor sync, real account-backed media, and deployed two-resident/phone acceptance. Local preview persistence does not complete these integrations.
+
+
+Interactive pass validation: all 135 city tests, TypeScript and production build passed. Six new layout tests cover initial room reachability, obstruction/out-of-bounds rejection, blocked destinations, rotated footprints, doorway protection and validated compact saves. Browser verified movement completion, selection, successful edits, rejected bed rotation, undo, save/reload, TV/receipt dialogs and Escape focus restoration. Both 319 × 847 and 1280 × 720 layouts were visually inspected. Browser meter snapshots: 14 draw calls in Explore / 15 in Arrange, 9.1k triangles, locally 120 fps in day/evening; no real-phone performance claim. The editor covers eight standalone furniture pieces; built-in fixtures and architecture stay fixed. Production apartment integration and multiplayer remain open as listed above.
+
+## 11 October — social-city reference review (proposed, not implemented)
+
+Reviewed nine user-supplied LagosLife screenshots against this roadmap and current room/life code. Screenshots establish visible interface patterns only; displayed player/visit counts and working multiplayer cannot be independently verified from them.
+
+Our visual direction: keep the Sunday Apartment's warm materials, consistent palette, furniture detail and soft lighting. Strengthen visible social activity and reasons to visit existing places before adding more districts.
+
+Recommended order:
+1. **Live-room interaction panel.** Consolidate place name, real room headcount, connection state, chat and emotes into a compact, collapsible panel. Add keyboard-accessible contextual destination/action chips for existing places (Diner booth/counter, Roof ledge, watch-party front row). Existing chat, emotes, room counts and PLACE_ADVERTS provide foundations; explicit action handlers and navigation must be checked for each chip. Do not imply that every advertised object already has a player-triggered action.
+2. **Clean view and legible names.** Hide optional overlays with an always-reachable restore control. Prioritize nearby/selected residents' labels and hide overlapping map labels by zoom; retain connection/error information and access to moderation. Add map category filters using existing destinations, with unknown/unavailable headcounts clearly distinguished from zero.
+3. **Finish the shared home experience.** Integrate the new apartment definition, authoritative placement, account saves and visiting friends. Existing visitor furniture and display APIs are foundations; the showcase still needs its own production integration. Make sitting, resting and watching TV readable through poses and object feedback. Prioritize this over new map territory.
+4. **Surface existing daily activity.** A compact Today card can show actual daily GM state, the resident's Slate progress and next bell. Build from authoritative data, without new streak penalties or a parallel rewards economy. Event teasers should use the existing big-night schedule and only advertise available experiences.
+5. **Give current venues distinct identities.** Extend architectural polish from homes/diner to Roof and Watch Party through props, lighting and small ambient motion, then remeasure phone performance. Contextual chips should describe activities actually supported there.
+
+Defer: additional cities, airports/vehicles/property expansion, cash gem hunts, hunger/hygiene maintenance bars and global popularity counters without a defined reliable source. These are new systems beyond the current social/calls/home completion work. Rested/Cozy mood presentation can use existing mechanics instead of adding survival meters.
+
+Acceptance for the next social-room pass: desktop/mobile and keyboard walkthrough, collapse/restore, no overlapping essential controls, accurate live/stale/error states, reconnect-safe chat, two-resident presence/actions verification and an updated performance snapshot. Proposed priority does not mark these features complete or replace the production checklist above.
+
+## 11 October — social-room panel implemented
+
+- [x] Shared compact room panel wired into LiveRoom: actual room headcounts, chat, people/profile access, reactions and contextual actions.
+- [x] Diner booth/counter, Roof front/back benches and Watch Party sofa/beanbag shortcuts select unoccupied seats from the actual scene plan. Existing server seat-taken handling remains authoritative for races.
+- [x] Available TV, trophy and nap actions consolidated into the panel in live homes.
+- [x] Clean view hides panel and optional name/NPC overlays, expands the scene and retains City/restore controls, connection warnings and error feedback.
+- [x] Reconnecting/stopped rooms do not present stale headcounts as live. Sending, reactions and seating are disabled; drafts remain editable and survive collapse/restore. Existing delivery acknowledgement/timeout handling is retained.
+- [x] Keyboard-accessible people list, labelled reaction buttons, Escape to close expanded sections, focus restoration on minimize and reactions.
+- [x] Added development-only `/room-social-preview` using the same panel and interiors, with clearly simulated chat/seating/profile/reaction feedback and connection fixtures. No live socket or account writes from the preview.
+- [x] 138 frontend tests, TypeScript and production build passed during this pass. Three new action tests cover real seat groups, occupied/full groups and unsupported venues.
+- [x] Browser: conversation send/history, seating, people list, Escape, reconnect disabling, draft retention and clean-view restore verified at 1280 × 720. Diner preview snapshot: 24 draw calls, 12.4k triangles, locally 120 fps with four sample residents.
+- [ ] Mobile visual sign-off: responsive styles implemented, but browser viewport override did not take effect in this run.
+- [ ] Deployed two-resident walkthrough, seat contention/reconnect and actual-device performance verification remain required. This pass does not establish those results.
+
+Remaining reference proposals: map label decluttering/filters, existing daily activity card polish, richer venue visuals and the production shared-apartment integration.

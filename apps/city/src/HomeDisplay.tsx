@@ -5,7 +5,7 @@ import type { Api } from "./api";
 import { useLoad } from "./useLoad";
 import { EmptyState, Loading } from "./ui";
 
-export default function HomeDisplay({ api, owner, kind, onClose }: { api: Pick<Api, "binder" | "reel">; owner: string; kind: "trophy_wall" | "tv"; onClose: () => void }) {
+export default function HomeDisplay({ api, owner, kind, onClose, preview = false }: { api: Pick<Api, "binder" | "reel">; owner: string; kind: "trophy_wall" | "tv"; onClose: () => void; preview?: boolean }) {
   const modal = useRef<HTMLDialogElement>(null);
   const binder = useLoad(() => kind === "trophy_wall" ? api.binder(owner) : Promise.resolve(null), [api, owner, kind]);
   const reel = useLoad(() => kind === "tv" ? api.reel() : Promise.resolve(null), [api, kind]);
@@ -19,6 +19,7 @@ export default function HomeDisplay({ api, owner, kind, onClose }: { api: Pick<A
     <div className="callsheet tall person-sheet">
       <button className="x" aria-label="Close display" onClick={onClose}>×</button>
       <span className="eyebrow">{kind === "tv" ? "BLOCK PARTY TV · THE LAST BELL" : "THE RECEIPT BINDER"}</span>
+      {preview && <p className="muted">Sample display · preview data</p>}
       <h2 id="home-display-title">{kind === "tv" ? "Around the city" : "Called it."}</h2>
       {kind === "trophy_wall" ? <>
         {!binder.data ? <Loading error={binder.error} retry={binder.reload} /> : <>
@@ -26,7 +27,7 @@ export default function HomeDisplay({ api, owner, kind, onClose }: { api: Pick<A
           {binder.data.receipts.length === 0 && <EmptyState icon="◇" title="Your story is still unfolding" description="Winning calls appear here after they settle and the bell reveals them." />}
           <div className="receipt-grid">{binder.data.receipts.map((r) => <article className="receipt-trophy" key={r.callId}><span className="eyebrow">CALLED IT</span><h3>{r.question}</h3><p>{r.side.toUpperCase()} · Chance of YES {r.chance}%</p><strong>{r.aura > 0 ? "+" : ""}{r.aura} Aura</strong></article>)}</div>
         </>}
-      </> : !reel.data ? <Loading error={reel.error} retry={reel.reload} /> : <div className="home-tv"><p>Bell · {String(reel.data.bellDay ?? "")}</p>{cards.length ? cards.map((c) => <article key={c.slot}><h3>{c.question}</h3><span>{String(c.result).toUpperCase()}</span></article>) : <EmptyState icon="◷" title="A quiet broadcast" description="No Slate settled at the last bell. Come back after the next reveal." />}<p className="muted">Your TV shows the bell recap for the signed-in viewer.</p></div>}
+      </> : !reel.data ? <Loading error={reel.error} retry={reel.reload} /> : <div className="home-tv"><p>Bell · {String(reel.data.bellDay ?? "")}</p>{cards.length ? cards.map((c) => <article key={c.slot}><h3>{c.question}</h3><span>{String(c.result).toUpperCase()}</span></article>) : <EmptyState icon="◷" title="A quiet broadcast" description="No Slate settled at the last bell. Come back after the next reveal." />}<p className="muted">{preview ? "Sample bell recap. Your live home uses account data." : "Your TV shows the bell recap for the signed-in viewer."}</p></div>}
     </div>
   </dialog>, document.body);
 }

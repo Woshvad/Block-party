@@ -1,5 +1,4 @@
 "use client";
-import { EMOTES } from "@bp/core";
 import { Html, OrbitControls } from "@react-three/drei";
 import { Canvas, type ThreeEvent, useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -28,10 +27,10 @@ import { type Board, type FeedKey, dinerBoard, hallBoard, matchBoard, oddsBoard 
 // heads, emotes, and the dimmed away residents. Every body part is one
 // instanced draw call for the whole room.
 
-export const EMOTE_ICON: Record<string, string> = {
-  wave: "👋", gm: "☀️", lfg: "🚀", rekt: "💀", victory_lap: "🏁", crew_couch: "🛋️", hodl: "💎", actually: "☝️", ring_it: "🔔",
-  touched_grass: "🌱", objection: "✋", shipped: "📦", watching: "👀", aping: "🦍", first: "🥇", gm_3am: "🌙", bull_trap: "🪤", fresh_eyes: "👁️",
-};
+import { EMOTE_ICON } from "./emoteIcons";
+import RoomPanel, { type RoomAction } from "./RoomPanel";
+import { roomSeatActions } from "./roomActions";
+export { EMOTE_ICON } from "./emoteIcons";
 
 const CAP = 64; // 60 here plus a few drawn away residents and NPCs
 const WALK = 3; // tiles a second
@@ -183,8 +182,7 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   const [status, setStatus] = useState<SocketStatus>({ kind: "connecting" });
   const [draft, updateDraft] = useReducer(chatDraft, { text: "", pending: null });
   const text = draft.text;
-  const [emotes, setEmotes] = useState(false);
-  const [log, setLog] = useState(false);
+  const [clean, setClean] = useState(false);
   const [person, setPerson] = useState<string | null>(null);
   const [, bump] = useReducer((x: number) => x + 1, 0);
   const conn = useRef<ReturnType<typeof openRoomSocket> | null>(null);
@@ -315,10 +313,13 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   }, [size.w, size.h]);
   useEffect(() => () => tiles.dispose(), [tiles]);
 
+  const actions:RoomAction[]=roomSeatActions(place,plan.seats,room.people).map(({label,seat})=>({id:label,label:seat?label:`${label} · full`,disabled:!seat,run:()=>{if(seat){const world=toWorld(seat);goTo(world.x,world.z);}}}));
+  for(const kind of ["trophy_wall","tv"] as const) if(home?.placed.some(p=>p.pieceId===kind)) actions.push({id:kind,label:kind==='tv'?'Watch TV':'Trophy wall',run:()=>setDisplay(kind)});
+  if(mine&&home){const bed=home.placed.find(p=>pieceOf(p.pieceId)?.mood==='rested');if(bed)actions.push({id:'nap',label:'Take a nap',run:()=>{void api.nap(bed.itemId).then(a=>{setNapMsg(`Napping until ${new Date(a.endsAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. You’ll wake up Rested.`);}).catch(e=>setNapMsg(e instanceof ApiError?e.message:'Couldn’t nap. Try again.'));}});}
   const span = Math.max(size.w, size.h);
   return (
     <>
-      <div className="stage room-stage">
+      <div className={`stage room-stage social-live-stage ${clean ? "is-clean" : ""}`}>
         <Canvas shadows dpr={[1, 1.5]} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: true }}>
           <RoomLighting span={span} outdoor={place === "roof"} />
           {home ? (
@@ -350,104 +351,21 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
             </>
           )}
           <RoomCamera w={size.w} h={size.h} />
-          <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />
+          {!clean && <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />}
           <Walk drawn={drawn} plan={plan} />
           <ChibiCrowd people={drawn} cap={CAP} onPerson={(id) => id !== room.you && !id.startsWith("npc:") && setPerson(id)} />
-          <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />
+          {!clean && <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />}
           <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 8} />
         </Canvas>
       </div>
 
-      <div className="roomtop">
-        <button className="pill" onClick={onLeave} aria-label="leave the room">
-          ‹ City
-        </button>
-        <div className="pill">
-          <b>{placeName(place)}</b> · {room.headcount.here} here{room.headcount.npc ? ` · ${room.headcount.npc} NPC` : ""}
-          {room.headcount.away ? ` · ${room.headcount.away} away` : ""}
-        </div>
-      </div>
-      {status.kind !== "live" && (
-        <div className={`roomstatus ${status.kind}`}>
-          {status.kind === "connecting" && "Walking in…"}
-          {status.kind === "reconnecting" && `Reconnecting… (try ${status.attempt})`}
-          {status.kind === "stopped" && (
-            <>
-              {status.reason}{" "}
-              <button className="link" onClick={onLeave}>
-                Back to the city
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {err && <div className="toast bad">{err.message}</div>}
+      <RoomPanel name={placeName(place)} room={room} status={status} text={text} pending={!!draft.pending} clean={clean}
+        onClean={()=>setClean(v=>!v)} onLeave={onLeave} onText={text=>updateDraft({type:'edit',text})} onSend={say}
+        onEmote={emote=>{if(send({t:'emote',emote}))haptic('light');}} onPerson={id=>{if(id!==room.you)setPerson(id);}} actions={actions}/>
+      {err && <div className="toast bad" role="alert">{err.message}</div>}
+      {napMsg && <div className="toast" role="status">{napMsg}</div>}
       {person && <Person api={api} userId={person} place={place} onClose={() => setPerson(null)} />}
       {display && <HomeDisplay api={api} owner={owner ?? me ?? ""} kind={display} onClose={() => setDisplay(null)} />}
-      {home && <div className="home-displays">{(["trophy_wall", "tv"] as const).filter((kind) => home.placed.some((p) => p.pieceId === kind)).map((kind) => <button className="pill" key={kind} onClick={() => setDisplay(kind)}>{kind === "tv" ? "Watch TV" : "Trophy wall"}</button>)}</div>}
-      {napMsg && <div className="toast">{napMsg}</div>}
-      {mine && home && status.kind === "live" && home.placed.some((p) => pieceOf(p.pieceId)?.mood === "rested") && (
-        <button
-          className="pill napbtn"
-          onClick={async () => {
-            const bed = home.placed.find((p) => pieceOf(p.pieceId)?.mood === "rested")!;
-            try {
-              const a = await api.nap(bed.itemId);
-              setNapMsg(`😴 Napping until ${new Date(a.endsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. You'll wake up Rested.`);
-              haptic("success");
-            } catch (e) {
-              setNapMsg(e instanceof ApiError ? e.message : "couldn't nap");
-            }
-          }}
-        >
-          😴 Nap
-        </button>
-      )}
-
-      {log && (
-        <div className="chatlog" onClick={() => setLog(false)}>
-          {room.lines.slice(-12).map((l) => (
-            <p key={l.id}>
-              <b>@{l.handle}</b> {l.text}
-            </p>
-          ))}
-          {room.lines.length === 0 && <p className="muted">Nobody's said anything yet.</p>}
-        </div>
-      )}
-      {emotes && (
-        <div className="emotes">
-          {EMOTES.map((e) => (
-            <button
-              key={e}
-              title={e.replace(/_/g, " ")}
-              onClick={() => {
-                if (send({ t: "emote", emote: e })) haptic("light");
-                setEmotes(false);
-              }}
-            >
-              {EMOTE_ICON[e] ?? "✨"}
-            </button>
-          ))}
-        </div>
-      )}
-      <form
-        className="chatbar"
-        onSubmit={(e) => {
-          e.preventDefault();
-          say();
-        }}
-      >
-        <button type="button" className="round" aria-label="chat log" onClick={() => setLog((v) => !v)}>
-          💬
-        </button>
-        <input aria-label="Message the room" value={text} onChange={(e) => updateDraft({ type: "edit", text: e.target.value })} placeholder={status.kind === "live" ? "Say something…" : "Waiting for connection…"} maxLength={280} disabled={status.kind !== "live"} enterKeyHint="send" />
-        <button type="button" className="round" aria-label="emotes" onClick={() => setEmotes((v) => !v)} disabled={status.kind !== "live"}>
-          😀
-        </button>
-        <button type="submit" className="round send" disabled={status.kind !== "live" || !!draft.pending || !text.trim()} aria-label={draft.pending ? "Sending" : "Send"}>
-          {draft.pending ? "…" : "↑"}
-        </button>
-      </form>
     </>
   );
 }
