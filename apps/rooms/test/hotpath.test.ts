@@ -116,14 +116,14 @@ describe("with the production settings", () => {
 });
 
 // A short trust window, so a test can watch lists go stale.
-describe("with a 3-second access window", () => {
+describe("with a 4-second access window", () => {
   const api = fakeApi();
   let rooms: Rooms;
   beforeAll(async () => {
-    rooms = await startRooms(api, { ACCESS_TTL_MS: "3000" });
+    rooms = await startRooms(api, { ACCESS_TTL_MS: "4000" });
   });
   afterAll(() => rooms?.dispose());
-  const pastTheWindow = () => quiet(3200);
+  const pastTheWindow = () => quiet(4200);
 
   it("a mute or block made mid-visit applies once the window passes, without reconnecting", async () => {
     const a = await rooms.connect("safety-a", { place: "faucet" });
@@ -172,10 +172,10 @@ describe("with a 3-second access window", () => {
   it("when the API is down, only a member whose lists are stale is refused; the rest carry on", async () => {
     const stale = await rooms.connect("outage-stale", { place: "roof" });
     await stale.next("welcome");
-    await quiet(1500);
+    await quiet(2000);
     const fresh = await rooms.connect("outage-fresh", { place: "roof" });
     await fresh.next("welcome");
-    await quiet(1800); // the first one's lists are past the window; the second's aren't
+    await quiet(2200); // the first one's lists are past the window; the second's aren't
     api.accessAvailable = false;
     try {
       stale.send({ t: "chat", text: "cannot bypass an outage", requestId: "o1" });
