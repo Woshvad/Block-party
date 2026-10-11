@@ -69,7 +69,7 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
               <p key={i}>⚔️ {d.snap ? `@${String(d.winner)} ate @${String(d.loser)}'s Snap` : `@${String(d.winner)} beat @${String(d.loser)}`} ({Number(d.pot)} GM pot)</p>
             ))}
             {r.ratio ? <p>📰 Ratio of the Day: "{String((r.ratio as Any).headline ?? "")}"</p> : null}
-            <p className="muted">🔥 {Number(r.burned).toLocaleString("en-US")} GM burned so far, all time.</p>
+            <p className="muted">🔥 {Number(r.burned).toLocaleString("en-US")} GM burned that day.</p>
             {r.tomorrowsLongShot ? (
               <p>
                 Tomorrow's Long Shot: <b>{(r.tomorrowsLongShot as Any).question as string}</b> (world {(r.tomorrowsLongShot as Any).world as number}%)

@@ -90,9 +90,9 @@ function blocks(b: Built) {
           b.city.push(box(r.x + px, 0.55, r.z + pz, 0.08, 0.8, 0.08, "#8a8f98"));
         }
         b.city.push(box(r.x, 0.8, r.z - r.w / 2 + 0.3, r.w - 0.6, 0.05, 0.03, "#f2c94c"), box(r.x, 0.5, r.z - r.w / 2 + 0.3, r.w - 0.6, 0.05, 0.03, "#2c2c2a"));
-        // The mining bar: how close the crowd is to opening it.
+        // A blank sign board over the fence. It shows no progress: no real
+        // number drives the unlock yet, and the board never invents one.
         b.city.push(box(r.x, 1.9, r.z, 5.2, 0.5, 0.25, "#2c2c2a"));
-        b.lamps.push(box(r.x - 2.5 + 0.9, 1.9, r.z + 0.13, 1.8, 0.36, 0.02, "#3ddc6e"));
         continue;
       }
       const ground = zone === "commercial" || zone === "office" ? PAVING : zone === "landmark" ? "#a9d28c" : zone === "industrial" ? "#b9b4a8" : GRASS;
