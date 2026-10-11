@@ -11,6 +11,7 @@ import SceneBoundary from "./SceneBoundary";
 import CityAtmosphere from "./CityAtmosphere";
 import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
+import { useBackLayer } from "./back";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
@@ -233,6 +234,8 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   const mapAction = (action: MapCommand["action"]) => setCommand((c) => ({ action, n: c.n + 1 }));
   useEffect(() => { if (showcase) mapAction("diner"); else mapAction("reset"); }, [showcase]);
   const perf = useRef<HTMLDivElement>(null);
+  useBackLayer(guide, () => setGuide(false));
+  useBackLayer(picked !== null, () => setPicked(null));
   useEffect(() => {
     initTelegram();
   }, []);

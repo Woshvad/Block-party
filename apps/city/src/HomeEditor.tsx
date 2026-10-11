@@ -4,6 +4,7 @@ import { Canvas } from "@react-three/fiber";
 import { useRef, useState } from "react";
 import { ActionKeys } from "./actionKeys";
 import { ApiError, type Api, type Home, type Placement } from "./api";
+import { useBackLayer } from "./back";
 import { countdown, useNow } from "./clock";
 import { RoomCamera, RoomLighting } from "./RoomLighting";
 import SceneBoundary from "./SceneBoundary";
@@ -38,6 +39,9 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   const size = h ? homeSize(h.tier) : { w: 8, d: 8 };
   // A piece mid-placement isn't saved: closing the Mini App asks first.
   useClosingConfirmation(mode.kind === "placing");
+  // Back closes the open sheet, or drops the piece being moved or placed.
+  useBackLayer(mode.kind !== "view", () => setMode({ kind: "view" }));
+  useBackLayer(sheet !== null, () => setSheet(null));
 
   // One change at a time; the home reloads after each so the screen is the truth.
   const run = async (fn: () => Promise<unknown>, ok?: string) => {

@@ -2,11 +2,13 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { Api } from "./api";
+import { useBackLayer } from "./back";
 import { useLoad } from "./useLoad";
 import { EmptyState, Loading } from "./ui";
 
 export default function HomeDisplay({ api, owner, kind, onClose, preview = false }: { api: Pick<Api, "binder" | "reel">; owner: string; kind: "trophy_wall" | "tv"; onClose: () => void; preview?: boolean }) {
   const modal = useRef<HTMLDialogElement>(null);
+  useBackLayer(true, onClose);
   const binder = useLoad(() => kind === "trophy_wall" ? api.binder(owner) : Promise.resolve(null), [api, owner, kind]);
   const reel = useLoad(() => kind === "tv" ? api.reel() : Promise.resolve(null), [api, kind]);
   useEffect(() => {

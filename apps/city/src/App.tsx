@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import AppNavigation, { type AppTab } from "./AppNavigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
+import { backStack, useBackLayer } from "./back";
 import { type Screen, boot, screenFor } from "./boot";
 import type { PageId } from "./screens/More";
 import { initTelegram, launchData, telegram } from "./telegram";
@@ -151,22 +152,20 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
   const go = (t: Tab) => {
     setTab(t);
     setPage(null);
-    history.replaceState(null, "", t === "city" ? location.pathname + location.search : `#${t}`);
+    backStack()?.replaceUrl(t === "city" ? location.pathname + location.search : `#${t}`);
   };
   const refreshGm = () => void api.me().then((m) => setMe(m)).catch(() => {});
+  const leaveRoom = () => {
+    setRoom(null);
+    refreshGm();
+  };
+  // Back (Telegram's BackButton, Android's back key, a browser's Back) closes
+  // the newest of these first, then anything open inside them.
+  useBackLayer(page !== null, () => setPage(null));
+  useBackLayer(trip !== null, () => setTrip(null));
+  useBackLayer(room !== null, leaveRoom);
   if (room) {
-    return (
-      <LiveRoom
-        api={api}
-        me={me.userId}
-        crewId={me.crew?.id ?? null}
-        place={room}
-        onLeave={() => {
-          setRoom(null);
-          refreshGm();
-        }}
-      />
-    );
+    return <LiveRoom api={api} me={me.userId} crewId={me.crew?.id ?? null} place={room} onLeave={leaveRoom} />;
   }
   const back = () => setPage(null);
   const pageView =

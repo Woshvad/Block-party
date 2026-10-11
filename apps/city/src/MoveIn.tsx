@@ -2,6 +2,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, type Api, type Look, type Resident, type ResidentDraft } from "./api";
+import { useBackLayer } from "./back";
 import { GOALS, KIT_STYLES, LOOK_PALETTES, LOOK_PARTS, TRAITS, type Field, fieldErrors, latestOnly, stepLook, toggleTrait } from "./draft";
 import { HAIR, OUTFIT, SKIN, itemLabel, label } from "./palette";
 import { Loading } from "./ui";
@@ -45,6 +46,10 @@ export default function MoveIn({ api, onDone }: { api: Pick<Api, "pickForMe" | "
   const sending = useRef(false); // state updates too late to stop a double tap; a ref doesn't
   // Choices aren't saved until the move: closing the Mini App midway asks first.
   useClosingConfirmation(!moved);
+  // Back steps back through move-in, not out of the app.
+  useBackLayer(step > 0 && !moved, () => {
+    if (!sending.current) setStep((s) => Math.max(0, s - 1));
+  });
 
   const pick = async () => {
     setServerErr(null);
