@@ -1,4 +1,4 @@
-import { createPrivyVerifier, mockProvider, openAiModeration, polymarketProvider, sampleMarkets } from "@bp/core";
+import { createPrivyVerifier, mockProvider, openAiModeration, parseBlockedWords, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb } from "@bp/db";
 import { createApp } from "./app";
 import { runMinute } from "./cron";
@@ -25,7 +25,14 @@ type Env = {
   FEATURE_TOWER_LIGHTS?: string;
   // "on" only after the legal opinion.
   FEATURE_REAL_MONEY?: string;
+  // Staff's blocked words, comma- or newline-separated.
+  BLOCKED_WORDS?: string;
 };
+
+// For the minute cron: the AI moderation check once OPENAI_API_KEY is set,
+// and the rooms Worker to take flagged room lines down.
+const moderationFor = (env: Env) => (env.OPENAI_API_KEY ? openAiModeration({ apiKey: env.OPENAI_API_KEY }) : undefined);
+const roomsFor = (env: Env) => (env.ROOMS_URL && env.TICKET_SECRET ? httpRoomsClient({ url: env.ROOMS_URL, secret: env.INTERNAL_SECRET }) : undefined);
 
 // ODDS_SOURCE: "polymarket" (the live feed, read-only) or "mock" (a sample feed); unset, no odds.
 const oddsFor = (env: Env) => (env.ODDS_SOURCE === "polymarket" ? polymarketProvider() : env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
@@ -44,6 +51,7 @@ export default {
       allowedOrigins: env.ALLOWED_ORIGINS.split(","),
       clientIpHeader: "cf-connecting-ip",
       ...(env.OPENAI_API_KEY ? { moderation: openAiModeration({ apiKey: env.OPENAI_API_KEY }) } : {}),
+      blockedWords: parseBlockedWords(env.BLOCKED_WORDS),
       ...(env.ROOMS_URL && env.TICKET_SECRET
         ? { rooms: httpRoomsClient({ url: env.ROOMS_URL, secret: env.INTERNAL_SECRET }), roomsUrl: env.ROOMS_URL, ticketSecret: env.TICKET_SECRET }
         : {}),
@@ -66,6 +74,15 @@ export default {
     const { db, close } = createDb(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false });
     const at = new Date(event.scheduledTime ?? Date.now());
     const odds = oddsFor(env);
-    ctx.waitUntil(runMinute(db, at, { sender: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), ...(odds ? { odds } : {}) }).finally(() => close()));
+    const moderation = moderationFor(env);
+    const rooms = roomsFor(env);
+    ctx.waitUntil(
+      runMinute(db, at, {
+        sender: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }),
+        ...(odds ? { odds } : {}),
+        ...(moderation ? { moderation } : {}),
+        ...(rooms ? { rooms } : {}),
+      }).finally(() => close()),
+    );
   },
 };

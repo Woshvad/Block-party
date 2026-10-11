@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { serve } from "@hono/node-server";
-import { type OddsProvider, mockProvider, polymarketProvider, sampleMarkets } from "@bp/core";
+import { type OddsProvider, mockProvider, openAiModeration, parseBlockedWords, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { createApp } from "./app";
 import { runMinute } from "./cron";
@@ -21,6 +21,8 @@ if (!schema.upToDate) {
 // ODDS_SOURCE: "polymarket" (the live feed, read-only) or "mock" (a sample feed); unset, no odds.
 const ODDS: OddsProvider | undefined =
   process.env.ODDS_SOURCE === "polymarket" ? polymarketProvider() : process.env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined;
+// The AI moderation check once OPENAI_API_KEY is set, as on Workers.
+const MODERATION = process.env.OPENAI_API_KEY ? openAiModeration({ apiKey: process.env.OPENAI_API_KEY }) : undefined;
 const app = createApp({
   db,
   telegramBotToken: need("TELEGRAM_BOT_TOKEN"),
@@ -35,17 +37,23 @@ const app = createApp({
   ...(process.env.ROOMS_URL && process.env.TICKET_SECRET
     ? { rooms: httpRoomsClient({ url: process.env.ROOMS_URL, secret: need("INTERNAL_SECRET") }), roomsUrl: process.env.ROOMS_URL, ticketSecret: process.env.TICKET_SECRET }
     : {}),
+  ...(MODERATION ? { moderation: MODERATION } : {}),
+  // Staff's blocked words, comma- or newline-separated.
+  blockedWords: parseBlockedWords(process.env.BLOCKED_WORDS),
 });
 // LOCAL_CRON=1: run the Worker's minute cron here too, so a local city has a
 // bell, live odds and a Slate. Notifications aren't sent (no real bot locally).
 if (process.env.LOCAL_CRON === "1") {
   const odds = ODDS;
+  // The cron's moderation job takes flagged room lines down in the live rooms.
+  const rooms = process.env.ROOMS_URL && process.env.TICKET_SECRET ? httpRoomsClient({ url: process.env.ROOMS_URL, secret: need("INTERNAL_SECRET") }) : undefined;
   let running = false;
   const tick = async () => {
     if (running) return; // a slow minute never overlaps the next
     running = true;
     try {
-      for (const r of await runMinute(db, new Date(), odds ? { odds } : {})) if (r.status === "rejected") console.error("cron job failed:", r.reason);
+      const deps = { ...(odds ? { odds } : {}), ...(MODERATION ? { moderation: MODERATION } : {}), ...(rooms ? { rooms } : {}) };
+      for (const r of await runMinute(db, new Date(), deps)) if (r.status === "rejected") console.error("cron job failed:", r.reason);
     } finally {
       running = false;
     }
