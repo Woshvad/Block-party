@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ActionKeys } from "../actionKeys";
 import { ApiError, type Api, type Me, type MyCrew } from "../api";
 import { paintAt } from "../banner";
+import { inviteLink } from "../launch";
 import { ifConfirmed, useClosingConfirmation } from "../telegram";
 import { itemLabel, label, plural } from "../palette";
 import { OUTFIT } from "../palette";
@@ -21,7 +22,8 @@ const Person = dynamic(() => import("../Person"), { ssr: false });
 
 const BOT_WORDS: Record<string, string> = { syndicate_call: "Syndicate calls", bell_in_15: "The bell in 15 minutes", crew_card: "The crew's daily card" };
 
-export default function Crew({ api, me, onBack, onChanged, onGoToHouse }: { api: Api; me: Me; onBack: () => void; onChanged: () => void; onGoToHouse: (crewId: string) => void }) {
+// invite: a code from the link the app was opened with, filled in for joining.
+export default function Crew({ api, me, invite, onBack, onChanged, onGoToHouse }: { api: Api; me: Me; invite?: string | null; onBack: () => void; onChanged: () => void; onGoToHouse: (crewId: string) => void }) {
   const mine = useLoad(() => api.myCrew(), [api]);
   const act = useAction();
   const m = mine.data;
@@ -31,16 +33,16 @@ export default function Crew({ api, me, onBack, onChanged, onGoToHouse }: { api:
   };
 
   if (m === undefined) return <Page title="Find your people." onBack={onBack} className="community-page crew-page">{<Loading error={mine.error} retry={mine.reload} />}</Page>;
-  if (m === null) return <NoCrew api={api} onBack={onBack} onJoined={reload} />;
+  if (m === null) return <NoCrew api={api} invite={invite ?? ""} onBack={onBack} onJoined={reload} />;
   return <InCrew api={api} me={me} m={m} act={act} onBack={onBack} reload={reload} onGoToHouse={onGoToHouse} />;
 }
 
-function NoCrew({ api, onBack, onJoined }: { api: Api; onBack: () => void; onJoined: () => void }) {
+function NoCrew({ api, invite, onBack, onJoined }: { api: Api; invite: string; onBack: () => void; onJoined: () => void }) {
   const act = useAction();
   const tables = useLoad(() => api.openTables(), [api]);
   const [name, setName] = useState("");
   const [policy, setPolicy] = useState<"approval" | "open">("approval");
-  const [code, setCode] = useState(() => (typeof location !== "undefined" ? new URLSearchParams(location.search).get("invite") ?? "" : ""));
+  const [code, setCode] = useState(invite);
   return (
     <Page title="Find your people." onBack={onBack} className="community-page crew-page">
       {act.toast}
@@ -217,7 +219,7 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                     <button className="btn light" disabled={act.pending} onClick={() => act.run(async () => {
                       try {
                         if (!navigator.clipboard) throw new Error("Clipboard unavailable");
-                        await navigator.clipboard.writeText(`${location.origin}/?invite=${encodeURIComponent(invite.code)}`);
+                        await navigator.clipboard.writeText(inviteLink(invite.code, location.origin));
                       } catch {
                         throw new ApiError(0, "CLIPBOARD_UNAVAILABLE", "Couldn’t copy the link. Select and copy the invite code above instead.");
                       }

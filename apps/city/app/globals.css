@@ -262,6 +262,7 @@ button:disabled { cursor: default; }
 .sheet { z-index: 6; border: 1px solid #ffffffb0; box-shadow: 0 8px 32px #17342b26; }
 .claim { max-width: 420px; bottom: calc(var(--safe-bottom) + 16px); border: 1px solid #deded3; font-size: 12px; }
 .claim .cta { font-size: 12px; padding: 10px; }
+.claim a.cta { text-decoration: none; text-align: center; }
 .room-stage { top: 82px; bottom: 105px; }
 .roomtop { align-items: center; }
 .roomtop .pill { font-size: 12px; }

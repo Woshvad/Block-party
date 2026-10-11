@@ -5,8 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { backStack, useBackLayer } from "./back";
 import { type Screen, boot, screenFor } from "./boot";
+import { type Launch, TELEGRAM_APP_URL, inviteLink, readLaunch, withoutLaunch } from "./launch";
 import type { PageId } from "./screens/More";
-import { initTelegram, launchData, telegram } from "./telegram";
+import { initTelegram, launchData, startParam, telegram } from "./telegram";
 
 const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
 const MoveIn = dynamic(() => import("./MoveIn"), { ssr: false });
@@ -34,6 +35,18 @@ async function devLaunchData(id: string): Promise<string | null> {
   const r = await fetch(`/dev/telegram?id=${encodeURIComponent(id)}`).catch(() => null);
   if (!r?.ok) return null;
   return ((await r.json()) as { initData?: string }).initData ?? null;
+}
+
+// The link the app was opened from (see launch.ts), acted on once per visit.
+// The address then drops the link's own parameters, so a reload doesn't
+// repeat them.
+let launchTaken = false;
+function takeLaunch(): Launch {
+  if (launchTaken) return { invite: null, notification: null };
+  launchTaken = true;
+  const launch = readLaunch(startParam(), location.search);
+  if (launch.invite || launch.notification) backStack()?.replaceUrl(location.pathname + withoutLaunch(location.search) + location.hash);
+  return launch;
 }
 
 export default function App() {
@@ -101,13 +114,22 @@ export default function App() {
       );
     case "moveIn":
       return <MoveIn api={api} onDone={() => void refresh()} />;
-    case "guest":
+    case "guest": {
+      // With the Mini App's link configured, the way in is one tap (carrying
+      // a crew invite if the guest came with one).
+      const invite = readLaunch(startParam(), location.search).invite;
+      const openInTelegram = TELEGRAM_APP_URL && (invite ? inviteLink(invite, location.origin) : TELEGRAM_APP_URL);
       return (
         <>
           <CityBoard api={api} me={screen.me} />
           <div className="claim">
             <b>You're looking around as a guest.</b>
             <span>Open Block Party in Telegram to move in and get your own room.</span>
+            {openInTelegram && (
+              <a className="cta" href={openInTelegram}>
+                Open in Telegram
+              </a>
+            )}
             {DEV && (
               <button
                 className="cta"
@@ -122,6 +144,7 @@ export default function App() {
           </div>
         </>
       );
+    }
     case "city":
       return <Home api={api} me={screen.me} />;
   }
@@ -139,6 +162,18 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
   const [trip, setTrip] = useState<{ place: string; ridesFree: boolean } | null>(null);
   const [room, setRoom] = useState<string | null>(null);
   const [page, setPage] = useState<PageId | null>(null);
+  const [invite, setInvite] = useState<string | null>(null);
+
+  // Opened from a link: a crew invite opens Crew with the code filled in; a
+  // push the player tapped is marked opened.
+  useEffect(() => {
+    const launch = takeLaunch();
+    if (launch.notification) void api.notificationOpened(launch.notification).catch(() => {});
+    if (launch.invite) {
+      setInvite(launch.invite);
+      setPage("crew");
+    }
+  }, [api]);
 
   // While the app is open and visible, a heartbeat each minute: play time
   // (Rested, Chart-brain, the reality check) counts even without other calls.
@@ -186,7 +221,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
     ) : page === "games" ? (
       <Games api={api} me={me} onBack={back} onChanged={refreshGm} />
     ) : page === "crew" ? (
-      <Crew api={api} me={me} onBack={back} onChanged={refreshGm} onGoToHouse={(crewId) => (setPage(null), setTrip({ place: `crew_house:${crewId}`, ridesFree: false }))} />
+      <Crew api={api} me={me} invite={invite} onBack={back} onChanged={refreshGm} onGoToHouse={(crewId) => (setPage(null), setTrip({ place: `crew_house:${crewId}`, ridesFree: false }))} />
     ) : page ? (
       <div className="screen center">
         <p>Coming in the next build.</p>
