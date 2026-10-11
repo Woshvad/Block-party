@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type FeedMarket, type GammaEvent, type GammaMarket, type OddsProvider, auraCenti, polymarketProvider } from "@bp/core";
+import { type FeedMarket, type GammaEvent, type GammaMarket, type OddsProvider, auraCenti, mintAccountFor, polymarketProvider, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   TowerError,
@@ -13,6 +13,7 @@ import {
   myTickets,
   openMarkets,
   pollOdds,
+  sayGm,
   setPrefs,
   touchActivity,
   blockUser,
@@ -601,6 +602,65 @@ describe("settling, receipts and the Right List", () => {
     expect(JSON.stringify(receipts)).not.toMatch(/wallet|usdc|amount|real/i);
     // Someone else's binder isn't mine, and holds no REKT and no Tail even with room to spare.
     expect((await receiptBinder(db, fren, { now: new Date(t + D) })).receipts.map((r) => r.question)).toEqual(["Q12?"]);
+  });
+});
+
+describe("streak days and the poll", () => {
+  // Waits until `n` sessions are queued on a row lock.
+  async function lockWaiters(n: number) {
+    const deadline = Date.now() + 10_000;
+    // loop-bound: gives up after 10 seconds
+    for (;;) {
+      const [row] = await client`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+      if (row!.n >= n) return;
+      if (Date.now() > deadline) throw new Error(`only ${row!.n}/${n} sessions are waiting on a lock`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+  const settle = <T,>(p: Promise<T>) => p.then((v) => ({ ok: true as const, v }), (e: unknown) => ({ ok: false as const, e }));
+
+  it("a gm and the poll minting on the same shard can't deadlock: streak days are granted after the poll commits", async () => {
+    const t = fresh();
+    const f = feed();
+    const [mx, my] = [f.add(t), f.add(t)];
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    // Two residents whose GM is minted from the same shard.
+    const byShard = new Map<string, string>();
+    let pair: [string, string] | null = null;
+    for (let i = 0; i < 200 && !pair; i++) {
+      const u = await makeResident(db);
+      const shard = mintAccountFor(userAccountId(u));
+      const other = byShard.get(shard);
+      if (other) pair = [other, u];
+      else byShard.set(shard, u);
+    }
+    const [x, y] = pair!;
+    await makeCall(db, x, { marketId: await idOf(mx.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await makeCall(db, y, { marketId: await idOf(my.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    // Hold y's resident row. y's gm queues on it first; then the poll locks x's
+    // call (x's streak mint used to take the shard here) and reaches y's.
+    const at = new Date(t + MIN);
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM users WHERE id = ${y} FOR UPDATE`;
+    let gm: ReturnType<typeof settle<Awaited<ReturnType<typeof sayGm>>>>;
+    let poll: ReturnType<typeof settle<Awaited<ReturnType<typeof pollOdds>>>>;
+    try {
+      gm = settle(sayGm(db, y, { now: at }));
+      await lockWaiters(1);
+      poll = settle(pollOdds(db, f.provider, { now: at }));
+      await lockWaiters(2);
+    } finally {
+      await barrier`COMMIT`;
+      barrier.release();
+    }
+    const [g, p] = await Promise.all([gm, poll]);
+    expect(g.ok ? "ok" : String((g.e as { cause?: { code?: string } })?.cause?.code ?? g.e)).toBe("ok");
+    expect(p.ok ? "ok" : String((p.e as { cause?: { code?: string } })?.cause?.code ?? p.e)).toBe("ok");
+    expect(p).toMatchObject({ v: { locked: 2 } });
+    const day = new Date(t).toISOString().slice(0, 10);
+    for (const u of [x, y]) expect((await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 1, last_day: day });
+    expect(await client`SELECT 1 FROM daily_gm WHERE user_id = ${y} AND city_day = ${day}`).toHaveLength(1);
   });
 });
 

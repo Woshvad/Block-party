@@ -133,12 +133,13 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
   }
   const result = await db.transaction(async (tx) => {
     const [got] = await tx.execute<{ ok: boolean }>(sql`SELECT pg_try_advisory_xact_lock(${POLL_LOCK}) AS ok`);
-    if (!got?.ok) return { ok: true as const, skipped: true };
+    if (!got?.ok) return { ok: true as const, skipped: true as const };
     let ticked = 0;
     let locked = 0;
     let moved = 0;
     let bad = 0;
     const carried: string[] = []; // the open markets this poll carried
+    const streakDays = new Set<string>(); // residents with a call locked, for after the commit
     for (const m of feed) {
       if (!validFeed(m)) {
         bad++;
@@ -207,7 +208,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
           const half = !c.onSlate && market.freezesAt.getTime() - now.getTime() < TOWER.halfAuraLastMinutes * 60_000;
           await tx.update(calls).set({ status: "locked", tickId: tick!.id, lockedPrice: tick!.price, lockedAt: now, half }).where(eq(calls.id, c.id));
           // Your streak grows with your first call of the day (the cast has no streak, and no GM).
-          if (!NPC_IDS.includes(c.userId)) await recordStreakDay(tx, c.userId, { now });
+          if (!NPC_IDS.includes(c.userId)) streakDays.add(c.userId);
           locked++;
         } else {
           await tx.update(calls).set({ status: "price_moved" }).where(eq(calls.id, c.id));
@@ -244,10 +245,26 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       if (c.ticket) await refundTicket(tx, c.userId, now);
     }
     await tx.insert(feedPolls).values({ source: provider.source, ok: true, markets: feed.length, at: now, ...(bad ? { error: `${bad} malformed market(s) skipped` } : {}) });
-    return { ok: true as const, skipped: false, ticked, locked, moved, expired: stale.length, bad };
+    return { ok: true as const, skipped: false as const, ticked, locked, moved, expired: stale.length, bad, streakDays: [...streakDays] };
   });
   if (result.skipped) return result;
-  return { ...result, settled: (await settleCalls(db, { now })).settled };
+  const { streakDays: residents, ...counts } = result;
+  // Streak days are granted once the poll has committed, one resident per
+  // transaction. Minted inside the poll, they held mint shards while it went
+  // on to lock more residents: the reverse of gm's order (resident, then
+  // ledger), so a gm and the poll could deadlock. Every resident's grant is
+  // tried; if any failed, the first error is thrown once calls are settled.
+  let failed: { e: unknown } | null = null;
+  for (const userId of residents) {
+    try {
+      await recordStreakDay(db, userId, { now });
+    } catch (e) {
+      failed ??= { e };
+    }
+  }
+  const settled = (await settleCalls(db, { now })).settled;
+  if (failed) throw failed.e;
+  return { ...counts, settled };
 }
 
 // --- The city's calls ------------------------------------------------------------------
