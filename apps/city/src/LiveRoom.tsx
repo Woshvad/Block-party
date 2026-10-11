@@ -21,7 +21,7 @@ import { type SocketStatus, openRoomSocket } from "./roomSocket";
 import { chatDraft } from "./chatDraft";
 import { haptic } from "./telegram";
 import { useToast } from "./useToast";
-import { type Board, type FeedKey, dinerBoard, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
+import { type Board, type FeedKey, type FeedStatus, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
 
 // A live room: everyone here walking where they tapped, chat bubbles over
 // heads, emotes, and the dimmed away residents. Every body part is one
@@ -126,13 +126,19 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
 }
 
 // The live boards for this room's screens: fetched on entry and every minute.
+// The odds come with the feed's status, so a paused feed dims the wall.
 function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<FeedKey, Board>> {
   const [odds, setOdds] = useState<MarketRow[] | null>(null);
+  const [feed, setFeed] = useState<FeedStatus | null>(null);
   const [hall, setHall] = useState<CityHall | null>(null);
   useEffect(() => {
     const wantsOdds = place === "tower" || place === "watch_party";
     const load = () => {
-      if (wantsOdds) void api.oddsWall().then(setOdds).catch(() => {});
+      if (wantsOdds)
+        void Promise.allSettled([api.oddsWall(), api.feed()]).then(([o, f]) => {
+          if (o.status === "fulfilled") setOdds(o.value);
+          setFeed((prev) => feedAfter(prev, o.status === "fulfilled", f.status === "fulfilled" ? f.value : null));
+        });
       if (place === "city_hall") void api.cityHall().then(setHall).catch(() => {});
     };
     load();
@@ -143,11 +149,11 @@ function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<Feed
   return useMemo(() => {
     const at = minute * 60_000;
     return {
-      ...(odds ? { odds: oddsBoard(odds, at), match: matchBoard(odds, at) } : {}),
+      ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed) } : {}),
       ...(hall ? { hall: hallBoard(hall, at) } : {}),
       diner: dinerBoard(new Date(at).toISOString().slice(0, 10)),
     };
-  }, [odds, hall, minute]);
+  }, [odds, feed, hall, minute]);
 }
 
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
