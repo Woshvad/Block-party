@@ -286,6 +286,16 @@ type C = Context<{ Variables: Vars }>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEM = /^[A-Za-z0-9_-]{8,100}$/;
 
+// What a per-IP rate-limit bucket holds instead of the address: an HMAC of
+// it keyed with the server's internal secret, so the stored buckets can't be
+// turned back into IPs by hashing guesses (and old ones are swept anyway).
+export async function ipBucketKey(secret: string, ip: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(`rate-limit-ip:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(ip)));
+  return [...mac.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function timingSafeEqual(a: string, b: string) {
   if (a.length !== b.length) return false;
   let d = 0;
@@ -335,6 +345,7 @@ export function createApp(cfg: AppConfig) {
   app.notFound((c) => c.json({ error: { code: "NOT_FOUND", message: "no such route", requestId: c.get("requestId") } }, 404));
 
   const ip = (c: C) => (cfg.clientIpHeader && c.req.header(cfg.clientIpHeader)) || "unknown";
+  const ipKey = (c: C) => ipBucketKey(cfg.internalSecret, ip(c));
 
   async function limit(c: C, bucket: string, max: number, windowSeconds: number) {
     const r = await hitRateLimit(db, bucket, { limit: max, windowSeconds, now: now() });
@@ -407,7 +418,7 @@ export function createApp(cfg: AppConfig) {
   };
 
   const authLimit = async (c: C, next: () => Promise<void>) => {
-    await limit(c, `ip:${ip(c)}:auth`, limits.authPerIpPerMinute, 60);
+    await limit(c, `ip:${await ipKey(c)}:auth`, limits.authPerIpPerMinute, 60);
     await next();
   };
 
@@ -434,7 +445,7 @@ export function createApp(cfg: AppConfig) {
 
   app.post("/v1/auth/guest", authLimit, async (c) => {
     const b = await body(c);
-    await limit(c, `ip:${ip(c)}:guest`, limits.guestsPerIpPerHour, 3600);
+    await limit(c, `ip:${await ipKey(c)}:guest`, limits.guestsPerIpPerHour, 3600);
     const r = await createGuest(db, { ageAck: b.ageAck === true });
     return c.json(r, 201);
   });
@@ -1074,7 +1085,7 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
   app.get("/v1/receipts/:token", async (c) => {
-    await limit(c, `receipt-ip:${ip(c)}`, limits.readsPerUserPerMinute, 60);
+    await limit(c, `receipt-ip:${await ipKey(c)}`, limits.readsPerUserPerMinute, 60);
     const id = cfg.receiptSecret ? await verifyReceiptToken(c.req.param("token"), cfg.receiptSecret) : null;
     const r = id ? await receipt(db, id, opts()) : null;
     if (!r) throw new ApiError(404, "NOT_FOUND", "no such receipt");

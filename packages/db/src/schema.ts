@@ -566,7 +566,7 @@ export const halvings = pgTable(
 // --- Rate limits ----------------------------------------------------------
 
 // Fixed-window counters. One row per bucket per window (a day at most); old
-// windows are swept by the minute cron.
+// windows are swept by the minute cron. Buckets never hold a raw client IP.
 export const rateLimits = pgTable(
   "rate_limits",
   {

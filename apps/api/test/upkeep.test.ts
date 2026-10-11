@@ -1,8 +1,33 @@
 import { afterAll, describe, expect, it } from "vitest";
+import { ipBucketKey } from "../src/app";
 import { runMinute } from "../src/cron";
-import { call, client, close, db, resident } from "./harness";
+import { SECRET, call, client, close, db, makeApp, resident } from "./harness";
 
 afterAll(close);
+
+describe("rate limits keep no client IPs", () => {
+  it("per-IP buckets hold a keyed hash of the address, and still limit each address", async () => {
+    const ip = `203.0.113.${Math.floor(Math.random() * 250)}`;
+    const strict = makeApp({ limits: { guestsPerIpPerHour: 1 } });
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(201);
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(429);
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, via: strict })).status).toBe(201); // another address
+    expect((await call("GET", "/v1/receipts/not-a-receipt", { ip })).status).toBe(404);
+
+    expect(await client`SELECT bucket FROM rate_limits WHERE bucket LIKE ${`%${ip}%`}`).toHaveLength(0);
+    const key = await ipBucketKey(SECRET, ip);
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    const buckets = (await client`SELECT DISTINCT bucket FROM rate_limits WHERE bucket LIKE ${`%${key}%`}`).map((r) => r.bucket as string).sort();
+    expect(buckets).toEqual([`ip:${key}:auth`, `ip:${key}:guest`, `receipt-ip:${key}`]);
+  });
+
+  it("the hash is keyed with the server's secret", async () => {
+    const ip = "203.0.113.9";
+    expect(await ipBucketKey(SECRET, ip)).toBe(await ipBucketKey(SECRET, ip));
+    expect(await ipBucketKey(SECRET, ip)).not.toBe(await ipBucketKey("t".repeat(40), ip));
+    expect(await ipBucketKey(SECRET, ip)).not.toBe(await ipBucketKey(SECRET, "203.0.113.10"));
+  });
+});
 
 describe("the minute cron's sweeps", () => {
   it("every 10 minutes: rate-limit windows over a day old and sessions that ended over a week ago go; the rest stay", async () => {
