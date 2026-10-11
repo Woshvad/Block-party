@@ -83,6 +83,7 @@ import {
   blockUser,
   decideAppeal,
   enqueueModeration,
+  enqueueModerationOnce,
   fileReport,
   muteUser,
   openAppeals,
@@ -288,6 +289,16 @@ function timingSafeEqual(a: string, b: string) {
   let d = 0;
   for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return d === 0;
+}
+
+// A stable UUID for a name (SHA-256, shaped as an RFC 4122 v5-style id): the
+// same room effect always maps to the same row.
+async function nameUuid(name: string) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(name)));
+  h[6] = (h[6]! & 0x0f) | 0x50;
+  h[8] = (h[8]! & 0x3f) | 0x80;
+  const x = [...h.subarray(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20, 32)}`;
 }
 
 export function createApp(cfg: AppConfig) {
@@ -1134,7 +1145,11 @@ export function createApp(cfg: AppConfig) {
     return c.json(await awayAt(db, place, { ...opts(), limit: 50 }));
   });
 
-  // The rooms Worker reports what happened: Cozy, and room chat for the AI check.
+  // The rooms Worker reports what happened: Cozy, visits, and room chat for
+  // the AI check. A room resends a batch whose answer it missed, oldest
+  // first, so each effect must land once. Cozy and visits already do (a
+  // repeat leaves the same mood and the same overlaps); a room line is
+  // queued under an id made from the effect's own.
   app.post("/internal/rooms/effects", internal, async (c) => {
     const b = await body(c);
     const place = b.place;
@@ -1155,7 +1170,9 @@ export function createApp(cfg: AppConfig) {
       }
       const line = e.line as { id?: unknown; userId?: unknown; text?: unknown } | undefined;
       if (e.kind === "moderate" && line && typeof line.id === "string" && typeof line.text === "string" && typeof line.userId === "string" && UUID.test(line.userId)) {
-        await enqueueModeration(db, { kind: "room", ref: `${place}#${copy}#${line.id}`, authorId: line.userId, text: line.text });
+        const item = { kind: "room", ref: `${place}#${copy}#${line.id}`, authorId: line.userId, text: line.text };
+        if (typeof e.id === "string" && e.id.length <= 40) await enqueueModerationOnce(db, await nameUuid(`room-effect:${place}#${copy}#${e.id}`), item);
+        else await enqueueModeration(db, item);
         applied++;
       }
     }

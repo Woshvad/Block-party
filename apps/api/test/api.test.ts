@@ -457,6 +457,24 @@ describe("live rooms over HTTP", () => {
     expect((await call("POST", "/internal/rooms/effects", { body: { place: "../x", copy: 0, effects: [] }, headers: { "x-internal-secret": SECRET } })).status).toBe(400);
   });
 
+  it("a batch the room sends again (its answer got lost) queues each line once", async () => {
+    const { client } = await import("./harness");
+    const u = await resident();
+    const lineId = `again-${crypto.randomUUID().slice(0, 8)}`;
+    const effects = [
+      { id: "41", kind: "visit_start", userId: u.userId, at: Date.now() - 60_000 },
+      { id: "42", kind: "moderate", line: { id: lineId, userId: u.userId, handle: u.handle, text: "said once, sent twice", at: Date.now() } },
+    ];
+    const post = (copy: number) => call("POST", "/internal/rooms/effects", { body: { place: "roof", copy, effects }, headers: { "x-internal-secret": SECRET } });
+    expect((await post(5)).body).toEqual({ applied: 2 });
+    expect((await post(5)).body).toEqual({ applied: 2 });
+    expect(await client`SELECT id FROM moderation_items WHERE ref = ${`roof#5#${lineId}`}`).toHaveLength(1);
+    expect(await client`SELECT id FROM room_visits WHERE user_id = ${u.userId} AND room = 'roof#5' AND left_at IS NULL`).toHaveLength(1);
+    // The same effect id from another room copy is another effect.
+    await post(6);
+    expect(await client`SELECT id FROM moderation_items WHERE ref = ${`roof#6#${lineId}`}`).toHaveLength(1);
+  });
+
   it("live room access separates mutes from blocks and refreshes restrictions", async () => {
     const [a, b, muted, mod] = [await resident(), await resident(), await resident(), await resident()];
     const { client } = await import("./harness");
