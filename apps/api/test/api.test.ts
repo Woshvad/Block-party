@@ -473,6 +473,13 @@ describe("live rooms over HTTP", () => {
     // The same effect id from another room copy is another effect.
     await post(6);
     expect(await client`SELECT id FROM moderation_items WHERE ref = ${`roof#6#${lineId}`}`).toHaveLength(1);
+    // A room copy whose storage started over (a local rooms server restart
+    // does that) counts its effects from 0 again: a new line under an effect
+    // id that copy used before is still a new line.
+    const fresh = `again-${crypto.randomUUID().slice(0, 8)}`;
+    const restarted = [{ id: "42", kind: "moderate", line: { id: fresh, userId: u.userId, handle: u.handle, text: "a new line under an old effect id", at: Date.now() } }];
+    await call("POST", "/internal/rooms/effects", { body: { place: "roof", copy: 5, effects: restarted }, headers: { "x-internal-secret": SECRET } });
+    expect(await client`SELECT id FROM moderation_items WHERE ref = ${`roof#5#${fresh}`}`).toHaveLength(1);
   });
 
   it("live room access separates mutes from blocks and refreshes restrictions", async () => {

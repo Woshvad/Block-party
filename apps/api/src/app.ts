@@ -1149,7 +1149,7 @@ export function createApp(cfg: AppConfig) {
   // the AI check. A room resends a batch whose answer it missed, oldest
   // first, so each effect must land once. Cozy and visits already do (a
   // repeat leaves the same mood and the same overlaps); a room line is
-  // queued under an id made from the effect's own.
+  // queued under an id made from the effect's id and the line's.
   app.post("/internal/rooms/effects", internal, async (c) => {
     const b = await body(c);
     const place = b.place;
@@ -1171,7 +1171,10 @@ export function createApp(cfg: AppConfig) {
       const line = e.line as { id?: unknown; userId?: unknown; text?: unknown } | undefined;
       if (e.kind === "moderate" && line && typeof line.id === "string" && typeof line.text === "string" && typeof line.userId === "string" && UUID.test(line.userId)) {
         const item = { kind: "room", ref: `${place}#${copy}#${line.id}`, authorId: line.userId, text: line.text };
-        if (typeof e.id === "string" && e.id.length <= 40) await enqueueModerationOnce(db, await nameUuid(`room-effect:${place}#${copy}#${e.id}`), item);
+        // The line's own id is in the name too: a room copy whose storage
+        // started over counts its effects from 0 again, and its new lines
+        // must not land on the old ones.
+        if (typeof e.id === "string" && e.id.length <= 40) await enqueueModerationOnce(db, await nameUuid(`room-effect:${place}#${copy}#${e.id}#${line.id}`), item);
         else await enqueueModeration(db, item);
         applied++;
       }
