@@ -194,6 +194,41 @@ describe("with a 4-second access window", () => {
     fresh.ws.close();
   });
 
+  it("leaving right after a nap tells nobody who blocked the leaver, even with the API down", async () => {
+    const blocker = await rooms.connect("left-blocker", { place: "tower", hidden: ["left-leaver"] });
+    await blocker.next("welcome");
+    const leaver = await rooms.connect("left-leaver", { place: "tower" });
+    await leaver.next("welcome");
+    const friend = await rooms.connect("left-friend", { place: "tower" });
+    await friend.next("welcome");
+    const lefts = (c: { events: Array<Record<string, any>> }) => c.events.filter((x) => x.t === "left" && x.userId === "left-leaver");
+    // Nap, then the leaver goes before anyone acts. First with the API down:
+    // nobody's lists are known, so "left" goes to nobody (headcounts still do).
+    await rooms.internal("/internal/forget?place=tower&copy=0", { method: "POST" });
+    api.accessAvailable = false;
+    try {
+      leaver.ws.close();
+      await quiet(600);
+    } finally {
+      api.accessAvailable = true;
+    }
+    expect(lefts(blocker)).toEqual([]);
+    expect(lefts(friend)).toEqual([]);
+    expect(blocker.events.some((x) => x.t === "headcount")).toBe(true);
+    // Again with the API up (once the room's retry wait after the failure has
+    // passed): the lists come back first, and only the friend hears it.
+    await quiet(1100);
+    const again = await rooms.connect("left-leaver", { place: "tower" });
+    await again.next("welcome");
+    await rooms.internal("/internal/forget?place=tower&copy=0", { method: "POST" });
+    again.ws.close();
+    await quiet(600);
+    expect(lefts(blocker)).toEqual([]);
+    expect(lefts(friend)).toHaveLength(1);
+    blocker.ws.close();
+    friend.ws.close();
+  });
+
   it("after a nap nobody's lists are known, so an outage refuses everyone until the API answers", async () => {
     const a = await rooms.connect("nap-a", { place: "tower" });
     const b = await rooms.connect("nap-b", { place: "tower", hidden: ["nap-a"] });

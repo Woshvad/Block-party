@@ -444,13 +444,23 @@ export class RoomDO implements DurableObject {
 
   // --- Leaving -----------------------------------------------------------------
 
+  // A leave doesn't wait for an access check, and after a nap every member
+  // wakes with empty block lists. So "left" only goes where both sides'
+  // lists are known again: otherwise someone who blocked the leaver (or was
+  // blocked by them) would learn they'd been in the room. Everyone still
+  // gets the new headcount.
+  private leaving(ds: Delivery[], leaver: string): Delivery[] {
+    const leaverKnown = this.checkedAt.has(leaver);
+    return ds.map((d) => (d.event.t === "left" ? { ...d, to: leaverKnown ? d.to.filter((u) => this.checkedAt.has(u)) : [] } : d));
+  }
+
   private async disconnect(e: RoomEngine, userId: string, code: number, reason: string) {
     for (const ws of this.sockets(userId)) {
       ws.serializeAttachment(null);
       closeSocket(ws, code, reason);
     }
     const out = e.isHere(userId) ? e.leave(userId, Date.now()) : null;
-    if (out) this.deliver(out.deliveries);
+    if (out) this.deliver(this.leaving(out.deliveries, userId));
     this.forgetResident(userId);
     // The directory hears about it even when this room had already forgotten
     // them, so its entry can't outlive the socket.
@@ -463,11 +473,17 @@ export class RoomDO implements DurableObject {
   private async gone(ws: WebSocket) {
     const a = readAttachment(ws);
     if (!a) return;
-    const e = await this.ensure();
+    let e = await this.ensure();
     // Still connected on another socket (the newer tab): stay.
     if (this.sockets(a.u).some((s) => s !== ws && s.readyState === WebSocket.OPEN)) return;
+    // Lists unknown since a nap: ask once, so "left" reaches everyone who may
+    // see it (see leaving). If the API can't answer, fewer hear it.
+    if (!this.allKnown(e)) {
+      await this.check(e, []).catch(() => undefined);
+      e = await this.ensure();
+    }
     const out = e.leave(a.u, Date.now());
-    this.deliver(out.deliveries);
+    this.deliver(this.leaving(out.deliveries, a.u));
     this.forgetResident(a.u);
     await this.toDirectory("/left", { copy: this.copy, u: a.u });
     await this.afterEvent(e, [...out.effects, visitEnd(a.u)]);
