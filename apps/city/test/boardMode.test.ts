@@ -49,4 +49,17 @@ describe("hiding the board", () => {
     const rules = roots.flatMap(css).flatMap((f) => [...readFileSync(f, "utf8").matchAll(/([^{}]*\.city-board[^{}]*)\{([^}]*)\}/g)].filter((m) => /(^|;|\s)display\s*:/.test(m[2]!)).map((m) => `${f}: ${m[1]!.trim()}`));
     expect(rules).toEqual([]);
   });
+
+  it("relies on R3F's Canvas making nothing until its container has a size, which the installed R3F still does", async () => {
+    // @react-three/fiber 9.0.4's Canvas creates its root and WebGL context
+    // only once the measured container is wider and taller than 0. A board
+    // mounted hidden (display:none, 0x0) therefore builds no city. If an
+    // upgrade drops that wait, this fails: check boardMode.ts's promise again.
+    const { readFileSync } = await import("node:fs");
+    const { createRequire } = await import("node:module");
+    const { dirname, join } = await import("node:path");
+    const pkg = createRequire(join(__dirname, "..", "package.json")).resolve("@react-three/fiber/package.json");
+    const canvas = readFileSync(join(dirname(pkg), "dist", "react-three-fiber.esm.js"), "utf8");
+    expect(canvas).toMatch(/if \(containerRect\.width > 0 && containerRect\.height > 0 && canvas\) \{/);
+  });
 });
