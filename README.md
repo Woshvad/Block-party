@@ -17,11 +17,15 @@ Needs Node 20+, pnpm 10, and Postgres 15 on localhost.
 ```bash
 pnpm install
 cp .env.example .env
+# Fresh local secrets, to paste over the placeholders in .env:
+node -e "for (const k of ['INTERNAL_SECRET', 'TICKET_SECRET', 'PON_PEPPER']) console.log(k + '=' + require('crypto').randomBytes(24).toString('base64url'))"
 createdb blockparty
 pnpm db:migrate
 pnpm test
 pnpm --filter @bp/api dev   # http://localhost:8787, refuses to start on an un-migrated database
 ```
+
+The API won't start (locally or on Workers) without a real-looking `TELEGRAM_BOT_TOKEN` (`<bot id>:<30+ letters, digits, - or _>`) or with any secret it uses under 32 characters or still the `.env.example` placeholder, and it says which. Locally the bot token can be your test bot's, or any made-up one of that shape: the dev sign-in signs with whatever is in `.env`.
 
 Tests drop and recreate `blockparty_test` on every run (the name must end in `_test`).
 

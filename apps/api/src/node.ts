@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { type OddsProvider, mockProvider, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { createApp } from "./app";
+import { configProblems } from "./config-check";
 import { logCronFailures, runMinute } from "./cron";
 import { httpRoomsClient } from "./rooms-client";
 
@@ -12,6 +13,13 @@ const need = (k: string) => {
   if (!v) throw new Error(`${k} is not set`);
   return v;
 };
+// The same check as the Worker's: no bot token or a weak secret, no server.
+const problems = configProblems(process.env);
+if (problems.length > 0) {
+  for (const p of problems) console.error(`config: ${p}`);
+  console.error("fix .env (README Setup has a line that makes local secrets) and start again");
+  process.exit(1);
+}
 const { db } = createDb(need("DATABASE_URL"), { max: Number(process.env.DB_POOL ?? 10) });
 const schema = await schemaStatus(db);
 if (!schema.upToDate) {
