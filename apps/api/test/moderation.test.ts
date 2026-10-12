@@ -1,9 +1,9 @@
-import { type ModerationProvider, OPENAI_MODERATION_BATCH, parseBlockedWords } from "@bp/core";
+import { type ModerationProvider, OPENAI_MODERATION_BATCH, parseBlockedWords, pickForMe, seededRandomInt } from "@bp/core";
 import { CREW_NAME_UNDER_REVIEW, enqueueModeration } from "@bp/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runMinute } from "../src/cron";
 import { runModerationJob } from "../src/moderation";
-import { SECRET, call, client, close, db, fakeRooms, makeApp, ready, resident, roomsState } from "./harness";
+import { SECRET, call, client, close, db, fakeRooms, makeApp, ready, resident, roomsState, telegramInit } from "./harness";
 
 beforeAll(ready);
 afterAll(close);
@@ -163,5 +163,22 @@ describe("staff's blocked words over HTTP", () => {
     expect(chat.body.error.field).toBe("BLOCKED_WORD");
     // The same text goes through where no list is configured.
     expect((await call("POST", "/v1/boards/city_hall", { token: u.token, body: { text: "you b4dw0rd" } })).status).toBe(201);
+  });
+
+  it("display names, crew names and Mayor pitches hold to the same list", async () => {
+    const city = makeApp({ blockedWords: parseBlockedWords("badword, other bad") });
+    const u = await resident();
+    const refused = (r: { status: number; body: any }) => [r.status, r.body.error?.code, r.body.error?.field];
+    expect(refused(await call("PATCH", "/v1/resident", { token: u.token, body: { name: "Mr B4dword" }, via: city }))).toEqual([422, "MODERATED", "name"]);
+    expect(refused(await call("POST", "/v1/crews", { token: u.token, body: { name: "Other Bad Crew" }, via: city }))).toEqual([422, "MODERATED", "name"]);
+    expect(refused(await call("POST", "/v1/election/candidacy", { token: u.token, body: { pitch: "vote badword" }, via: city }))).toEqual([422, "MODERATED", "pitch"]);
+    const tag = crypto.randomUUID().slice(0, 6);
+    expect((await call("POST", "/v1/crews", { token: u.token, body: { name: `Good Crew ${tag}` }, via: city })).status).toBe(201);
+    expect(refused(await call("PATCH", "/v1/crews/mine", { token: u.token, body: { name: "badword club" }, via: city }))).toEqual([422, "MODERATED", "name"]);
+    expect((await call("PATCH", "/v1/resident", { token: u.token, body: { name: "Mister Fine" }, via: city })).status).toBe(200);
+    // Move-in too.
+    const fresh = await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, via: city });
+    const moveIn = await call("POST", "/v1/resident", { token: fresh.body.sessionToken, body: { ...pickForMe(seededRandomInt(7)), handle: `bw${tag}`, name: "B A D W O R D" }, via: city });
+    expect(refused(moveIn)).toEqual([422, "MODERATED", "name"]);
   });
 });

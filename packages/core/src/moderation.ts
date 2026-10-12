@@ -377,6 +377,12 @@ function hasBlockedWord(input: string, blocked: readonly string[]): boolean {
   });
 }
 
+// The same check on its own, for text that isn't a message: display names,
+// crew names and Mayor pitches.
+export function containsBlockedWord(input: unknown, blocked: readonly string[] | undefined): boolean {
+  return typeof input === "string" && !!blocked?.length && hasBlockedWord(input, blocked);
+}
+
 // --- The verdict ----------------------------------------------------------
 
 const SECRET_WARNING = "No one from Block Party will ever ask for your seed phrase or your funds. Not the Mayor. Not your crew.";

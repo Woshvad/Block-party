@@ -11,6 +11,7 @@ import {
   signRoomTicket,
   type ModerationProvider,
   checkMessage,
+  containsBlockedWord,
   BUYABLE_IDS,
   CATALOGUE,
   FLOOR_FINISHES,
@@ -267,7 +268,8 @@ export type AppConfig = {
   // The AI moderation check (OpenAI's free endpoint in production).
   moderation?: ModerationProvider;
   // Staff-maintained blocked words (the BLOCKED_WORDS setting, read with
-  // parseBlockedWords), checked on every chat and Ratio send.
+  // parseBlockedWords), checked on every chat and Ratio send, and on display
+  // names, crew names and Mayor pitches.
   blockedWords?: readonly string[];
   // The live rooms: presence, evidence and takedowns, plus tickets to get in.
   rooms?: RoomsClient;
@@ -445,6 +447,11 @@ export function createApp(cfg: AppConfig) {
   const opts = () => ({ now: now() });
   // For the routes that send text: the clock plus staff's blocked words.
   const sendOpts = () => ({ now: now(), ...(cfg.blockedWords ? { blockedWords: cfg.blockedWords } : {}) });
+  // The city-wide strings (names, crew names, pitches) hold to the same list
+  // as chat, before anything is written.
+  const noBlockedWord = (text: unknown, field: string) => {
+    if (containsBlockedWord(text, cfg.blockedWords)) throw new ApiError(422, "MODERATED", "that word isn't allowed here", field);
+  };
 
   // --- Public --------------------------------------------------------------
 
@@ -552,7 +559,9 @@ export function createApp(cfg: AppConfig) {
   });
   app.get("/v1/handles/:handle/available", auth, async (c) => c.json({ available: await isHandleAvailable(db, c.req.param("handle") ?? "") }));
   app.post("/v1/resident", auth, async (c) => {
-    const r = await createResident(db, c.get("userId"), await body(c));
+    const b = await body(c);
+    noBlockedWord(b.name, "name");
+    const r = await createResident(db, c.get("userId"), b);
     // Checked apart: a flagged name comes down to the handle, while a handle
     // can't change, so staff deal with the resident.
     await enqueueModeration(db, { kind: "resident_name", ref: r.userId, authorId: r.userId, text: r.name });
@@ -564,6 +573,7 @@ export function createApp(cfg: AppConfig) {
     const userId = c.get("userId");
     let r = await getResident(db, userId);
     if (b.name !== undefined) {
+      noBlockedWord(b.name, "name");
       r = await updateName(db, userId, b.name);
       await enqueueModeration(db, { kind: "resident_name", ref: userId, authorId: userId, text: r.name });
     }
@@ -648,6 +658,7 @@ export function createApp(cfg: AppConfig) {
 
   app.post("/v1/crews", auth, async (c) => {
     const b = await body(c);
+    noBlockedWord(b.name, "name");
     const crew = await createCrew(db, c.get("userId"), { name: b.name, joinPolicy: b.joinPolicy, banner: b.banner });
     await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: c.get("userId"), text: crew.name });
     return c.json(crew, 201);
@@ -655,6 +666,7 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/crews/mine", auth, async (c) => c.json(await mine(c)));
   app.patch("/v1/crews/mine", auth, async (c) => {
     const b = await body(c);
+    noBlockedWord(b.name, "name");
     const crew = await editCrew(db, c.get("userId"), b);
     // A new name gets the same AI check as the first one.
     if (b.name !== undefined) await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: c.get("userId"), text: crew.name });
@@ -729,7 +741,9 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/laws", auth, (c) => c.json(LAWS));
   app.get("/v1/city-hall", auth, async (c) => c.json(await cityHall(db, c.get("userId"), opts())));
   app.post("/v1/election/candidacy", auth, async (c) => {
-    const cand = await declareCandidacy(db, c.get("userId"), (await body(c)).pitch, opts());
+    const { pitch } = await body(c);
+    noBlockedWord(pitch, "pitch");
+    const cand = await declareCandidacy(db, c.get("userId"), pitch, opts());
     await enqueueModeration(db, { kind: "pitch", ref: `${cand.week}:${cand.userId}`, authorId: cand.userId, text: cand.pitch });
     return c.json(cand, 201);
   });
