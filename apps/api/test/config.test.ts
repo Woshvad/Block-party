@@ -54,6 +54,24 @@ describe("the API's wrangler config matches the code", () => {
     }
   });
 
+  it("the deployed API has an odds feed", () => {
+    expect(["polymarket", "mock"]).toContain(cfg.vars.ODDS_SOURCE);
+  });
+
+  it("every setting the Worker reads is documented: README Deploying and .env.example", () => {
+    const readme = read("../../../README.md").replace(/\r\n/g, "\n");
+    const from = readme.indexOf("## Deploying");
+    const deploying = readme.slice(from, readme.indexOf("\n## ", from + 1));
+    const example = read("../../../.env.example");
+    // Not HYPERDRIVE: a binding, checked above.
+    const keys = [...envType.matchAll(/^\s*([A-Z][A-Z0-9_]*)\??:/gm)].map((m) => m[1]!).filter((k) => k !== "HYPERDRIVE");
+    expect(keys).toContain("RECEIPT_SECRET");
+    for (const k of keys) {
+      expect(deploying, k).toContain(`\`${k}\``);
+      expect(example, k).toMatch(new RegExp(`^${k}=`, "m"));
+    }
+  });
+
   it("the minute cron is on, and the Worker has a scheduled handler", () => {
     expect(cfg.triggers.crons).toEqual(["* * * * *"]);
     expect(worker).toMatch(/async scheduled\(/);

@@ -178,10 +178,29 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 
 ## Deploying
 
+**Owner items first.** None of these exist yet, and the config only holds marked placeholders for them (`OWNER ITEM` in both `wrangler.jsonc` files): the Cloudflare account, the Postgres database and its Hyperdrive id, the domains, the bot token from @BotFather, Polymarket's written OK for free calls, and somewhere to host the city.
+
 1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
-2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc`.
-3. Secrets on both Workers (`wrangler secret put`): `INTERNAL_SECRET` and `TICKET_SECRET` (the same on both), plus the API's `TELEGRAM_BOT_TOKEN`, and when ready `OPENAI_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`.
-4. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Rooms go first so they already accept the slimmer tickets a new API signs; an older rooms Worker refuses them. Check the API's `/health` says the schema is up to date. Rooms ask the API's `/internal/rooms/access` for each resident's blocks, mutes and restrictions when they join and trust the answer for 15 seconds; while it is unavailable, nobody can join, and a resident whose answer is older than that can't act. Optional on rooms: `BLOCKED_WORDS`, staff's blocked words for room chat (comma- or newline-separated).
+2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc` in place of `REPLACE_WITH_HYPERDRIVE_ID`.
+3. Domains. The config assumes the city at `https://blockparty.city` (the API's `ALLOWED_ORIGINS`), the API at `https://api.blockparty.city` (the rooms' `API_URL`) and the rooms at `https://rooms.blockparty.city` (the API's `ROOMS_URL`). Give each Worker its custom domain (the commented `routes` line in its `wrangler.jsonc`) or change those vars: on `workers.dev` alone the two Workers can't reach each other at these addresses.
+4. Secrets, with `wrangler secret put NAME` in each Worker's directory. A fresh shared secret: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
+
+   | Secret | Worker | What it does |
+   | --- | --- | --- |
+   | `TELEGRAM_BOT_TOKEN` | API | Telegram sign-in and pushes. Required, and shaped like a real token (`<bot id>:<30+ letters, digits, - or _>`). |
+   | `INTERNAL_SECRET` | API and rooms, the same | The Workers' internal routes. Required, 32+ characters. |
+   | `TICKET_SECRET` | API and rooms, the same | Signs room tickets. Required on rooms; without it the API's rooms are off (503). 32+ characters. |
+   | `RECEIPT_SECRET` | API | Signs public receipt links; without it calls have no receipt link. 32+ characters. |
+   | `PON_PEPPER` | API | Hashes phone numbers and wallets for Proof of Neighbour. 32+ characters. The PoN routes still answer 503 until a phone or crypto-proof provider is configured too, and none is built yet. |
+   | `OPENAI_API_KEY` | API | The AI moderation check (OpenAI's free moderation endpoint). |
+   | `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | API | Privy sign-in (the app id and the verification key's PEM from the Privy dashboard). Without both, or with a key that won't load (it's logged), only `/v1/auth/privy` is off (503). |
+   | `BLOCKED_WORDS` | API and rooms | Optional. Staff's blocked words for chat, comma- or newline-separated. |
+   | `CITY_URL` | API | Optional. The city's address, for the Open button on pushes (`<CITY_URL>/?n=<notification id>`); plain-text pushes without it. |
+
+   The API refuses to serve without the bot token or with a secret it uses under 32 characters or still a `.env.example` placeholder: every request gets a 500, `/health` lists the problems by name, and the cron doesn't run.
+5. Vars live in `wrangler.jsonc`, not secrets. The API: `ODDS_SOURCE` (`polymarket`, the live read-only feed; `mock` for a sample feed on staging; unset, no markets and no Slate), `ALLOWED_ORIGINS`, `ROOMS_URL`, and the switches `FEATURE_DUELS`, `FEATURE_TOWER_LIGHTS` and `FEATURE_REAL_MONEY` (off unless `"on"`). The rooms: `API_URL`; `ACCESS_TTL_MS` is for tests only.
+6. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Rooms go first so they already accept the slimmer tickets a new API signs; an older rooms Worker refuses them. Check the API's `/health` says the schema is up to date. Rooms ask the API's `/internal/rooms/access` for each resident's blocks, mutes and restrictions when they join and trust the answer for 15 seconds; while it is unavailable, nobody can join, and a resident whose answer is older than that can't act. Optional on rooms: `BLOCKED_WORDS`, staff's blocked words for room chat (comma- or newline-separated).
+7. The city: `NEXT_PUBLIC_API_URL=https://<api domain> pnpm --filter @bp/city build`, then serve it over https from the address in `ALLOWED_ORIGINS` and point the bot's Mini App at it. The API's address is baked in at build time, and a production build stops if `NEXT_PUBLIC_API_URL` is unset or isn't https.
 
 ## Notes for later bricks
 

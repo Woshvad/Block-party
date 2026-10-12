@@ -1,8 +1,12 @@
 // The live rooms Worker: one Durable Object per room copy, plus a directory
 // per place. Deploy: pnpm --filter @bp/rooms build && wrangler deploy
 // Secrets (wrangler secret put ...): TICKET_SECRET, INTERNAL_SECRET (both the
-// same as the API's). Optional: BLOCKED_WORDS, staff's blocked words for room
-// chat, comma- or newline-separated (the same list as the API's).
+// same as the API's, 32+ characters). Optional: BLOCKED_WORDS, staff's blocked
+// words for room chat, comma- or newline-separated (the same list as the API's).
+// ACCESS_TTL_MS is for tests only. README "Deploying" describes each.
+// OWNER ITEMS (placeholders, nothing here is real yet): the Cloudflare account
+// and the domains. API_URL assumes https://api.blockparty.city, and the API's
+// ROOMS_URL assumes https://rooms.blockparty.city.
 {
   "name": "block-party-rooms",
   "main": "dist/worker.js",
@@ -16,6 +20,8 @@
     ]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RoomDO", "DirectoryDO"] }],
+  // OWNER ITEM: the rooms' custom domain, once the domain is on the account,
+  // e.g. "routes": [{ "pattern": "<rooms domain>", "custom_domain": true }].
   "vars": { "API_URL": "https://api.blockparty.city" },
   "observability": { "enabled": true }
 }
