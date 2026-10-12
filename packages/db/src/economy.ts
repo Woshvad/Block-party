@@ -64,14 +64,20 @@ async function lastActiveBefore(tx: Db, userId: string, day: string, movedIn: st
   return g && g.d > movedIn ? g.d : movedIn;
 }
 
-// "owed" is never stored: that Saturday stays unrecorded and is tried again.
+// "owed" is never stored: that Saturday stays unrecorded and is tried again
+// by the same bell's final pass.
 export type RentOutcome = { saturday: string; status: "paid" | "couch" | "sublet" | "owed"; amount: number };
 
 // Charges every Saturday's rent the resident owes up to today, oldest first,
 // at most MAX_RENT_WEEKS back (older ones are forgiven, never stacked).
 // Idempotent. The bell job runs it first thing at each Saturday bell, before
-// anyone can spend, so nobody can dodge rent by spending first.
-export async function collectRent(db: Db, userId: string, opts: { now?: Date } = {}): Promise<RentOutcome[]> {
+// anyone can spend, so nobody can dodge rent by spending first. Someone short
+// in the wallet but not counting their open stakes is "owed": the bell runs
+// it again with `final` once tonight's stakes have paid out, and then what's
+// in the wallet is what there is. A stake still open past the bell doesn't
+// keep anyone off the couch, or one kept open over every Saturday would mean
+// rent was never paid.
+export async function collectRent(db: Db, userId: string, opts: { now?: Date; final?: boolean } = {}): Promise<RentOutcome[]> {
   const today = cityDay(opts.now ?? new Date());
   return db.transaction(async (tx) => {
     const r = await lockResident(tx, userId);
@@ -96,10 +102,11 @@ export async function collectRent(db: Db, userId: string, opts: { now?: Date } =
       // between "can they pay?" and the charge.
       const balance = (await lockAccounts(tx, [userAccountId(userId), burnAccountFor(userAccountId(userId)), SYS_PURSE])).get(userAccountId(userId)) ?? 0;
       if (balance < RENT.tenement) {
-        // GM out on stakes is still theirs: parking it in a stake over the
-        // bell doesn't make anyone too poor to pay. Read after the wallet's
-        // lock, so a stake coming home right now is counted once, not twice.
-        const staked = await openGmStakes(tx, userId);
+        // GM out on stakes is still theirs: a stake settling tonight doesn't
+        // make anyone too poor to pay, so the first pass waits for it. Read
+        // after the wallet's lock, so a stake coming home right now is
+        // counted once, not twice. The final pass counts the wallet alone.
+        const staked = opts.final ? 0 : await openGmStakes(tx, userId);
         if (balance + staked < RENT.tenement) {
           // Can't pay: a week on the crew's couch (or the bench). Never debt.
           await tx.insert(rentCharges).values({ userId, saturday, status: "couch" });
@@ -107,9 +114,9 @@ export async function collectRent(db: Db, userId: string, opts: { now?: Date } =
           continue;
         }
         // They can pay, but part of it is out on stakes. Never debt: this
-        // Saturday stays unrecorded, and so do the ones after it, until a later
-        // run (next Saturday's bell) finds the GM back in the wallet. If the
-        // stakes are lost by then, that run sends them to the couch.
+        // Saturday stays unrecorded, and so do the ones after it, until the
+        // bell's final pass, after tonight's payouts, charges the wallet or
+        // sends them to the couch.
         out.push({ saturday, status: "owed", amount: 0 });
         break;
       }

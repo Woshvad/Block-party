@@ -23,6 +23,7 @@ import {
   settleCityMarkets,
   stakeCity,
   supplyStats,
+  tenancy,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -245,30 +246,40 @@ describe("a stake is still the staker's GM", () => {
     expect(await sayGm(db, u, { now: day(1) })).toMatchObject({ drip: 50, brokeFloor: false });
   });
 
-  it("for rent: a stake over the Saturday bell isn't the couch; the rent waits until the stake comes home", async () => {
+  it("for rent: a stake settling at the Saturday bell isn't the couch; the rent is paid from it the same bell", async () => {
     const s = await staffer();
-    const bellDay = addDays(today, toSat + 2); // settles after the Saturday
-    const m = await createCityMarket(db, s, { question: "Does rent see stakes?", kind: "manual", bellDay }, { now: new Date() });
+    const bellDay = addDays(today, toSat - 1); // settles at the Saturday bell
+    const m = await createCityMarket(db, s, { question: "Does rent wait for tonight's stakes?", kind: "manual", bellDay }, { now: new Date() });
     const u = await makeResident(db);
     await burnTo(u, 300);
     await stakeCity(db, u, { marketId: m.id, side: "yes", stake: 75 }, { now: new Date() });
     const saturday = addDays(today, toSat);
-    // 225 in the wallet and 75 staked: they can pay, just not yet. No couch, no charge.
-    expect(await collectRent(db, u, { now: day(toSat, 1) })).toEqual([{ saturday, status: "owed", amount: 0 }]);
-    expect(await bal(u)).toBe(225);
+    // 225 in the wallet and 75 staked: they can pay, just not before the stake comes home.
+    expect(await collectRent(db, u, { now: day(toSat, 0) })).toEqual([{ saturday, status: "owed", amount: 0 }]);
     expect(await client`SELECT 1 FROM rent_charges WHERE user_id = ${u}`).toHaveLength(0);
-    // The market is voided at its bell and the stake comes home.
+    // The bell's Tower step: the market is voided and the stake comes home.
     await resolveCityMarket(db, s, m.id, "void");
-    await settleCityMarkets(db, bellDay, day(toSat + 3, 0));
-    expect(await openGmStakes(db, u)).toBe(0);
-    await sayGm(db, u, { now: day(toSat + 1) }); // still around: the next Saturday isn't a sublet
-    // The next Saturday: the owed week is paid first (350 -> 100), then this week is the couch.
-    const next = await collectRent(db, u, { now: day(toSat + 7, 1) });
-    expect(next.map((o) => [o.saturday, o.status, o.amount])).toEqual([
-      [saturday, "paid", 250],
-      [addDays(saturday, 7), "couch", 0],
-    ]);
-    expect(await bal(u)).toBe(100);
+    await settleCityMarkets(db, bellDay, day(toSat, 0));
+    // The bell's final pass: paid, 300 -> 50.
+    expect(await collectRent(db, u, { now: day(toSat, 0), final: true })).toEqual([{ saturday, status: "paid", amount: 250 }]);
+    expect(await bal(u)).toBe(50);
+  });
+
+  it("for rent: a stake kept open over the Saturday bell doesn't dodge it; the bell's final pass reads the wallet", async () => {
+    const s = await staffer();
+    const bellDay = addDays(today, toSat + 2); // settles after the Saturday
+    const m = await createCityMarket(db, s, { question: "Does a long stake dodge rent?", kind: "manual", bellDay }, { now: new Date() });
+    const u = await makeResident(db);
+    await burnTo(u, 300);
+    await stakeCity(db, u, { marketId: m.id, side: "yes", stake: 75 }, { now: new Date() });
+    const saturday = addDays(today, toSat);
+    expect(await collectRent(db, u, { now: day(toSat, 0) })).toEqual([{ saturday, status: "owed", amount: 0 }]);
+    // Nothing of theirs paid out tonight: 225 in the wallet is short, so the couch.
+    expect(await collectRent(db, u, { now: day(toSat, 0), final: true })).toEqual([{ saturday, status: "couch", amount: 0 }]);
+    expect(await bal(u)).toBe(225);
+    expect((await tenancy(db, u, { now: day(toSat, 1) })).where).not.toBe("home");
+    // Recorded: the next bell doesn't ask about this Saturday again.
+    expect(await client`SELECT status FROM rent_charges WHERE user_id = ${u} AND saturday = ${saturday}`).toEqual([{ status: "couch" }]);
   });
 
   it("until it settles", async () => {

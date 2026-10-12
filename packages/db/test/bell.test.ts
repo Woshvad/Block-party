@@ -212,6 +212,19 @@ describe("other bell steps", () => {
     // and before tonight's stakes pay out.
     const order = await runBell(db, { now: new Date(sat.getTime() + 2 * 60_000), only: ["chains", "rent"] });
     expect(Object.keys(order.ran)).toEqual(["rent", "chains"]);
+
+    // After tonight's payouts (the Tower step), a final pass charges whoever
+    // the rent step left without a charge for this Saturday, from the wallet.
+    const late = await makeResident(db); // here before the bell, missed by the rent step
+    expect(await client`SELECT 1 FROM rent_charges WHERE user_id = ${late}`).toHaveLength(0);
+    const final = await runBell(db, { now: new Date(sat.getTime() + 3 * 60_000), only: ["rent_final", "tower", "rent"] });
+    expect(Object.keys(final.ran)).toEqual(["rent", "tower", "rent_final"]);
+    expect(final.ran.rent_final).toMatchObject({ paid: expect.any(Number), couch: expect.any(Number) }); // other tests' residents may be owed too
+    expect(await bal(late)).toBe(1000 - 250);
+    expect(await bal(u)).toBe(800); // already paid: never charged twice
+    expect((await runBell(db, { now: new Date(sat.getTime() + 4 * 60_000), only: ["rent_final"] })).ran.rent_final).toBe("already done");
+    // Not on other days.
+    expect((await runBell(db, { now: friday, only: ["rent_final"] })).ran).toEqual({});
   }, 120_000);
 
   it("settles crew chains and records each step with its result", async () => {

@@ -25,7 +25,7 @@ export type BellOptions = {
   // step failing partway through the bell.
   onStep?: (step: string) => void | Promise<void>;
   // Run only these steps (ops tooling and tests). The default runs every due step.
-  only?: Array<"chains" | "rent" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts">;
+  only?: Array<"chains" | "rent" | "rent_final" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts">;
 };
 
 // Keyset pagination over a sorted id column. Each page starts strictly after
@@ -91,6 +91,40 @@ async function stepRent(db: Db, now: Date, pageSize: number): Promise<StepResult
     }
   }
   return { residents: checked, paid, couch, sublet, owed };
+}
+
+// After tonight's stakes have paid out: everyone the rent step left owing
+// (no charge recorded for this Saturday) pays from their wallet now, or
+// takes the couch. The owed state never outlives the bell.
+async function stepRentFinal(db: Db, now: Date, pageSize: number): Promise<StepResult> {
+  const saturday = cityDay(now);
+  let checked = 0;
+  let paid = 0;
+  let couch = 0;
+  const fetch = (after: string, limit: number) =>
+    db
+      .select({ id: sql<string>`${residents.userId}::text` })
+      .from(residents)
+      .where(
+        and(
+          gt(sql`${residents.userId}::text`, after),
+          // Moved in before today (a Saturday move-in owes nothing that week).
+          sql`${residents.createdAt} < ${`${saturday}T00:00:00Z`}::timestamptz`,
+          sql`NOT EXISTS (SELECT 1 FROM rent_charges c WHERE c.user_id = residents.user_id AND c.saturday = ${saturday}::date)`,
+        ),
+      )
+      .orderBy(asc(sql`${residents.userId}::text`))
+      .limit(limit);
+  for await (const page of pages(fetch, pageSize)) {
+    for (const r of page) {
+      for (const o of await collectRent(db, r.id, { now, final: true })) {
+        if (o.status === "paid") paid++;
+        else if (o.status === "couch") couch++;
+      }
+      checked++;
+    }
+  }
+  return { residents: checked, paid, couch };
 }
 
 // Halves and burns the excess above 2,000 on every resident balance and crew
@@ -168,6 +202,10 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     { day: bellDay, step: "chains", run: () => stepChains(db, now, pageSize) },
     // After the chains, so Bell Scores see tonight's chain lengths.
     { day: bellDay, step: "tower", run: () => stepTower(db, bellDay, now) },
+  );
+  // Saturday: tonight's stakes have paid out, so whoever rent left owing pays now or takes the couch.
+  if (isSaturday(today)) due.push({ day: bellDay, step: "rent_final", run: () => stepRentFinal(db, now, pageSize) });
+  due.push(
     { day: bellDay, step: "npc_lines", run: () => npcBoardLines(db, bellDay, now) },
     // The alt checks, after tonight's duels and markets have paid out.
     { day: bellDay, step: "alts", run: async () => ({ ...(await runAltChecks(db, { now })) }) },
@@ -185,7 +223,7 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     due.push({ day: seasonLastDay(season), step: "halving", run: () => stepHalving(db, season, pageSize, opts.onHalvingAccount) });
   }
 
-  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts")) : due;
+  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "rent_final" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts")) : due;
 
   // One runner at a time: a transaction-scoped advisory lock held for the
   // whole run. A runner that finds it taken returns at once (busy) instead of
