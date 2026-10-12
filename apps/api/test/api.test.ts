@@ -473,7 +473,8 @@ describe("live rooms over HTTP", () => {
     await arrive(me.userId, "roof");
     const r = await ticketFor(me.token, "roof");
     const t = await verifyRoomTicket(r.body.ticket, TICKET_SECRET);
-    expect(Object.keys(t).sort()).toEqual(["age", "crew", "exp", "frens", "h", "place", "u", "v"]);
+    expect(Object.keys(t).sort()).toEqual(["age", "crew", "exp", "frens", "h", "hidden", "place", "u", "v"]);
+    expect((t as unknown as { hidden: unknown }).hidden).toEqual([]); // only for the previous rooms Worker: always empty
     for (const other of [blockedByMe, blockedMe, muted]) expect(JSON.stringify(t)).not.toContain(other.userId);
     expect(r.body.url.length).toBeLessThan(4096);
   });
