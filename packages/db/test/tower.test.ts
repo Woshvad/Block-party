@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type FeedMarket, type GammaEvent, type GammaMarket, type OddsProvider, auraCenti, mintAccountFor, polymarketProvider, userAccountId } from "@bp/core";
+import { type FeedMarket, type GammaEvent, type GammaMarket, type KnownMarket, type OddsProvider, auraCenti, cityDay, mintAccountFor, polymarketProvider, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   TowerError,
   createDb,
   ensureSystemAccounts,
   feedStatus,
+  grantOwedStreakDays,
   makeCall,
   marketView,
   myTickets,
@@ -24,6 +25,8 @@ import {
   rightList,
   receiptBinder,
   settleCalls,
+  npcCalls,
+  todaySlate,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -670,6 +673,84 @@ describe("streak days and the poll", () => {
     for (const u of [x, y]) expect((await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 1, last_day: day });
     expect(await client`SELECT 1 FROM daily_gm WHERE user_id = ${y} AND city_day = ${day}`).toHaveLength(1);
   });
+
+  it("a streak day whose grant fails after the poll commits is granted by the next poll", async () => {
+    const t = fresh();
+    const f = feed();
+    const [mx, my] = [f.add(t), f.add(t)];
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const [x, y] = [await makeResident(db), await makeResident(db)];
+    await makeCall(db, x, { marketId: await idOf(mx.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await makeCall(db, y, { marketId: await idOf(my.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    // y's streak row is held, and this poll gives up on a lock after 200 ms,
+    // so y's grant fails once the poll has locked both calls and committed.
+    await client`INSERT INTO streaks (user_id) VALUES (${y}) ON CONFLICT DO NOTHING`;
+    const impatient = createDb(process.env.TEST_DATABASE_URL!, { max: 2, connection: { lock_timeout: 200 } });
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM streaks WHERE user_id = ${y} FOR UPDATE`;
+    let first: Awaited<ReturnType<typeof settle<Awaited<ReturnType<typeof pollOdds>>>>>;
+    try {
+      first = await settle(pollOdds(impatient.db, f.provider, { now: new Date(t + MIN) }));
+    } finally {
+      await barrier`COMMIT`;
+      barrier.release();
+      await impatient.close();
+    }
+    expect(first.ok ? "ok" : String((first.e as { cause?: { code?: string } })?.cause?.code ?? first.e)).toBe("55P03"); // lock_not_available
+    expect((await client`SELECT status FROM calls WHERE user_id IN ${client([x, y])}`).map((r) => r.status)).toEqual(["locked", "locked"]);
+    const day = new Date(t).toISOString().slice(0, 10);
+    const streak = async (u: string) => (await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0];
+    expect(await streak(x)).toMatchObject({ current: 1, last_day: day });
+    expect(await streak(y)).toMatchObject({ current: 0, last_day: null });
+
+    // The next poll has nothing new to lock, and grants y's day all the same.
+    await pollOdds(db, f.provider, { now: new Date(t + 2 * MIN) });
+    expect(await streak(y)).toMatchObject({ current: 1, last_day: day });
+    expect(await client`SELECT 1 FROM gm_transactions WHERE idempotency_key = ${`streak_bonus:${y}:${day}`}`).toHaveLength(1);
+    expect(await client`SELECT 1 FROM streak_grants WHERE user_id IN ${client([x, y])}`).toHaveLength(0);
+  });
+
+  it("an owed streak day that a later day has already passed is dropped, not retried by every poll", async () => {
+    const t = fresh();
+    const f = feed();
+    f.add(t);
+    const u = await makeResident(db);
+    const [day, next] = [new Date(t).toISOString().slice(0, 10), new Date(t + D).toISOString().slice(0, 10)];
+    // A day owed from a poll whose grant never ran, after the next day counted.
+    await client`INSERT INTO streaks (user_id) VALUES (${u}) ON CONFLICT DO NOTHING`;
+    await client`UPDATE streaks SET current = 1, longest = 1, last_day = ${next} WHERE user_id = ${u}`;
+    await client`INSERT INTO streak_grants (user_id, city_day) VALUES (${u}, ${day})`;
+    expect(await pollOdds(db, f.provider, { now: new Date(t + D + MIN) })).toMatchObject({ ok: true });
+    expect((await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 1, last_day: next });
+    expect(await client`SELECT 1 FROM streak_grants WHERE user_id = ${u}`).toHaveLength(0);
+  });
+
+  it("a resident's owed days count in order: while an earlier one fails, a later one waits", async () => {
+    const t = fresh();
+    const u = await makeResident(db);
+    const [day, next] = [new Date(t).toISOString().slice(0, 10), new Date(t + D).toISOString().slice(0, 10)];
+    await client`INSERT INTO streak_grants (user_id, city_day) VALUES (${u}, ${day}), (${u}, ${next})`;
+    // The earlier day's note is held, so its grant (which clears the note) gives up.
+    const impatient = createDb(process.env.TEST_DATABASE_URL!, { max: 2, connection: { lock_timeout: 200 } });
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM streak_grants WHERE user_id = ${u} AND city_day = ${day} FOR UPDATE`;
+    let failed: Awaited<ReturnType<typeof grantOwedStreakDays>>;
+    try {
+      failed = await grantOwedStreakDays(impatient.db);
+    } finally {
+      await barrier`COMMIT`;
+      barrier.release();
+      await impatient.close();
+    }
+    expect(String((failed?.e as { cause?: { code?: string } })?.cause?.code)).toBe("55P03");
+    expect((await client`SELECT current FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 0 });
+    // Next time both count, the earlier first.
+    expect(await grantOwedStreakDays(db)).toBeNull();
+    expect((await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 2, last_day: next });
+    expect((await client`SELECT city_day FROM streak_days WHERE user_id = ${u} ORDER BY city_day`).map((r) => r.city_day)).toEqual([day, next]);
+  });
 });
 
 // The live provider on real Gamma payloads (recorded 2026-10-11, see
@@ -725,5 +806,108 @@ describe("the live Polymarket feed, on recorded Gamma payloads", () => {
     expect(await pollOdds(db, provider, { now: new Date(at + 4 * MIN) })).toMatchObject({ ok: true, settled: 1 });
     expect(await row("pm:5304665")).toMatchObject({ status: "resolved", outcome: false });
     expect((await callRow(cc.id)).aura_centi).toBe(auraCenti(false, 34, 50));
+  });
+
+  it("a Slate card the listing drops stays callable at its live price; one Gamma stops trading goes dark, for the cast too", async () => {
+    // A day of its own, far from the other tests' Slates.
+    const at = Date.UTC(2040, 0, 1 + Math.floor(Math.random() * 3000), 9);
+    const tag = String(Math.floor(Math.random() * 1e9));
+    const gm = (id: string, yes: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      question: `Will ${id} happen?`,
+      outcomes: '["Yes", "No"]',
+      outcomePrices: `["${yes}", "${(1 - Number(yes)).toFixed(2)}"]`,
+      endDate: new Date(at + 20 * H).toISOString(),
+      closed: false,
+      acceptingOrders: true,
+      ...extra,
+    });
+    const [card, other, filler] = [`${tag}1`, `${tag}2`, `${tag}3`];
+    // What the listing shows, and what /markets?closed=false&id=... answers.
+    let listed = [gm(card, "0.46"), gm(other, "0.5"), gm(filler, "0.5")];
+    const trading = new Map([[card, gm(card, "0.40")], [other, gm(other, "0.5")]]);
+    const gamma = (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/events") return ok(u.searchParams.get("tag_slug") === "crypto" ? listed.map((m) => ({ slug: `e${m.id}`, markets: [m] })) : []);
+      if (u.searchParams.get("closed") === "false") return ok(u.searchParams.getAll("id").flatMap((id) => (trading.has(id) ? [trading.get(id)!] : [])));
+      return ok([]);
+    };
+    const provider = polymarketProvider({ fetch: gamma, log: () => {} });
+    await pollOdds(db, provider, { now: new Date(at) });
+    const row = async (ext: string) => (await client`SELECT id, price, status, in_feed FROM markets WHERE source = 'polymarket' AND external_id = ${`pm:${ext}`}`)[0]!;
+    const [cardRow, otherRow] = [await row(card), await row(other)];
+    const day = cityDay(new Date(at));
+    await client`INSERT INTO slates (city_day, modifier, published_at) VALUES (${day}, 'none', ${new Date(at).toISOString()})`;
+    await client`INSERT INTO slate_cards (city_day, slot, tier, market_id) VALUES (${day}, 1, 'coin_flip', ${cardRow.id}), (${day}, 2, 'coin_flip', ${otherRow.id})`;
+
+    // The ladder moves on: the listing drops both. The card is looked up by
+    // id and carried at its trading price; so is the other card.
+    listed = [gm(filler, "0.5")];
+    await pollOdds(db, provider, { now: new Date(at + MIN) });
+    expect(await row(card)).toMatchObject({ price: 40, status: "open", in_feed: true });
+    const u = await makeResident(db);
+    const c = await makeCall(db, u, { marketId: cardRow.id, side: "yes", chance: 60, seenPrice: 40 }, { now: new Date(at + MIN + 1000) });
+    await pollOdds(db, provider, { now: new Date(at + 2 * MIN) });
+    expect(await callRow(c.id)).toMatchObject({ status: "locked", locked_price: 40 });
+
+    // Gamma stops taking orders on the other card: off the feed, and nobody
+    // (the cast included) calls it at the stale price.
+    trading.set(other, gm(other, "0.5", { acceptingOrders: false }));
+    await pollOdds(db, provider, { now: new Date(at + 3 * MIN) });
+    expect(await row(other)).toMatchObject({ status: "open", in_feed: false });
+    await npcCalls(db, { now: new Date(at + 3 * MIN + 1000) });
+    expect(await client`SELECT 1 FROM calls WHERE market_id = ${otherRow.id}`).toHaveLength(0);
+    expect(await client`SELECT 1 FROM calls WHERE market_id = ${cardRow.id} AND user_id <> ${u}`).not.toHaveLength(0); // the carried card it does call
+    const slate = await todaySlate(db, u, { now: new Date(at + 3 * MIN + 1000) });
+    expect(slate!.credit).toBe("Odds via Polymarket · Not affiliated");
+    expect(slate!.cards.map((x) => [x.marketId, x.open])).toEqual([
+      [cardRow.id, true],
+      [otherRow.id, false],
+    ]);
+    expect(await marketView(db, u, otherRow.id, { now: new Date(at + 3 * MIN + 1000) })).toMatchObject({ status: "open", inFeed: false });
+  });
+
+  it("after a switch of feed, the old feed's markets leave the Floor and freeze on time", async () => {
+    const t = fresh();
+    const [old, next] = [feed(), feed()];
+    const oldProvider: OddsProvider = { source: `old-${randomUUID().slice(0, 8)}`, fetch: (n) => old.provider.fetch(n) };
+    const nextProvider: OddsProvider = { source: `next-${randomUUID().slice(0, 8)}`, fetch: (n) => next.provider.fetch(n) };
+    const soon = old.add(t, { freezesAt: new Date(t + 2 * MIN), settlesBy: new Date(t + H) });
+    const later = old.add(t);
+    next.add(t);
+    await pollOdds(db, oldProvider, { now: new Date(t) });
+    const [soonId, laterId] = [await idOf(soon.externalId), await idOf(later.externalId)];
+    // ODDS_SOURCE changes: only the new feed polls from now on.
+    await pollOdds(db, nextProvider, { now: new Date(t + MIN) });
+    expect((await client`SELECT in_feed FROM markets WHERE id = ${laterId}`)[0]!.in_feed).toBe(false);
+    expect((await openMarkets(db, { now: new Date(t + MIN) })).map((m) => m.id)).not.toContain(laterId);
+    const u = await makeResident(db);
+    expect(await code(makeCall(db, u, { marketId: laterId, side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + MIN + 1000) }))).toBe("MARKET_CLOSED");
+    await pollOdds(db, nextProvider, { now: new Date(t + 3 * MIN) });
+    expect((await client`SELECT status FROM markets WHERE id = ${soonId}`)[0]!.status).toBe("frozen");
+  });
+
+  it("tells the feed which markets something rides on, and which must stay live", async () => {
+    const f = feed();
+    let known: readonly KnownMarket[] = [];
+    const provider: OddsProvider = { source: `riding-${randomUUID().slice(0, 8)}`, fetch: async (now, k = []) => ((known = k), f.provider.fetch(now)) };
+    const t = Date.UTC(2045, 0, 1 + Math.floor(Math.random() * 3000), 9); // a day with no other Slate
+    const [quiet, pending, locked, slated] = [f.add(t), f.add(t), f.add(t), f.add(t)];
+    await pollOdds(db, provider, { now: new Date(t) });
+    const u = await makeResident(db);
+    await makeCall(db, u, { marketId: await idOf(locked.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await pollOdds(db, provider, { now: new Date(t + MIN) }); // locks it
+    await makeCall(db, u, { marketId: await idOf(pending.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + MIN + 1000) });
+    const day = cityDay(new Date(t));
+    await client`INSERT INTO slates (city_day, modifier, published_at) VALUES (${day}, 'none', ${new Date(t).toISOString()})`;
+    await client`INSERT INTO slate_cards (city_day, slot, tier, market_id) VALUES (${day}, 1, 'coin_flip', ${await idOf(slated.externalId)})`;
+    // The poll asks about all four, with what rides on each.
+    for (const m of [quiet, pending, locked, slated]) f.ms.delete(m.externalId);
+    await pollOdds(db, provider, { now: new Date(t + 2 * MIN) });
+    const flags = Object.fromEntries(known.map((k) => [k.externalId, [k.held, k.live]]));
+    expect(flags[quiet.externalId]).toEqual([false, false]);
+    expect(flags[pending.externalId]).toEqual([true, true]);
+    expect(flags[locked.externalId]).toEqual([true, false]);
+    expect(flags[slated.externalId]).toEqual([true, true]);
   });
 });

@@ -10,18 +10,20 @@ export type BoardRow = { left: string; right?: string; tone?: "up" | "down" | "p
 // dim: the data may be stale (the odds feed is paused), so the screen fades.
 export type Board = { title: string; rows: BoardRow[]; foot?: string; dim?: boolean };
 
-export const POLYMARKET_CREDIT = "Odds via Polymarket · Not affiliated";
 const ROWS = 6;
 
-// The odds feed, as /v1/tower/feed reports it.
-export type FeedStatus = { paused: boolean; lastTickAt: string | null };
+// The odds feed, as /v1/tower/feed reports it. `credit` names where the odds
+// came from ("Odds via Polymarket · Not affiliated", or "Sample odds · Not
+// real" for the sample feed); null when the API hasn't said.
+export type FeedStatus = { paused: boolean; lastTickAt: string | null; credit: string | null };
 
 // The feed after one refresh of a room's screens. The prices on the wall are
 // only as fresh as the last refresh where both the prices and the feed status
-// came back, so if either failed the wall counts as paused since that one.
+// came back, so if either failed the wall counts as paused since that one,
+// still credited to where those prices came from.
 export function feedAfter(prev: FeedStatus | null, pricesOk: boolean, feed: FeedStatus | null): FeedStatus {
   if (pricesOk && feed) return feed;
-  return { paused: true, lastTickAt: prev?.lastTickAt ?? null };
+  return { paused: true, lastTickAt: prev?.lastTickAt ?? null, credit: prev?.credit ?? null };
 }
 
 // "20:41" today, "Oct 9 20:41" before that, in the player's own time.
@@ -31,11 +33,13 @@ function sinceLabel(iso: string, now: number): string {
   return at.toDateString() === new Date(now).toDateString() ? time : `${at.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
-// A stale wall says so: dimmed, and the foot says since when. The credit stays.
+// A stale wall says so: dimmed, and the foot says since when. The credit is
+// the API's, so sample odds never carry Polymarket's name; without one, none.
 function feedFoot(feed: FeedStatus | null, now: number): Pick<Board, "foot" | "dim"> {
-  if (feed && !feed.paused) return { foot: POLYMARKET_CREDIT };
+  const credit = feed?.credit ?? null;
+  if (feed && !feed.paused) return credit ? { foot: credit } : {};
   const since = feed?.lastTickAt ? `Paused since ${sinceLabel(feed.lastTickAt, now)}` : "Odds paused";
-  return { foot: `${since} · ${POLYMARKET_CREDIT}`, dim: true };
+  return { foot: credit ? `${since} · ${credit}` : since, dim: true };
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);

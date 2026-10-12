@@ -7,8 +7,15 @@ loadEnv();
 
 export const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
-export async function runMigrations(url: string) {
-  const { db, close } = createDb(url, { max: 1 });
+// How long a migration may wait for a table lock before giving up. Drizzle
+// applies every pending migration in one transaction; one queued behind a
+// long-running transaction (an ALTER TABLE waiting for its lock) would make
+// every request on that table queue behind it in turn, and the pool would
+// fill. Failing fast leaves nothing changed: run it again when it's quiet.
+export const MIGRATION_LOCK_TIMEOUT_MS = 5_000;
+
+export async function runMigrations(url: string, opts: { lockTimeoutMs?: number } = {}) {
+  const { db, close } = createDb(url, { max: 1, connection: { lock_timeout: opts.lockTimeoutMs ?? MIGRATION_LOCK_TIMEOUT_MS } });
   try {
     await migrate(db, { migrationsFolder });
   } finally {

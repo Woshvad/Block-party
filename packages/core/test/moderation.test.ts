@@ -3,7 +3,7 @@ import { entropyToMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { checkMessage, containsWalletAddress, findLinks, looksLikePrivateKey, looksLikeSeedPhrase, parseBlockedWords } from "../src";
+import { checkMessage, containsWalletAddress, findLinks, hostOf, looksLikePrivateKey, looksLikeSeedPhrase, parseBlockedWords } from "../src";
 
 // Seeded phrases, so these tests can never flake on a rare unlucky draw.
 function phrases(n: number, seed: number) {
@@ -289,12 +289,55 @@ describe("bare names: any real ending, or anything shaped like an address, is a 
     expect(v.ok && v.text, link).toBe("go to [link removed] now");
   });
 
+  it.each([
+    ["go __t.me/scam__ now", "t.me/scam"],
+    ["go _telegra.ph now", "telegra.ph"],
+    ["claim at -gm-drop.xyz now", "gm-drop.xyz"],
+    ["go gm-drop.com_ now", "gm-drop.com"],
+    ["claim at x_gm-drop.com", "gm-drop.com"],
+    ["go gm-drop。xyz", "gm-drop.xyz"],
+  ])("- and _ around a name don't hide it: %s", (msg, host) => {
+    expect(findLinks(msg).map(hostOf), msg).toEqual([host.split("/")[0]]);
+    const v = checkMessage(msg, NEW);
+    expect(v.ok && v.strippedLinks, msg).toBe(1);
+    expect(v.ok && v.text, msg).not.toContain(host);
+    expect(reason(msg, FIRST_DM), msg).toBe("FIRST_DM_LINK");
+  });
+
+  it("a common word before a real ending is still a link when written as one", () => {
+    for (const link of ["claim.money", "x.com", "t.me", "free.bet/claim"]) expect(findLinks(`go ${link}`), link).toHaveLength(1);
+  });
+
   it("a long chain of subdomains is still caught", () => {
     const v = checkMessage("go to a.b.c.d.e.f.g.h.i.j.k.l.gm-drop.xyz now", NEW);
     expect(v.ok && v.text).not.toContain("gm-drop");
   });
 
-  it.each(["e.g. the roof", "i.e. tonight", "lol.ok see you", "lol.no way", "ok.so who's in", "end.Next time", "done.thanks ser", "Mr.Smith says gm", "v1.2.3 is out", "pi is 3.14", "U.S.A"])(
+  it.each([
+    "e.g. the roof",
+    "i.e. tonight",
+    "lol.ok see you",
+    "lol.no way",
+    "ok.so who's in",
+    "end.Next time",
+    "done.thanks ser",
+    "Mr.Smith says gm",
+    "v1.2.3 is out",
+    "pi is 3.14",
+    "U.S.A",
+    // Chinese and Japanese end a sentence with 。 and no space.
+    "了解。So we wait",
+    "すごい。Me too",
+    "好的。Bet on it",
+    // Abbreviations, and common words run together.
+    "the U.S.Election odds",
+    "e.g.Polymarket",
+    "i.e.the bell",
+    "a.k.a.Steve",
+    "that.is wild",
+    "nice call.Bet again",
+    "web3.js rocks",
+  ])(
     "a sentence that lost a space is not one: %s",
     (msg) => {
       expect(findLinks(msg), msg).toEqual([]);
@@ -305,8 +348,11 @@ describe("bare names: any real ending, or anything shaped like an address, is a 
   );
 });
 
+// "ᴄᴏɴɴᴇᴄᴛ ʏᴏᴜʀ ᴡᴀʟʟᴇᴛ ᴛᴏ ᴄʟᴀɪᴍ", in small capitals.
+const SMALL_CAPS_BAIT = ch(0x1d04, 0x1d0f, 0x274, 0x274, 0x1d07, 0x1d04, 0x1d1b, 0x20, 0x28f, 0x1d0f, 0x1d1c, 0x280, 0x20, 0x1d21, 0x1d00, 0x29f, 0x29f, 0x1d07, 0x1d1b, 0x20, 0x1d1b, 0x1d0f, 0x20, 0x1d04, 0x29f, 0x1d00, 0x26a, 0x1d0d);
+
 describe("lookalike letters don't hide scam bait", () => {
-  it.each([`c${CY.o}nnect your wallet to claim`, `verify y${CY.o}ur w${CY.a}llet`, "vérify your wallet"])("%s", (msg) => {
+  it.each([`c${CY.o}nnect your wallet to claim`, `verify y${CY.o}ur w${CY.a}llet`, "vérify your wallet", SMALL_CAPS_BAIT])("%s", (msg) => {
     expect(reason(msg)).toBe("SCAM");
   });
 });
@@ -333,5 +379,29 @@ describe("staff's blocked words", () => {
     const ctx = { ...OLD, blockedWords: parseBlockedWords("сука") };
     expect(reason("ты сука", ctx)).toBe("BLOCKED_WORD");
     expect(reason("cyka blyat is a meme", ctx)).toBe("OK");
+  });
+
+  it("an entry in another script reads through Latin lookalikes mixed into a word", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("сука, сука блять") };
+    // Latin c and a among the Cyrillic letters: the same word to the eye.
+    expect(reason("ты cукa", ctx)).toBe("BLOCKED_WORD");
+    const phrase = { ...OLD, blockedWords: parseBlockedWords("сука блять") };
+    expect(reason("сукa блять", phrase)).toBe("BLOCKED_WORD");
+    expect(reason("cyka blyat is a meme", ctx)).toBe("OK"); // all Latin: another word
+  });
+
+  it("numbers are never read as words", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("ass, tits, badword") };
+    for (const msg of ["I'm up 455 GM today", "Trump at 45.5% now", "price 4,55 €", "odds 71.75", "4 5 5", "won 1,455 GM at 7:15"]) {
+      expect(reason(msg, ctx), msg).toBe("OK");
+    }
+    // Digits beside letters are still leetspeak.
+    for (const msg of ["what a 4ss", "t1ts", "b 4 d w 0 r d", "a s s"]) expect(reason(msg, ctx), msg).toBe("BLOCKED_WORD");
+  });
+
+  it("an entry with no letters matches only as written", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("1488") };
+    expect(reason("1488", ctx)).toBe("BLOCKED_WORD");
+    expect(reason("i a", ctx)).toBe("OK"); // what "1488" would squash to
   });
 });

@@ -19,6 +19,7 @@ export const fakeApi = () => ({
   effects: [] as Posted[],
   effectsAvailable: true,
   effectsRefused: 0, // effect posts answered with a 503
+  refusedPlaces: [] as string[], // the place of each, in order
   effectsTooLarge: 0, // effect posts over the API's body limit, answered with a 413
 });
 
@@ -50,6 +51,7 @@ export async function startRooms(api: FakeApi, bindings: Record<string, string> 
       if (path === "/internal/rooms/effects") {
         if (!api.effectsAvailable) {
           api.effectsRefused++;
+          api.refusedPlaces.push(((await req.json()) as Posted).place);
           return new Response("unavailable", { status: 503 });
         }
         const text = await req.text();

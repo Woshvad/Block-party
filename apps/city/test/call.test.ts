@@ -1,6 +1,6 @@
 import { chanceOnSide } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { auraIf, clampChance, sliderRange } from "../src/call";
+import { auraIf, callsOpen, clampChance, sliderRange } from "../src/call";
 import { countdown, until } from "../src/clock";
 
 const SIDES = ["yes", "no"] as const;
@@ -58,5 +58,16 @@ describe("countdown", () => {
     expect(until(null, 0)).toBe("now");
     expect(until("garbage", 0)).toBe("now");
     expect(until("2026-10-10T00:00:00Z", Date.parse("2026-10-09T21:46:00Z"))).toBe("2h 14m");
+  });
+});
+
+describe("callsOpen", () => {
+  const now = Date.parse("2026-10-12T10:00:00Z");
+  const later = "2026-10-12T15:00:00Z";
+  it("takes calls only while open, unfrozen and carried by the latest poll", () => {
+    expect(callsOpen({ status: "open", inFeed: true, freezesAt: later }, now)).toBe(true);
+    expect(callsOpen({ status: "open", inFeed: false, freezesAt: later }, now)).toBe(false); // the feed dropped it: stale price
+    expect(callsOpen({ status: "frozen", inFeed: true, freezesAt: later }, now)).toBe(false);
+    expect(callsOpen({ status: "open", inFeed: true, freezesAt: "2026-10-12T09:59:00Z" }, now)).toBe(false);
   });
 });

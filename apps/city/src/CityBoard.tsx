@@ -13,10 +13,11 @@ import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
 import { useBackLayer } from "./back";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
+import { boardShown } from "./boardMode";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
-import { deviceTier } from "./quality";
+import { deviceTier, watchContext } from "./quality";
 import { haptic, initTelegram } from "./telegram";
 
 // The city board, SimCity style: an isometric view over a street grid of
@@ -225,19 +226,20 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
     void poll();
     return () => { live = false; clearTimeout(timer); };
   }, [api, active]);
-  const hall = useLoad(() => api.cityHall(), [api]);
-  const slate = useLoad(() => api.slate(), [api]);
-  // Back on the board after another screen: the Mayor, the Law and the
-  // Slate's calls may have changed meanwhile.
-  const shown = useRef(active);
+  // City Hall and the Slate, fetched once the board is first shown and again
+  // on each return to it (boardShown). Mounted hidden, they wait.
+  const seen = useRef({ shown: active, everShown: active });
+  const hall = useLoad(() => (seen.current.everShown ? api.cityHall() : Promise.resolve(undefined)), [api]);
+  const slate = useLoad(() => (seen.current.everShown ? api.slate() : Promise.resolve(undefined)), [api]);
   useEffect(() => {
-    if (active && !shown.current) {
+    const step = boardShown(seen.current, active);
+    seen.current = { shown: active, everShown: step.everShown };
+    if (step.fetch) {
       void hall.reload();
       void slate.reload();
     }
-    shown.current = active;
   }, [active]);
-  const now = useNow(1000);
+  const now = useNow(1000, active);
   const h = hall.data;
   const s = slate.data;
   const bellAt = s?.bellAt ?? nextBell(now);
@@ -266,7 +268,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   }, []);
   return (
     <div className="city-board" hidden={!active}>
-      {/* Mock values until the API is wired in phase 1. */}
+      {/* The live banner: City Hall's Mayor and this week's Law, from the API. */}
       <button className="banner" onClick={onOpenHall} disabled={!onOpenHall} aria-label="Open City Hall">
         {h?.mayor ? (
           <>
@@ -342,7 +344,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
         <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
           {/* Hidden, it draws nothing ("never") but keeps everything it built. */}
-          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }}>
+          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }} onCreated={watchContext}>
             <CityAtmosphere night={night} />
             <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
             {/* The sun, casting real shadows over the whole city. */}

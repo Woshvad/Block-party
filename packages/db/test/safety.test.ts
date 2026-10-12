@@ -11,7 +11,6 @@ import {
   moderationQueue,
   postToBoard,
   reviewModerationItem,
-  takeDownFlagged,
   allowNewDmThread,
   appealRestriction,
   blockUser,
@@ -33,6 +32,7 @@ import {
   runModerationBatch,
   unblockUser,
   unmuteUser,
+  updateName,
 } from "../src";
 import { makeResident } from "./helpers";
 
@@ -289,10 +289,11 @@ describe("flagged text stays down until staff review it", () => {
   const flagAll = (words: string[]): ModerationProvider => ({
     classify: async (ts) => ts.map((t) => ({ flagged: words.some((w) => t.includes(w)), categories: ["harassment"] })),
   });
-  // Runs the AI check over this test's items only, with the takedown hook the API uses.
-  async function check(words: string[]) {
+  // Runs the AI check over this test's items only. The batch itself takes
+  // the database's text down; no hook needed.
+  async function check(words: string[], onFlagged?: (f: { ref: string }) => Promise<void>) {
     await client`UPDATE moderation_items SET status = 'clean' WHERE status = 'pending' AND NOT (text LIKE ANY (${words.map((w) => `%${w}%`)}))`;
-    await runModerationBatch(db, flagAll(words), { onFlagged: (f) => takeDownFlagged(db, f) });
+    await runModerationBatch(db, flagAll(words), onFlagged ? { onFlagged } : {});
   }
   let weekN = 0;
   // A candidacy written straight in, in a week of its own long ago.
@@ -368,6 +369,74 @@ describe("flagged text stays down until staff review it", () => {
     expect(await pitchOf(week, runner)).toBe(PITCH_UNDER_REVIEW); // still the second pitch's hold, not the first pitch back
     await reviewModerationItem(db, mod, second.id, "restore");
     expect(await pitchOf(week, runner)).toBe(`Secondpitch ${tag}`);
+  });
+
+  it("a flagged display name shows as the @handle until staff look; a rename since is never overwritten", async () => {
+    const [mod, u, renamer] = [await staffer(), await makeResident(db), await makeResident(db)];
+    const tag = randomUUID().slice(0, 6);
+    const residentRow = async (id: string) => (await client`SELECT name, handle FROM residents WHERE user_id = ${id}`)[0]!;
+    await updateName(db, u, `Slurname ${tag}`);
+    const item = await enqueueModeration(db, { kind: "resident_name", ref: u, authorId: u, text: `Slurname ${tag}` });
+    await check([`Slurname ${tag}`]);
+    const { handle } = await residentRow(u);
+    expect((await residentRow(u)).name).toBe(handle);
+    // Staff keep it down: still the handle. Put back: the name returns.
+    expect(await reviewModerationItem(db, mod, item.id, "remove")).toMatchObject({ review: "removed" });
+    expect((await residentRow(u)).name).toBe(handle);
+    await updateName(db, u, `Slurname ${tag}`);
+    const again = await enqueueModeration(db, { kind: "resident_name", ref: u, authorId: u, text: `Slurname ${tag}` });
+    await check([`Slurname ${tag}`]);
+    await reviewModerationItem(db, mod, again.id, "restore");
+    expect((await residentRow(u)).name).toBe(`Slurname ${tag}`);
+    // A restore only replaces the @handle placeholder, never a name written since.
+    const third = await enqueueModeration(db, { kind: "resident_name", ref: u, authorId: u, text: `Slurname ${tag}` });
+    await check([`Slurname ${tag}`]);
+    await client`UPDATE residents SET name = ${`Fresh ${tag}`} WHERE user_id = ${u}`;
+    await reviewModerationItem(db, mod, third.id, "restore");
+    expect((await residentRow(u)).name).toBe(`Fresh ${tag}`);
+
+    // Renamed before the check got there: the new name stays. Renamed after
+    // the takedown: a restore of the old name leaves the new one alone.
+    await updateName(db, renamer, `Oldname ${tag}`);
+    const old = await enqueueModeration(db, { kind: "resident_name", ref: renamer, authorId: renamer, text: `Oldname ${tag}` });
+    await updateName(db, renamer, `Newname ${tag}`);
+    await enqueueModeration(db, { kind: "resident_name", ref: renamer, authorId: renamer, text: `Newname ${tag}` });
+    await check([`Oldname ${tag}`]);
+    expect((await residentRow(renamer)).name).toBe(`Newname ${tag}`);
+    await updateName(db, renamer, (await residentRow(renamer)).handle);
+    await reviewModerationItem(db, mod, old.id, "restore");
+    expect((await residentRow(renamer)).name).toBe((await residentRow(renamer)).handle);
+  });
+
+  it("text comes down with the verdict, and a failing after-commit hook never leaves the rest up", async () => {
+    const poster = await makeResident(db);
+    const tag = randomUUID().slice(0, 6);
+    const posts = [];
+    for (let i = 0; i < 3; i++) posts.push(await postToBoard(db, poster, "city_hall", `hookpost${i} ${tag}`, { now: new Date(Date.UTC(2031, 6, 1, 0, i)) }));
+    const hooked: string[] = [];
+    const run = check([`hookpost0 ${tag}`, `hookpost1 ${tag}`, `hookpost2 ${tag}`], async (f) => {
+      hooked.push(f.ref);
+      if (hooked.length === 1) throw new Error("rooms down");
+    });
+    await expect(run).rejects.toThrow("rooms down"); // the failure still reaches the caller's log
+    expect(hooked).toHaveLength(3); // every hook ran
+    const hidden = await client`SELECT hidden FROM messages WHERE id IN ${client(posts.map((p) => p.id))}`;
+    expect(hidden.map((r) => r.hidden)).toEqual([true, true, true]);
+    expect(await client`SELECT status FROM moderation_items WHERE ref IN ${client(posts.map((p) => p.id))} AND status <> 'flagged'`).toHaveLength(0);
+  });
+
+  it("staff never review their own flagged text: it goes to someone else", async () => {
+    const [mod, other] = [await staffer(), await staffer()];
+    const tag = randomUUID().slice(0, 6);
+    const crew = await createCrew(db, mod, { name: `Owncrew ${tag}` });
+    const item = await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: mod, text: crew.name });
+    await check([`Owncrew ${tag}`]);
+    expect((await moderationQueue(db, mod)).map((q) => q.id)).not.toContain(item.id);
+    expect((await moderationQueue(db, other)).map((q) => q.id)).toContain(item.id);
+    expect(await code(reviewModerationItem(db, mod, item.id, "restore"))).toBe("NOT_STAFF");
+    expect((await crewRow(crew.id)).name).toBe(CREW_NAME_UNDER_REVIEW);
+    await reviewModerationItem(db, other, item.id, "restore");
+    expect((await crewRow(crew.id)).name).toBe(`Owncrew ${tag}`);
   });
 
   it("text the AI check never managed to read waits for staff, who can take it down", async () => {

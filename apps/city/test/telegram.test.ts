@@ -99,3 +99,16 @@ describe("the start parameter", () => {
     }
   });
 });
+
+describe("every confirmation in the city", () => {
+  it("goes through confirmAction: a bare confirm() may answer no, or yes, without asking inside Telegram", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = join(__dirname, "..", "src");
+    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? files(join(dir, d.name)) : /\.tsx?$/.test(d.name) ? [join(dir, d.name)] : []));
+    const bare = files(src)
+      .filter((f) => !f.endsWith("telegram.ts")) // the one place that may fall back to the browser's
+      .flatMap((f) => readFileSync(f, "utf8").split("\n").flatMap((line, i) => (/(^|[^\w.])confirm\(|window\.confirm\(/.test(line) ? [`${f.slice(src.length + 1)}:${i + 1}`] : [])));
+    expect(bare).toEqual([]);
+  });
+});

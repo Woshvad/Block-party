@@ -41,6 +41,33 @@ function fakeHistory(start = "/") {
   };
 }
 
+// Next's app router over that history, as next/dist/client/components/
+// app-router.js treats it: its patched pushState and replaceState copy its
+// __NA marker into the entry and learn the address, unless the state already
+// carries the marker (then it's written as is). Its own popstate listener,
+// added before ours, restores the popped entry's address, and after every
+// listener has run it commits the address it knows (commit()).
+function withNextRouter(f: ReturnType<typeof fakeHistory>) {
+  const { history } = f;
+  const push = history.pushState.bind(history);
+  const replace = history.replaceState.bind(history);
+  let known = f.url();
+  const marked = (data: unknown) => ({ ...((data as object | null) ?? {}), __NA: true });
+  history.pushState = (data, title, url) => {
+    if ((data as { __NA?: boolean } | null)?.__NA) return push(data, title, url);
+    if (url) known = url;
+    return push(marked(data), title, url);
+  };
+  history.replaceState = (data, title, url) => {
+    if ((data as { __NA?: boolean } | null)?.__NA) return replace(data, title, url);
+    if (url) known = url;
+    return replace(marked(data), title, url);
+  };
+  replace(marked(null), "", known); // the page's own entry is Next's
+  f.onPop(() => void (known = f.url()));
+  return { commit: () => replace(marked(history.state), "", known), known: () => known };
+}
+
 // The stack's own deferred re-check, run by hand.
 function manual() {
   const jobs: (() => void)[] = [];
@@ -205,5 +232,41 @@ describe("in a browser", () => {
     m.run();
     h.settle();
     expect(h.url()).toBe("/#tower");
+  });
+
+  it("under Next's router too: the address set behind a guard survives Next's commit after Back", () => {
+    const h = fakeHistory("/#today");
+    const next = withNextRouter(h); // its listener comes first, as in the app
+    const m = manual();
+    const stack = new BackStack(browserHost(h.history, h.onPop), m.later);
+    const log: string[] = [];
+    // A page is open (its guard pushed); a tab tap rewrites the address, then closes the page.
+    const removePage = layer(stack, log, "page");
+    stack.replaceUrl("/#tower");
+    expect(next.known()).toBe("/#tower");
+    removePage();
+    m.run();
+    h.settle();
+    next.commit();
+    expect(h.url()).toBe("/#tower");
+    // And with the phone's Back.
+    layer(stack, log, "person");
+    stack.replaceUrl("/#more");
+    h.phoneBack();
+    m.run();
+    h.settle();
+    next.commit();
+    expect(h.url()).toBe("/#more");
+  });
+});
+
+describe("in Telegram, under Next's router", () => {
+  it("an address the app writes is one Next keeps (a refresh doesn't bring ?invite back)", () => {
+    const h = fakeHistory("/?invite=abc");
+    const next = withNextRouter(h);
+    const button = { show() {}, hide() {}, onClick() {} };
+    telegramHost(button, h.history).replaceUrl("/");
+    next.commit(); // what router.refresh() writes
+    expect(h.url()).toBe("/");
   });
 });

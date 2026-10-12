@@ -43,7 +43,7 @@ export default function TodayView({ today: t, slate: s, todayError, slateError, 
       {summary && summary.total > 0 && <div className="slate-progress"><progress value={summary.submitted} max={summary.total} aria-label="Calls submitted" /><span>{summary.submitted} of {summary.total} submitted{summary.available ? ` · ${summary.available} open` : ""}</span></div>}
       {s && s.cards.length === 0 && <EmptyState icon="▦" title="No cards to show yet" description="This Slate has no cards available. Try refreshing in a moment." action={<button className="btn light" onClick={retrySlate}>Refresh Slate</button>} />}
       <div className="slate-grid">{s?.cards.map((c) => <SlateTile key={c.marketId} c={c} now={now} onCall={() => onCall(c.marketId)} />)}</div>
-      {s && s.cards.length > 0 && <footer className="slate-footer"><p>Your grid stays sealed until the bell in <b>{until(s.bellAt, now)}</b>.</p><span>Odds via Polymarket · Not affiliated</span></footer>}
+      {s && s.cards.length > 0 && <footer className="slate-footer"><p>Your grid stays sealed until the bell in <b>{until(s.bellAt, now)}</b>.</p>{s.credit && <span>{s.credit}</span>}</footer>}
     </section>
   </main>;
 }

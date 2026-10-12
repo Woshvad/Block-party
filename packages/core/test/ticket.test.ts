@@ -58,8 +58,17 @@ describe("room tickets", () => {
     const leaky = { ...base, hidden: ["blocker"], blocked: ["blocker"], chat: false } as typeof base;
     const t = await signRoomTicket(leaky, SECRET);
     const body = JSON.parse(atob(t.split(".")[0]!.replace(/-/g, "+").replace(/_/g, "/")));
-    expect(Object.keys(body).sort()).toEqual(["age", "crew", "exp", "frens", "h", "place", "u", "v"]);
+    expect(Object.keys(body).sort()).toEqual(["age", "crew", "exp", "frens", "h", "hidden", "place", "u", "v"]);
+    expect(body.hidden).toEqual([]); // always empty: only there for the previous rooms Worker
     expect(JSON.stringify(body)).not.toContain("blocker");
+  });
+
+  it("a new ticket passes the previous release's check, so a rooms rollback still lets people in", async () => {
+    // The previous rooms Worker's shape check (verifyRoomTicket at 00f3cf0).
+    const previous = (t: Record<string, unknown>) =>
+      t?.v === 1 && typeof t.u === "string" && typeof t.place === "string" && /^[a-z0-9_:-]{1,64}$/.test(t.place) && Array.isArray(t.hidden) && Array.isArray(t.frens) && (t.blocked === undefined || Array.isArray(t.blocked));
+    const t = await signRoomTicket(base, SECRET);
+    expect(previous(JSON.parse(atob(t.split(".")[0]!.replace(/-/g, "+").replace(/_/g, "/"))))).toBe(true);
   });
 
   it("every malformed token is refused as MALFORMED or BAD_SIGNATURE, never accepted", async () => {

@@ -53,6 +53,19 @@ describe("OpenAI moderation adapter", () => {
     expect(err).toBeInstanceOf(ModerationUnavailable);
   });
 
+  it("gives up on a stalled answer, headers or body, instead of waiting forever", async () => {
+    // Never answers until the request is aborted.
+    const hang = ((_url: string, init: RequestInit) =>
+      new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+    const t = Date.now();
+    expect(await openAiModeration({ apiKey: "k", fetch: hang, timeoutMs: 30 }).classify(["a"]).catch((e) => e)).toBeInstanceOf(ModerationUnavailable);
+    // Headers, then a body that never finishes.
+    const slowBody = ((_url: string, init: RequestInit) =>
+      Promise.resolve(new Response(new ReadableStream({ start: (c) => init.signal?.addEventListener("abort", () => c.error(init.signal!.reason)) }), { status: 200 }))) as unknown as typeof fetch;
+    expect(await openAiModeration({ apiKey: "k", fetch: slowBody, timeoutMs: 30 }).classify(["a"]).catch((e) => e)).toBeInstanceOf(ModerationUnavailable);
+    expect(Date.now() - t).toBeLessThan(2_000);
+  });
+
   it("passes on Retry-After", async () => {
     const { f } = fakeFetch(() => new Response("", { status: 429, headers: { "retry-after": "17" } }));
     const err = (await openAiModeration({ apiKey: "k", fetch: f }).classify(["a"]).catch((e) => e)) as ModerationUnavailable;

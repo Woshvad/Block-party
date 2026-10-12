@@ -71,7 +71,12 @@ export const sessions = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("sessions_user_idx").on(t.userId)],
+  (t) => [
+    index("sessions_user_idx").on(t.userId),
+    // The two ways a session ends, for the sweep (sweepSessions).
+    index("sessions_expires_idx").on(t.expiresAt),
+    index("sessions_revoked_idx").on(t.revokedAt).where(sql`${t.revokedAt} IS NOT NULL`),
+  ],
 );
 
 // --- GM ledger ------------------------------------------------------------
@@ -183,6 +188,22 @@ export const streakDays = pgTable(
       .references(() => users.id),
     cityDay: date("city_day", { mode: "string" }).notNull(),
     kind: streakDayKind("kind").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.cityDay] })],
+);
+
+// Streak days a poll owes: written in the poll's transaction for each
+// resident whose call it locked, deleted in the transaction that grants the
+// day. A grant that fails, or a run cut off after the poll commits, leaves
+// its row for the next poll to grant.
+export const streakGrants = pgTable(
+  "streak_grants",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    cityDay: date("city_day", { mode: "string" }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.cityDay] })],

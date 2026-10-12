@@ -93,9 +93,11 @@ export async function cancelGrudge(db: Db, newcomerId: string, matchId: unknown,
 // an unanswered offer goes home. Every open match up to and including
 // bellDay, so a day whose bell never ran is settled by the next one.
 //
-// A match waits for its whole Slate: while a card has no result yet, or a
-// result whose calls aren't scored yet, it would count as 0 for both players
-// and could hand the pot to the wrong one. It carries to a later bell.
+// A match waits for the cards its players called: while one has no result
+// yet, or a result whose calls aren't scored yet, it would count as 0 and
+// could hand the pot to the wrong one, so it carries to a later bell. A card
+// neither of them called scores 0 for both whatever happens, so it never
+// holds their stakes (one Gamma never marks resolved could hold them for good).
 export async function settleGrudges(db: Db, bellDay: CityDay, now: Date) {
   const due = await db
     .select({ id: grudgeMatches.id })
@@ -112,27 +114,30 @@ export async function settleGrudges(db: Db, bellDay: CityDay, now: Date) {
         return;
       }
       if (m.status !== "active") return;
-      const cards = await tx
-        .select({ id: markets.id, status: markets.status })
-        .from(slateCards)
-        .innerJoin(markets, eq(markets.id, slateCards.marketId))
-        .where(eq(slateCards.cityDay, m.cityDay));
-      if (cards.some((c) => c.status !== "resolved" && c.status !== "void")) {
-        waiting++;
-        return;
-      }
-      const rows = cards.length
+      const cards = await tx.select({ id: slateCards.marketId }).from(slateCards).where(eq(slateCards.cityDay, m.cityDay));
+      // Their Slate calls, including one still waiting to lock (its market is
+      // still open, so it waits like any card without a result).
+      const theirs = cards.length
         ? await tx
-            .select({ userId: calls.userId, aura: calls.auraCenti, status: markets.status })
+            .select({ userId: calls.userId, aura: calls.auraCenti, call: calls.status, status: markets.status })
             .from(calls)
             .innerJoin(markets, eq(markets.id, calls.marketId))
-            .where(and(inArray(calls.marketId, cards.map((c) => c.id)), eq(calls.status, "locked"), eq(calls.onSlate, true), or(eq(calls.userId, m.newcomerId), eq(calls.userId, m.inviterId))))
+            .where(
+              and(
+                inArray(calls.marketId, cards.map((c) => c.id)),
+                inArray(calls.status, ["pending", "locked"]),
+                eq(calls.onSlate, true),
+                or(eq(calls.userId, m.newcomerId), eq(calls.userId, m.inviterId)),
+              ),
+            )
         : [];
       // A void card scores nobody; a resolved one must be scored before it counts.
-      if (rows.some((r) => r.status === "resolved" && r.aura === null)) {
+      const unsettled = (r: (typeof theirs)[number]) => (r.status !== "resolved" && r.status !== "void") || (r.status === "resolved" && r.aura === null);
+      if (theirs.some(unsettled)) {
         waiting++;
         return;
       }
+      const rows = theirs.filter((r) => r.call === "locked");
       const total = (u: string) => rows.filter((r) => r.userId === u).reduce((a, r) => a + (r.aura ?? 0), 0);
       const winner = grudgeWinner({ id: m.newcomerId, auraCenti: total(m.newcomerId) }, { id: m.inviterId, auraCenti: total(m.inviterId) });
       if (winner) {

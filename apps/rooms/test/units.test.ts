@@ -1,7 +1,8 @@
+import { parseBlockedWords as apiParseBlockedWords } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "../src/directory";
+import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, SYNC_MS, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "../src/directory";
 import { OUTBOX, Outbox, type OutboxStorage } from "../src/outbox";
-import { BUCKET, parseBlockedWords, takeToken } from "../src/worker";
+import { BUCKET, configProblems, parseBlockedWords, takeToken } from "../src/worker";
 
 // The rooms' pure parts, on an explicit clock. The Worker around them runs
 // in workerd in rooms.test.ts and hotpath.test.ts.
@@ -87,29 +88,74 @@ describe("the effects outbox", () => {
     expect([...data.keys()]).toEqual(["outbox"]);
   });
 
+  // No jitter: each retry lands at the end of its window.
+  const latest = () => 1;
+
   it("keeps everything through failures, backing off, and a fresh outbox picks up where it was", async () => {
     const { storage } = memoryStorage();
-    const box = new Outbox(storage);
+    const box = new Outbox(storage, OUTBOX.max, latest);
     await box.add(effects(2));
     let status = 503;
     const posts: unknown[][] = [];
     const post = async (b: unknown[]) => (posts.push(b), status);
     await box.drain(post, () => T);
-    expect(box.retryAt).toBe(T + OUTBOX.firstRetryMs);
+    expect(await box.retryAt()).toBe(T + OUTBOX.firstRetryMs);
     await box.drain(post, () => T);
-    expect(box.retryAt).toBe(T + 2 * OUTBOX.firstRetryMs);
+    expect(await box.retryAt()).toBe(T + 2 * OUTBOX.firstRetryMs);
     status = 0; // unreachable counts the same
     for (let i = 0; i < 20; i++) await box.drain(post, () => T);
-    expect(box.retryAt).toBe(T + OUTBOX.maxRetryMs);
+    expect(await box.retryAt()).toBe(T + OUTBOX.maxRetryMs);
     // A nap: a new outbox over the same storage still has both, under the same ids.
-    const again = new Outbox(storage);
+    const again = new Outbox(storage, OUTBOX.max, latest);
     expect(await again.waiting()).toBe(2);
     status = 200;
     const sent: Array<{ id: string }> = [];
     await again.drain(async (b) => (sent.push(...(b as never[])), 200), () => T);
     expect(sent.map((x) => x.id)).toEqual(["0", "1"]);
     expect(posts.every((b) => JSON.stringify(b) === JSON.stringify(posts[0]))).toBe(true); // every retry was the same batch
-    expect(again.retryAt).toBeNull();
+    expect(await again.retryAt()).toBeNull();
+  });
+
+  it("the backoff survives a nap or an eviction: a fresh outbox waits, and keeps doubling", async () => {
+    const { storage } = memoryStorage();
+    const box = new Outbox(storage, OUTBOX.max, latest);
+    await box.add(effects(1));
+    await box.drain(async () => 503, () => T);
+    await box.drain(async () => 503, () => T);
+    // The room naps: a new outbox over the same storage.
+    const woken = new Outbox(storage, OUTBOX.max, latest);
+    expect(await woken.retryAt()).toBe(T + 2 * OUTBOX.firstRetryMs);
+    expect(await woken.due(T + OUTBOX.firstRetryMs)).toBe(false);
+    expect(await woken.due(T + 2 * OUTBOX.firstRetryMs)).toBe(true);
+    await woken.drain(async () => 503, () => T + 2 * OUTBOX.firstRetryMs);
+    expect(await new Outbox(storage, OUTBOX.max, latest).retryAt()).toBe(T + 6 * OUTBOX.firstRetryMs); // the third failure: 4x
+  });
+
+  it("jitters each retry within the upper half of its window", async () => {
+    const at = async (jitter: number) => {
+      const box = new Outbox(memoryStorage().storage, OUTBOX.max, () => jitter);
+      await box.add(effects(1));
+      await box.drain(async () => 503, () => T);
+      return (await box.retryAt())! - T;
+    };
+    expect([await at(0), await at(0.5), await at(1)]).toEqual([OUTBOX.firstRetryMs / 2, (OUTBOX.firstRetryMs * 3) / 4, OUTBOX.firstRetryMs]);
+  });
+
+  it("a slow API can't hold a drain (and the alarm that waits on it) past the directory's memory", async () => {
+    const { storage } = memoryStorage();
+    const box = new Outbox(storage);
+    await box.add(effects(OUTBOX.batch * 10));
+    // An API that takes every batch, 9 seconds after it's sent.
+    let clock = T;
+    const posts: number[] = [];
+    await box.drain(async (b) => ((clock += 9_000), posts.push(b.length), 200), () => clock);
+    // Batches start at 0, 9, 18 and 27 s; none after 30 s. The rest wait for the next alarm.
+    expect(posts).toEqual([OUTBOX.batch, OUTBOX.batch, OUTBOX.batch, OUTBOX.batch]);
+    expect(await box.waiting()).toBe(OUTBOX.batch * 6);
+    expect(await box.retryAt()).toBeNull(); // nothing failed: no backoff
+    // The longest an alarm can spend in a drain, plus a sync interval, is
+    // still inside the directory's memory of the room's members.
+    expect(OUTBOX.drainMs + OUTBOX.postTimeoutMs + SYNC_MS).toBeLessThan(DIRECTORY_TTL_MS);
   });
 
   it("drops a batch the API calls malformed (400) instead of retrying it forever", async () => {
@@ -198,7 +244,7 @@ describe("the effects outbox", () => {
     expect(taken).toEqual([0, 1, 2, 3, 4, 6, 7]);
     expect(tries.map((t) => t.length)).toEqual([8, 4, 2, 2, 2, 1, 1, 1, 1]);
     expect(await box.waiting()).toBe(0);
-    expect(box.retryAt).toBeNull();
+    expect(await box.retryAt()).toBeNull();
   });
 });
 
@@ -220,9 +266,23 @@ describe("the per-socket bucket", () => {
 });
 
 describe("BLOCKED_WORDS", () => {
-  it("is comma- or newline-separated, trimmed, with blanks ignored", () => {
-    expect(parseBlockedWords(" rugpull, honeypot\r\nScamCoin\n\n,  ,")).toEqual(["rugpull", "honeypot", "ScamCoin"]);
+  it("is read exactly as the API reads it", () => {
+    expect(parseBlockedWords).toBe(apiParseBlockedWords);
+    // Symbol-only entries go: kept, "@" or "$" would read as a letter.
+    expect(parseBlockedWords(" rugpull, honeypot\r\nScamCoin\n\n,  ,@,$$,rugpull")).toEqual(["rugpull", "honeypot", "scamcoin"]);
     expect(parseBlockedWords(undefined)).toEqual([]);
     expect(parseBlockedWords("")).toEqual([]);
+  });
+});
+
+describe("the rooms config check", () => {
+  const good = { TICKET_SECRET: "t".repeat(32), INTERNAL_SECRET: "i".repeat(40) };
+  it("names each missing, short or placeholder secret, never its value", () => {
+    expect(configProblems(good)).toEqual([]);
+    expect(configProblems({})).toEqual(["TICKET_SECRET is not set", "INTERNAL_SECRET is not set"]);
+    expect(configProblems({ ...good, TICKET_SECRET: "short" })).toEqual(["TICKET_SECRET must be 32+ characters"]);
+    const placeholder = "replace-me-with-a-long-random-secret-value";
+    expect(configProblems({ ...good, INTERNAL_SECRET: placeholder })).toEqual(["INTERNAL_SECRET is still the .env.example placeholder"]);
+    expect(JSON.stringify(configProblems({ ...good, TICKET_SECRET: "short" }))).not.toContain("short\"");
   });
 });

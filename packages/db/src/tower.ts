@@ -27,13 +27,13 @@ import {
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, notInArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { areFrens } from "./chat";
-import { recordStreakDay } from "./daily";
+import { grantOwedStreakDays } from "./daily";
 import { moodState } from "./moods";
 import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
 import { ratioHeadline } from "./ratio";
 import { isOnSlate, slateModifier } from "./slate";
-import { calls, crewMembers, feedPolls, marketTicks, markets, residents, tickets, users } from "./schema";
+import { calls, crewMembers, feedPolls, marketTicks, markets, residents, streakGrants, streaks, tickets, users } from "./schema";
 
 export class TowerError extends Error {
   constructor(
@@ -121,9 +121,27 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
   if (typeof provider?.source !== "string") throw new TypeError("pollOdds needs an odds provider");
   // Our markets from this feed that aren't final yet, soonest to freeze
   // first: a feed that only lists what's trading looks these up to say what
-  // became of the ones it no longer lists.
+  // became of the ones it no longer lists. `held`: a call (and so any duel)
+  // or a Slate card rides on it, so its result comes first. `live`: it must
+  // keep its price while it trades, listed or not (a card on today's Slate,
+  // a call waiting to lock).
+  // (Spelled out: in a one-table select drizzle writes columns unqualified,
+  // and inside these subqueries "id" would then mean calls.id.)
+  const today = cityDay(now);
   const known = await db
-    .select({ externalId: markets.externalId, question: markets.question, category: markets.category, ladder: markets.ladder, freezesAt: markets.freezesAt, settlesBy: markets.settlesBy, price: markets.price })
+    .select({
+      externalId: markets.externalId,
+      question: markets.question,
+      category: markets.category,
+      ladder: markets.ladder,
+      freezesAt: markets.freezesAt,
+      settlesBy: markets.settlesBy,
+      price: markets.price,
+      held: sql<boolean>`(EXISTS (SELECT 1 FROM calls c WHERE c.market_id = markets.id AND c.status IN ('pending', 'locked'))
+        OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id))`,
+      live: sql<boolean>`(markets.status = 'open' AND (EXISTS (SELECT 1 FROM calls c WHERE c.market_id = markets.id AND c.status = 'pending')
+        OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id AND s.city_day = ${today})))`,
+    })
     .from(markets)
     .where(and(eq(markets.source, provider.source), inArray(markets.status, ["open", "frozen"])))
     .orderBy(markets.freezesAt);
@@ -143,7 +161,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     let moved = 0;
     let bad = 0;
     const carried: string[] = []; // the open markets this poll carried
-    const streakDays = new Set<string>(); // residents with a call locked, for after the commit
+    const lockedFor = new Set<string>(); // residents with a call locked: owed today's streak day
     for (const m of feed) {
       if (!validFeed(m)) {
         bad++;
@@ -212,7 +230,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
           const half = !c.onSlate && market.freezesAt.getTime() - now.getTime() < TOWER.halfAuraLastMinutes * 60_000;
           await tx.update(calls).set({ status: "locked", tickId: tick!.id, lockedPrice: tick!.price, lockedAt: now, half }).where(eq(calls.id, c.id));
           // Your streak grows with your first call of the day (the cast has no streak, and no GM).
-          if (!NPC_IDS.includes(c.userId)) streakDays.add(c.userId);
+          if (!NPC_IDS.includes(c.userId)) lockedFor.add(c.userId);
           locked++;
         } else {
           await tx.update(calls).set({ status: "price_moved" }).where(eq(calls.id, c.id));
@@ -223,14 +241,17 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     }
     // Markets this poll didn't carry: frozen once their time is up, listed or
     // not, and off the Floor meanwhile, because their last price is stale.
+    // Every source's, not just this one's: after ODDS_SOURCE changes (mock to
+    // polymarket on the same database), the old feed's markets would
+    // otherwise stay open, on the Floor and callable at prices nobody updates.
     await tx
       .update(markets)
       .set({ status: "frozen", inFeed: false })
-      .where(and(eq(markets.source, provider.source), eq(markets.status, "open"), lte(markets.freezesAt, now)));
+      .where(and(eq(markets.status, "open"), lte(markets.freezesAt, now)));
     await tx
       .update(markets)
       .set({ inFeed: false })
-      .where(and(eq(markets.source, provider.source), eq(markets.status, "open"), eq(markets.inFeed, true), notInArray(markets.id, carried)));
+      .where(and(eq(markets.status, "open"), eq(markets.inFeed, true), notInArray(markets.id, carried)));
     // Calls that can never lock: their market froze or ended first, or the feed
     // went quiet for too long. Tickets come back.
     const stale = await tx
@@ -248,27 +269,32 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       await tx.update(calls).set({ status: "expired" }).where(eq(calls.id, c.id));
       if (c.ticket) await refundTicket(tx, c.userId, now);
     }
+    // Today's streak day, owed to each resident whose call this poll locked
+    // (unless today already counted for them): noted with the poll, so a
+    // grant that fails, or a run cut off after the commit, is made by the
+    // next poll instead of lost.
+    if (lockedFor.size) {
+      const counted = await tx
+        .select({ userId: streaks.userId })
+        .from(streaks)
+        .where(and(inArray(streaks.userId, [...lockedFor]), gte(streaks.lastDay, today)));
+      for (const r of counted) lockedFor.delete(r.userId);
+      if (lockedFor.size) await tx.insert(streakGrants).values([...lockedFor].map((userId) => ({ userId, cityDay: today }))).onConflictDoNothing();
+    }
     await tx.insert(feedPolls).values({ source: provider.source, ok: true, markets: feed.length, at: now, ...(bad ? { error: `${bad} malformed market(s) skipped` } : {}) });
-    return { ok: true as const, skipped: false as const, ticked, locked, moved, expired: stale.length, bad, streakDays: [...streakDays] };
+    return { ok: true as const, skipped: false as const, ticked, locked, moved, expired: stale.length, bad };
   });
   if (result.skipped) return result;
-  const { streakDays: residents, ...counts } = result;
   // Streak days are granted once the poll has committed, one resident per
   // transaction. Minted inside the poll, they held mint shards while it went
   // on to lock more residents: the reverse of gm's order (resident, then
-  // ledger), so a gm and the poll could deadlock. Every resident's grant is
-  // tried; if any failed, the first error is thrown once calls are settled.
-  let failed: { e: unknown } | null = null;
-  for (const userId of residents) {
-    try {
-      await recordStreakDay(db, userId, { now });
-    } catch (e) {
-      failed ??= { e };
-    }
-  }
+  // ledger), so a gm and the poll could deadlock. Every owed day is tried,
+  // this poll's and any an earlier one couldn't grant; if any failed, the
+  // first error is thrown once calls are settled (its note stays).
+  const failed = await grantOwedStreakDays(db);
   const settled = (await settleCalls(db, { now })).settled;
   if (failed) throw failed.e;
-  return { ...counts, settled };
+  return { ...result, settled };
 }
 
 // --- The city's calls ------------------------------------------------------------------
@@ -608,6 +634,8 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
     question: m.question,
     category: m.category,
     status: m.status,
+    // false: the latest poll didn't carry it, so its price is stale and calls are closed.
+    inFeed: m.inFeed,
     infoOnly: m.infoOnly,
     freezesAt: m.freezesAt,
     settlesBy: m.settlesBy,

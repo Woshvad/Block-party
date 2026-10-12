@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { Api } from "../api";
 import { label } from "../palette";
 import { RESTRICT_FOR, itemPlace, itemState, resolveProblem, reviewChoices } from "../staffForms";
+import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 import { handleOf, useWho } from "../who";
@@ -242,7 +243,7 @@ function Markets({ api, act }: { api: Api; act: Act }) {
             <span>{m.question}</span>
             <span className="btnrow">
               {(["yes", "no", "void"] as const).map((r) => (
-                <button key={r} onClick={() => confirm(`Resolve "${m.question}" as ${r.toUpperCase()}?`) && act.run(() => api.resolveCityMarket(m.id, r), `Resolved ${r}`).then(() => open.reload())}>
+                <button key={r} onClick={() => ifConfirmed(`Resolve "${m.question}" as ${r.toUpperCase()}?`, () => act.run(() => api.resolveCityMarket(m.id, r), `Resolved ${r}`).then(() => open.reload()))}>
                   {r.toUpperCase()}
                 </button>
               ))}

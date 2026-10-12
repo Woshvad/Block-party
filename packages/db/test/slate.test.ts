@@ -118,6 +118,7 @@ describe("calling the Slate", () => {
     expect(s!.cards.find((c) => c.marketId === ids[1])!.mine).toMatchObject({ side: "yes", chance: 65, status: "locked" });
     expect(s!.cards.filter((c) => c.mine)).toHaveLength(1);
     expect(JSON.stringify(s)).not.toMatch(/outcome|aura/i);
+    expect(s!.credit).toBe("Sample odds · Not real"); // not Polymarket's odds, so never its name
     expect(await todaySlate(db, u, { now: new Date(t), day: "2000-01-01" })).toBeNull();
   });
 

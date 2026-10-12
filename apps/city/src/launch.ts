@@ -17,6 +17,42 @@ export function readLaunch(start: string | null | undefined, search: string): La
   return { invite, notification };
 }
 
+// A Telegram start parameter can't be taken out of the address: Telegram
+// keeps it in the signed launch data (and the tgWebAppStartParam query) and
+// hands it back on every reload of the Mini App. So the one acted on is
+// remembered for the session, and a reload gets null for it; a different
+// link, or the same one in a new session, counts again.
+export type Remembered = { get(): string | null; set(value: string): void };
+
+export function freshStart(start: string | null, taken: Remembered): string | null {
+  if (!start || taken.get() === start) return null;
+  taken.set(start);
+  return start;
+}
+
+// Session storage, guarded: it can be missing or throw (private windows,
+// cleared site data), and then only this page load remembers.
+export function sessionMemory(key: string): Remembered {
+  let memory: string | null = null;
+  return {
+    get() {
+      try {
+        return window.sessionStorage.getItem(key) ?? memory;
+      } catch {
+        return memory;
+      }
+    },
+    set(value) {
+      memory = value;
+      try {
+        window.sessionStorage.setItem(key, value);
+      } catch {
+        // this page load only
+      }
+    },
+  };
+}
+
 // The query string without the launch's own parameters, so a reload doesn't
 // act on them again.
 export function withoutLaunch(search: string): string {

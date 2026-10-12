@@ -341,12 +341,29 @@ describe("lookalike letters from other scripts", () => {
     expect(reason(() => normalizeName(name))).toBe("reserved");
   });
 
+  // Small capitals, the usual "fancy text" font, and Cherokee and Lisu letters
+  // drawn like Latin capitals. Spelled by code point.
+  const sc = (...cps: number[]) => String.fromCodePoint(...cps);
+  it.each([
+    ["admin in small capitals", sc(0x1d00, 0x1d05, 0x1d0d, 0x26a, 0x274)], // ᴀᴅᴍɪɴ
+    ["the mods in small capitals", sc(0x1d0d, 0x1d0f, 0x1d05)], // ᴍᴏᴅ
+    ["support in small capitals", sc(0xa731, 0x1d1c, 0x1d18, 0x1d18, 0x1d0f, 0x280, 0x1d1b)], // ꜱᴜᴘᴘᴏʀᴛ
+    ["the staff in small capitals", `B${sc(0x29f, 0x1d0f, 0x1d04, 0x1d0b)} P${sc(0x1d00, 0x280, 0x1d1b, 0x28f)}`], // Bʟᴏᴄᴋ Pᴀʀᴛʏ
+    ["the Faucet Fren NPC in small capitals", `${sc(0xa730, 0x1d00, 0x1d1c, 0x1d04, 0x1d07, 0x1d1b)} ${sc(0xa730, 0x280, 0x1d07, 0x274)}`], // ꜰᴀᴜᴄᴇᴛ ꜰʀᴇɴ
+    ["the Mayor with a Cherokee M", `${sc(0x13b7)}ayor`], // Ꮇayor
+    ["the Mayor with a small Cherokee M", `${sc(0xab87)}ayor`],
+    ["the Mayor with a Lisu M", `${sc(0xa4df)}ayor`],
+    ["the mods with a Cyrillic small м", `${sc(0x43c)}od`], // looks like ᴍ
+  ])("can't pass for %s", (_who, name) => {
+    expect(reason(() => normalizeName(name))).toBe("reserved");
+  });
+
   it("every default-ignorable character comes out, not just the listed ones", () => {
     expect(normalizeName(`Roof${String.fromCodePoint(0x1d173)}Rat`)).toBe("RoofRat"); // a musical format character
     expect(normalizeName(`Roof${String.fromCodePoint(0x1bca0)}Rat`)).toBe("RoofRat"); // a shorthand format control
   });
 
   it("names written in those scripts are still fine", () => {
-    for (const n of ["Ольга", "Сергей Петров", "Ναταλία", "Αλέξης"]) expect(reason(() => normalizeName(n)), n).toBe("OK");
+    for (const n of ["Ольга", "Сергей Петров", "Ναταλία", "Αλέξης", "Мария", "Томас", "Наташа"]) expect(reason(() => normalizeName(n)), n).toBe("OK");
   });
 });

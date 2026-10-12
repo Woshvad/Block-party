@@ -26,11 +26,12 @@ export async function npcCalls(db: Db, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
   const day = cityDay(now);
   const cards = await db
-    .select({ marketId: markets.id, price: markets.price, status: markets.status, freezesAt: markets.freezesAt })
+    .select({ marketId: markets.id, price: markets.price, status: markets.status, inFeed: markets.inFeed, freezesAt: markets.freezesAt })
     .from(slateCards)
     .innerJoin(markets, eq(markets.id, slateCards.marketId))
     .where(eq(slateCards.cityDay, day));
-  const open = cards.filter((c) => c.status === "open" && now < c.freezesAt);
+  // Only cards the latest poll carried: a stale price takes no calls, the cast's included.
+  const open = cards.filter((c) => c.status === "open" && c.inFeed && now < c.freezesAt);
   let made = 0;
   for (const c of open) if (await npcCall(db, "nothing_9000", c.marketId, c.price, nothingCall(c.price), now)) made++;
   if (now.getTime() - dayStart(day).getTime() >= NPC.contrarianCallsAtHour * 3_600_000 && open.length) {

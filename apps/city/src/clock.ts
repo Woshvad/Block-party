@@ -19,12 +19,16 @@ export const until = (iso: string | null | undefined, now: number) => {
 };
 
 // A clock that ticks every `everyMs` while the page is open.
-export function useNow(everyMs = 1000): number {
+// `running` false stops the ticking (a screen hidden under another), and
+// the time is brought up to date when it starts again.
+export function useNow(everyMs = 1000, running = true): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), everyMs);
     return () => clearInterval(id);
-  }, [everyMs]);
+  }, [everyMs, running]);
   return now;
 }
 

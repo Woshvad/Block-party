@@ -30,6 +30,8 @@ describe("the flagged queue", () => {
     expect(itemPlace({ kind: "board", ref: "abc" })).toBe("Board post");
     expect(itemPlace({ kind: "room", ref: "diner#3#line" })).toBe("Room line (diner)");
     expect(itemPlace({ kind: "pitch", ref: "2026-10-12:u" })).toBe("Mayor pitch");
+    expect(itemPlace({ kind: "resident_name", ref: "u" })).toBe("Resident's name");
+    expect(itemPlace({ kind: "resident_handle", ref: "u" })).toBe("Resident's handle");
   });
 
   it("offers only what can actually happen", () => {
@@ -37,6 +39,8 @@ describe("the flagged queue", () => {
     expect(verdicts("board", "flagged")).toEqual(["restore", "remove"]);
     expect(verdicts("crew_name", "flagged")).toEqual(["restore", "remove"]);
     expect(verdicts("room", "flagged")).toEqual(["remove"]); // a room line can't come back
+    expect(reviewChoices({ kind: "resident_name", status: "flagged" }).map((c) => c.label)).toEqual(["Put it back", "Keep it down"]); // it shows as the @handle
+    expect(reviewChoices({ kind: "resident_handle", status: "flagged" })[1]!.label).toBe("Handled (restrict them in Controls)"); // a handle can't change
     expect(verdicts("board", "error")).toEqual(["restore", "remove"]);
     expect(reviewChoices({ kind: "board", status: "error" })[1]!.label).toBe("Take it down"); // still up: nothing was taken down yet
   });
@@ -45,7 +49,8 @@ describe("the flagged queue", () => {
 describe("where a flagged item stands", () => {
   it("says what is down and what is still up", () => {
     expect(itemState({ kind: "board", status: "flagged", categories: ["harassment", "hate_threatening"] })).toBe("flagged: harassment, hate threatening; taken down");
-    expect(itemState({ kind: "resident_name", status: "flagged", categories: ["hate"] })).toBe("flagged: hate; still shown");
+    expect(itemState({ kind: "resident_name", status: "flagged", categories: ["hate"] })).toBe("flagged: hate; taken down");
+    expect(itemState({ kind: "resident_handle", status: "flagged", categories: ["hate"] })).toBe("flagged: hate; still shown");
     expect(itemState({ kind: "pitch", status: "error", categories: [] })).toBe("the AI check couldn't read it; still up");
   });
 });

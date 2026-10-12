@@ -1,10 +1,11 @@
 "use client";
 import { ALERT_KINDS, GM, GOALS, RENT, TRAITS } from "@bp/core";
 import { useEffect, useState } from "react";
-import { ActionKeys } from "../actionKeys";
+import { actionKeysFor } from "../actionKeys";
 import { type Api, type Me } from "../api";
 import { toggleTrait } from "../draft";
 import { label, plural } from "../palette";
+import { type Quality, deviceTier, saveQuality, savedQuality } from "../quality";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
@@ -33,7 +34,8 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
   const [name, setName] = useState(r.name);
   const [traits, setTraits] = useState<string[]>(r.traits);
   const [appeal, setAppeal] = useState<Record<string, string>>({});
-  const [keys] = useState(() => new ActionKeys());
+  const keys = actionKeysFor("me");
+  const [graphics, setGraphics] = useState<Quality | null>(() => savedQuality());
   useEffect(() => {
     setTraits(r.traits);
   }, [r.traits]);
@@ -248,6 +250,27 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
             <p className="muted">At most 3 pushes a day, never in quiet hours, and nothing about money.</p>
           </>
         )}
+      </section>
+
+      <section className="card">
+        <h2>Graphics</h2>
+        <p className="muted">Light draws the city simpler (no shadows, no strollers), for phones that run hot or close the app.</p>
+        <div className="btnrow">
+          {([null, "high", "low"] as const).map((q) => (
+            <button
+              key={q ?? "auto"}
+              className={`btn ${graphics === q ? "" : "light"}`}
+              aria-pressed={graphics === q}
+              onClick={() => {
+                saveQuality(q);
+                setGraphics(q);
+              }}
+            >
+              {q === null ? "Let the phone decide" : q === "high" ? "Full" : "Light"}
+            </button>
+          ))}
+        </div>
+        <p className="muted">Now: {deviceTier().quality === "low" ? "Light" : "Full"}. A change applies the next time the app opens.</p>
       </section>
 
       {restr.data && restr.data.length > 0 && (

@@ -1,9 +1,9 @@
-import { GM, GRUDGE, STREAK_PIECES, type StreakState, advanceStreak, cityDay, dripFor, nextBell, streakView, userAccountId } from "@bp/core";
+import { type CityDay, GM, GRUDGE, STREAK_PIECES, type StreakState, advanceStreak, cityDay, daysBetween, dripFor, mintAccountFor, nextBell, streakView, userAccountId } from "@bp/core";
 import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { grantEarned } from "./home";
-import { burn, mint } from "./ledger";
-import { badges, cityPositions, dailyGm, duels, gmEntries, gmAccounts, gmTransactions, grudgeMatches, streakDays, streaks, users } from "./schema";
+import { burn, lockAccounts, mint } from "./ledger";
+import { badges, cityPositions, dailyGm, duels, gmEntries, gmAccounts, gmTransactions, grudgeMatches, streakDays, streakGrants, streaks, users } from "./schema";
 
 export class DailyError extends Error {
   constructor(readonly code: "UNKNOWN_USER" | "HODL_FULL", message: string) {
@@ -92,6 +92,10 @@ export async function sayGm(db: Db, userId: string, opts: { now?: Date } = {}): 
       return { cityDay: day, already: true, drip: existing.drip, brokeFloor: existing.brokeFloor, balance: b!.balance };
     }
 
+    // Read under the wallet's lock (taken as the mint below will take it, in
+    // the ledger's order), as rent does: a stake paying out between reading
+    // the balance and reading the open stakes would count in neither.
+    await lockAccounts(tx, [mintAccountFor(acct), acct]);
     const netWorth = await gmNetWorth(tx, userId, now);
     const { amount, brokeFloor } = dripFor(netWorth);
     const res = await mint(tx, {
@@ -114,44 +118,96 @@ async function lockStreak(tx: Db, userId: string): Promise<StreakState> {
   return { current: row!.current, longest: row!.longest, lastDay: row!.lastDay, hodlDays: row!.hodlDays };
 }
 
+// The resident, then their streak: the order every streak change locks in.
+async function lockResidentStreak(tx: Db, userId: string): Promise<StreakState> {
+  const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update");
+  if (!u) throw new DailyError("UNKNOWN_USER", "no such resident");
+  return lockStreak(tx, userId);
+}
+
+// Counts `day` for a resident whose streak is locked: the streak, the
+// calendar, the bonus, and any card it earns. Nothing if the day already
+// counted.
+async function countStreakDay(tx: Db, userId: string, day: CityDay, before: StreakState) {
+  const r = advanceStreak(before, day);
+  if (!r.changed) return { ...r, cityDay: day };
+
+  await tx
+    .update(streaks)
+    .set({ ...r.state, updatedAt: new Date() })
+    .where(eq(streaks.userId, userId));
+  await tx.insert(streakDays).values([
+    ...r.coveredDays.map((d) => ({ userId, cityDay: d, kind: "hodl" as const })),
+    { userId, cityDay: day, kind: "played" as const },
+  ]);
+  await mint(tx, {
+    accountId: userAccountId(userId),
+    amount: r.bonus,
+    kind: "streak_bonus",
+    idempotencyKey: `streak_bonus:${userId}:${day}`,
+    meta: { cityDay: day, streak: r.state.current },
+  });
+  if (r.cards.length) {
+    await tx
+      .insert(badges)
+      .values(r.cards.map((n) => ({ userId, badge: `streak_${n}`, earnedOn: day })))
+      .onConflictDoNothing();
+    // The 30-day gm lamp and the 100-day neon: earned, never sold.
+    for (const n of r.cards) if (STREAK_PIECES[n]) await grantEarned(tx, userId, STREAK_PIECES[n]);
+  }
+  return { ...r, cityDay: day };
+}
+
 // Called when a resident does the day's qualifying thing. The plan counts
-// days with a call, so the calls brick fires this on a resident's first
-// locked call of the city day.
+// days with a call, so the poll grants a resident's first locked call of the
+// city day (through the streak days it owes, below).
 export async function recordStreakDay(db: Db, userId: string, opts: { now?: Date } = {}) {
   const day = cityDay(opts.now ?? new Date());
+  return db.transaction(async (tx) => countStreakDay(tx, userId, day, await lockResidentStreak(tx, userId)));
+}
+
+// A streak day a poll owes (see streakGrants): granted, and the note
+// cleared, in one transaction. A day that a later one has already passed
+// comes too late to change the streak, so its note just goes. Returns
+// whether the day counted now.
+export async function grantOwedStreakDay(db: Db, userId: string, day: CityDay) {
   return db.transaction(async (tx) => {
-    const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update");
-    if (!u) throw new DailyError("UNKNOWN_USER", "no such resident");
-
-    const before = await lockStreak(tx, userId);
-    const r = advanceStreak(before, day);
-    if (!r.changed) return { ...r, cityDay: day };
-
-    await tx
-      .update(streaks)
-      .set({ ...r.state, updatedAt: new Date() })
-      .where(eq(streaks.userId, userId));
-    await tx.insert(streakDays).values([
-      ...r.coveredDays.map((d) => ({ userId, cityDay: d, kind: "hodl" as const })),
-      { userId, cityDay: day, kind: "played" as const },
-    ]);
-    await mint(tx, {
-      accountId: userAccountId(userId),
-      amount: r.bonus,
-      kind: "streak_bonus",
-      idempotencyKey: `streak_bonus:${userId}:${day}`,
-      meta: { cityDay: day, streak: r.state.current },
-    });
-    if (r.cards.length) {
-      await tx
-        .insert(badges)
-        .values(r.cards.map((n) => ({ userId, badge: `streak_${n}`, earnedOn: day })))
-        .onConflictDoNothing();
-      // The 30-day gm lamp and the 100-day neon: earned, never sold.
-      for (const n of r.cards) if (STREAK_PIECES[n]) await grantEarned(tx, userId, STREAK_PIECES[n]);
-    }
-    return { ...r, cityDay: day };
+    const before = await lockResidentStreak(tx, userId);
+    const late = before.lastDay !== null && daysBetween(before.lastDay, day) < 0;
+    const counted = late ? false : (await countStreakDay(tx, userId, day, before)).changed;
+    // The note goes last. A poll noting the same day waits on this delete,
+    // and the poll can hold ledger locks the mint above waits on; deleted
+    // first, the two could wait on each other.
+    await tx.delete(streakGrants).where(and(eq(streakGrants.userId, userId), eq(streakGrants.cityDay, day)));
+    return counted;
   });
+}
+
+// Grants the streak days polls owe, oldest first, one resident per
+// transaction: this poll's, and any an earlier poll couldn't grant (a failed
+// grant, or a run cut off after its poll committed, leaves the note). Every
+// one is tried; a resident whose earlier day failed isn't tried for a later
+// one until the next poll, so their days count in order. Gives back the
+// first failure for the caller to throw.
+export async function grantOwedStreakDays(db: Db, opts: { batch?: number } = {}) {
+  const owed = await db
+    .select({ userId: streakGrants.userId, cityDay: streakGrants.cityDay })
+    .from(streakGrants)
+    .orderBy(streakGrants.cityDay, streakGrants.createdAt)
+    .limit(opts.batch ?? 1000);
+  let failed: { e: unknown } | null = null;
+  const waiting = new Set<string>();
+  // loop-bound: at most `batch` owed days; any more wait for the next poll.
+  for (const o of owed) {
+    if (waiting.has(o.userId)) continue;
+    try {
+      await grantOwedStreakDay(db, o.userId, o.cityDay);
+    } catch (e) {
+      waiting.add(o.userId);
+      failed ??= { e };
+    }
+  }
+  return failed;
 }
 
 // --- Hodl Days ------------------------------------------------------------

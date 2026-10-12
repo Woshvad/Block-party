@@ -63,11 +63,25 @@ export class BackStack {
 
 type TelegramBackButton = { show(): void; hide(): void; onClick(cb: () => void): void };
 
+// Writes the app's address into the current history entry so that Next's
+// router learns it too. Next patches replaceState and only takes the URL
+// from a state that isn't its own: one already carrying its __NA marker is
+// written as it is, and Next later puts back the address it last knew (when
+// it commits after a Back, or on router.refresh()). So its markers are left
+// out here, and its patch copies them back in.
+function writeUrl(history: Pick<History, "replaceState" | "state">, url: string) {
+  const state = history.state;
+  const ours = state && typeof state === "object" ? { ...(state as Record<string, unknown>) } : {};
+  delete ours.__NA;
+  delete ours._N;
+  history.replaceState(ours, "", url);
+}
+
 export function telegramHost(button: TelegramBackButton, history: Pick<History, "replaceState" | "state">): BackHost {
   return {
     attach: (onBack) => button.onClick(onBack),
     setOpen: (open) => (open ? button.show() : button.hide()),
-    replaceUrl: (url) => history.replaceState(history.state, "", url),
+    replaceUrl: (url) => writeUrl(history, url),
   };
 }
 
@@ -92,7 +106,7 @@ export function browserHost(history: Pick<History, "pushState" | "replaceState" 
     }
   };
   onPopState(() => {
-    if (url !== null) history.replaceState(history.state, "", url);
+    if (url !== null) writeUrl(history, url);
     if (ignoring) {
       ignoring = false;
       sync(); // something may have opened meanwhile
@@ -110,7 +124,7 @@ export function browserHost(history: Pick<History, "pushState" | "replaceState" 
     },
     replaceUrl: (u) => {
       url = u;
-      history.replaceState(history.state, "", u);
+      writeUrl(history, u);
     },
   };
 }

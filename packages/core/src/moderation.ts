@@ -192,7 +192,9 @@ function unDisguise(text: string): string {
     .replace(/\s*[[(]\s*(?:\.|dot)\s*[\])]\s*/gi, ".")
     // "evil dot com" is a disguised link; "the dot com bubble" is history.
     .replace(/(\S+)\s+dot\s+(?=[a-z]{2,}\b)/gi, (m, word: string) => (FILLER.has(word.toLowerCase()) ? m : `${word}.`))
-    .replace(/[。．｡]/g, ".");
+    // "gm-drop。xyz" is a disguised dot. After Chinese or Japanese, 。 is just
+    // the full stop, and no space follows it: "了解。So we wait".
+    .replace(/(?<![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])[。．｡]/gu, ".");
 }
 
 // Anything with a scheme or www. is a link. So is a bare name like
@@ -201,9 +203,11 @@ function unDisguise(text: string): string {
 // is a real, registrable name). At most 10 labels before the ending: real
 // names never need more, and an unbounded run lets a message of one-letter
 // labels ("ж.ж.ж...") make the match backtrack for a quarter of a second.
+// A name can't start or end with - or _, so those bound it like spaces do:
+// "__t.me/x__", "-gm-drop.xyz" and "x_gm-drop.com" all hold a link.
 const LABEL = "[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?";
 const LINK = new RegExp(
-  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|(?<![\\p{L}\\p{N}_-])(?:${LABEL}\\.){1,10}(?:\\p{L}{2,24}|xn--[a-z0-9-]{1,59})(?![\\p{L}\\p{N}_-])(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
+  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|(?<![\\p{L}\\p{N}])(?:${LABEL}\\.){1,10}(?:\\p{L}{2,24}|xn--[a-z0-9-]{1,59})(?![\\p{L}\\p{N}])(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
   "giu",
 );
 
@@ -231,15 +235,26 @@ const CHAT_WORDS = new Set(
   ),
 );
 
+// Endings that are also little English words: straight after a common word,
+// with no space, they carry on the sentence ("that.is wild", "ok.so").
+const WORD_ENDINGS = new Set("am as at be by do in is it me my no so to us".split(" "));
+// Common words a sentence breaks after ("nice call.Bet again").
+const COMMON_WORDS = new Set([...EVERYDAY, ...CHAT_WORDS, ...FILLER, ..."i it is was are be been he she we they them him us me not too here how why who".split(" ")]);
+
 // .eth and .sol names are handles, not links.
 const NOT_A_LINK = /^[a-z0-9-]+\.(?:eth|sol)$/i;
 
 // Whether a LINK match is really an address. A known ending makes it one
 // ("telegra.ph", "gm-drop.sbs"). So does an unknown ending when the rest
-// looks like an address: a path or port, a subdomain, or a digit or hyphen in
-// a name ("gm-drop.whatever", "claim.gm.whatever"). Plain "word.word" with an
-// unknown ending is a sentence that lost its space: "e.g.", "lol.ok",
-// "end.Next", "done.thanks".
+// looks like an address: a path or port, a subdomain, or a hyphen in a name
+// ("gm-drop.whatever", "claim.gm.whatever"). What reads as a sentence that
+// lost its space is not one:
+//  - plain "word.word" with an unknown ending: "lol.ok", "end.Next",
+//    "done.thanks", "web3.js";
+//  - letters with dots, one at a time: "e.g.Polymarket", "the U.S.Election",
+//    "a.k.a.Steve";
+//  - a chat word before any ending ("lol.no"), or a common word before a
+//    little word ("that.is") or before a capitalised one ("call.Bet").
 function countsAsLink(m: string): boolean {
   if (/^(?:(?:https?|ftp):\/\/|www\.)/i.test(m)) return true;
   const host = m.replace(/[:/].*$/s, "");
@@ -247,9 +262,16 @@ function countsAsLink(m: string): boolean {
   if (NOT_A_LINK.test(host)) return false;
   const labels = host.toLowerCase().split(".");
   const tld = labels.pop()!;
-  if (KNOWN_TLDS.has(tld) || tld.startsWith("xn--")) return !(labels.length === 1 && rest === "" && CHAT_WORDS.has(labels[0]!));
+  const known = KNOWN_TLDS.has(tld) || tld.startsWith("xn--");
+  if (rest === "" && labels.length === 1) {
+    const word = labels[0]!;
+    const capitalised = /^[A-Z][a-z]+$/.test(host.slice(host.lastIndexOf(".") + 1));
+    if (CHAT_WORDS.has(word) || (COMMON_WORDS.has(word) && (WORD_ENDINGS.has(tld) || capitalised))) return false;
+  }
+  if (known) return true;
   if (!/^[a-z]+$/.test(tld)) return false;
-  return rest !== "" || labels.length > 1 || labels.some((l) => /[\d-]/.test(l));
+  if (rest === "" && labels.every((l) => l.length === 1)) return false;
+  return rest !== "" || labels.length > 1 || labels.some((l) => l.includes("-"));
 }
 
 export function hostOf(link: string): string | null {
@@ -303,41 +325,62 @@ export function parseBlockedWords(raw?: string): string[] {
 // Latin letters, digits and the leetspeak stand-ins squash() reads.
 const LATIN_ENTRY = /^[a-z0-9@$\s'.-]+$/;
 
+const HAS_LETTER = /\p{L}/u;
+// A letter from some other script than Latin.
+const NON_LATIN_LETTER = /(?!\p{Script=Latin})\p{L}/u;
+
 // A blocked word counts as a whole word, read the way scam phrases are:
 // through leetspeak, lookalike letters and punctuation, so "b4dw0rd",
 // "bаdword" (Cyrillic а), "b.a.d.w.o.r.d" and "b a d w o r d" all match
-// "badword", while "notbadwordish" doesn't. An entry written in another
-// script is matched word for word as written.
+// "badword", while "notbadwordish" doesn't. Leetspeak only reads digits as
+// letters beside letters: "455", "45.5%" or "4 5 5" is a number, never "ass".
+// An entry with no letters ("1488") is matched as written. So is an entry
+// written in another script, except that a word mixing in lookalike letters
+// reads through them: "cукa" (Latin c and a) is "сука" dressed up, while
+// "cyka", all Latin, is another word.
 function hasBlockedWord(input: string, blocked: readonly string[]): boolean {
-  const tokens = cleanText(input).split(/\s+/).map(squash).filter(Boolean);
-  // Letters spaced out one at a time read as one word.
+  const pieces = cleanText(input)
+    .split(/\s+/)
+    .map((t) => ({ s: squash(t), letters: HAS_LETTER.test(t) }))
+    .filter((p) => p.s);
+  const tokens = pieces.filter((p) => p.letters).map((p) => p.s);
+  // Letters spaced out one at a time read as one word, if there's a letter among them.
   const spelled: string[] = [];
   let run = "";
-  for (const t of [...tokens, ""]) {
-    if (t.length === 1) run += t;
-    else {
-      if (run.length > 1) spelled.push(run);
+  let runHasLetter = false;
+  for (const p of [...pieces, { s: "", letters: false }]) {
+    if (p.s.length === 1) {
+      run += p.s;
+      runHasLetter ||= p.letters;
+    } else {
+      if (run.length > 1 && runHasLetter) spelled.push(run);
       run = "";
+      runHasLetter = false;
     }
   }
   const words: string[] = cleanText(input).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   const tokenSet = new Set([...tokens, ...spelled]);
-  const wordSet = new Set(words);
   // A multi-word entry matches the same words in a row.
-  const inARow = (list: string[], parts: string[], join: string) => {
-    const want = parts.join(join);
-    for (let i = 0; i + parts.length <= list.length; i++) if (list.slice(i, i + parts.length).join(join) === want) return true;
+  const inARow = <T>(list: T[], parts: string[], same: (item: T, part: string) => boolean) => {
+    for (let i = 0; i + parts.length <= list.length; i++) if (parts.every((p, j) => same(list[i + j]!, p))) return true;
     return false;
   };
+  const sameWord = (word: string, part: string) => word === part || (NON_LATIN_LETTER.test(word) && foldLookalikes(word) === foldLookalikes(part));
   return blocked.some((entry) => {
     const plain = entry.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-    if (LATIN_ENTRY.test(plain) && squash(plain)) {
+    if (LATIN_ENTRY.test(plain) && HAS_LETTER.test(plain) && squash(plain)) {
       const parts = plain.split(/\s+/).map(squash).filter(Boolean);
-      return parts.length === 1 ? tokenSet.has(parts[0]!) : inARow(tokens, parts, "") || tokenSet.has(parts.join(""));
+      return parts.length === 1 ? tokenSet.has(parts[0]!) : inARow(tokens, parts, (t, p) => t === p) || tokenSet.has(parts.join(""));
     }
     const parts = entry.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-    return parts.length === 1 ? wordSet.has(parts[0]!) : parts.length > 1 && inARow(words, parts, " ");
+    return parts.length > 0 && inARow(words, parts, sameWord);
   });
+}
+
+// The same check on its own, for text that isn't a message: display names,
+// crew names and Mayor pitches.
+export function containsBlockedWord(input: unknown, blocked: readonly string[] | undefined): boolean {
+  return typeof input === "string" && !!blocked?.length && hasBlockedWord(input, blocked);
 }
 
 // --- The verdict ----------------------------------------------------------

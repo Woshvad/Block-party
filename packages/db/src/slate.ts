@@ -1,4 +1,4 @@
-import { type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, cityDay, gridText, modifierFor, pickSlate, slateNumber, square } from "@bp/core";
+import { type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, cityDay, gridText, modifierFor, oddsCredit, pickSlate, slateNumber, square } from "@bp/core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client";
 import { calls, markets, slateCards, slates } from "./schema";
@@ -51,7 +51,7 @@ export async function todaySlate(db: Db, userId: string, opts: { now?: Date; day
   const [s] = await db.select().from(slates).where(eq(slates.cityDay, day));
   if (!s) return null;
   const cards = await db
-    .select({ slot: slateCards.slot, tier: slateCards.tier, marketId: markets.id, question: markets.question, category: markets.category, price: markets.price, freezesAt: markets.freezesAt, status: markets.status, outcome: markets.outcome })
+    .select({ slot: slateCards.slot, tier: slateCards.tier, marketId: markets.id, question: markets.question, category: markets.category, price: markets.price, freezesAt: markets.freezesAt, status: markets.status, inFeed: markets.inFeed, outcome: markets.outcome, source: markets.source })
     .from(slateCards)
     .innerJoin(markets, eq(markets.id, slateCards.marketId))
     .where(eq(slateCards.cityDay, day))
@@ -69,6 +69,9 @@ export async function todaySlate(db: Db, userId: string, opts: { now?: Date; day
     modifier: s.modifier,
     bellAt: bellAfter(day),
     sealed: !revealed,
+    // Where the cards' odds come from: Polymarket's name only when every one
+    // is Polymarket's (a sample card says so instead).
+    credit: cards.length ? oddsCredit(cards.find((c) => c.source !== "polymarket")?.source ?? "polymarket") : null,
     cards: cards.map((c) => {
       const m = mine.find((x) => x.marketId === c.marketId);
       return {
@@ -80,7 +83,8 @@ export async function todaySlate(db: Db, userId: string, opts: { now?: Date; day
         // The world's price is public; whether it settled waits for the bell.
         world: c.price,
         freezesAt: c.freezesAt,
-        open: c.status === "open" && now < c.freezesAt,
+        // Callable: open, not frozen yet, and carried by the latest poll.
+        open: c.status === "open" && c.inFeed && now < c.freezesAt,
         mine: m ? { side: m.side, chance: m.chance, status: m.status } : null,
       };
     }),

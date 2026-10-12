@@ -35,4 +35,35 @@ describe("schema status", () => {
       await sqlAdmin.end();
     }
   });
+
+  it("migrating gives up on a lock it can't get, instead of queueing everyone behind it", async () => {
+    const admin = new URL(process.env.TEST_DATABASE_URL!);
+    const name = `bp_locked_${Date.now()}_test`;
+    admin.pathname = "/postgres";
+    const sqlAdmin = postgres(admin.toString(), { max: 1, onnotice: () => {} });
+    await sqlAdmin.unsafe(`CREATE DATABASE "${name}"`);
+    const url = new URL(process.env.TEST_DATABASE_URL!);
+    url.pathname = `/${name}`;
+    const holder = postgres(url.toString(), { max: 1, onnotice: () => {} });
+    try {
+      // A long transaction holds a table the migration needs.
+      await holder.unsafe(`CREATE SCHEMA drizzle; CREATE TABLE drizzle.__drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at bigint)`);
+      const held = await holder.reserve();
+      await held`BEGIN`;
+      await held`LOCK TABLE drizzle.__drizzle_migrations IN ACCESS EXCLUSIVE MODE`;
+      try {
+        const started = Date.now();
+        const e = (await runMigrations(url.toString(), { lockTimeoutMs: 300 }).catch((x) => x)) as { cause?: { code?: string } } | undefined;
+        expect(e?.cause?.code).toBe("55P03"); // lock_not_available: the lock timeout
+        expect(Date.now() - started).toBeLessThan(5_000);
+      } finally {
+        await held`ROLLBACK`;
+        held.release();
+      }
+    } finally {
+      await holder.end();
+      await sqlAdmin.unsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+      await sqlAdmin.end();
+    }
+  });
 });

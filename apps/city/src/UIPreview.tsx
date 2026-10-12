@@ -16,7 +16,7 @@ export default function UIPreview() {
   const [active, setActive] = useState<AppTab>("today");
   const [notice, setNotice] = useState<string | null>(null);
   const today: Today = { cityDay: "preview", bellAt: new Date(epoch + 6 * 3600000).toISOString(), saidGm: state === "complete", streak: 7, longest: 12, hodlDays: 2, playedToday: false, alive: true, hodlNeeded: 0 };
-  const slate: Slate = { cityDay: "preview", number: 42, modifier: "contrarian_day", sealed: true, bellAt: today.bellAt, cards: [
+  const slate: Slate = { cityDay: "preview", number: 42, modifier: "contrarian_day", sealed: true, bellAt: today.bellAt, credit: "Sample odds · Not real", cards: [
     { slot: 0, tier: "lock", marketId: "preview-1", question: "Will the city reach its community goal this week?", category: "Community", world: 72, freezesAt: new Date(epoch + 2 * 3600000).toISOString(), open: true, mine: { side: "yes", chance: 80, status: "locked" } },
     { slot: 1, tier: "coin_flip", marketId: "preview-2", question: "Will the home side win the weekend final?", category: "Sport", world: 51, freezesAt: new Date(epoch + 3 * 3600000).toISOString(), open: true, mine: null },
     { slot: 2, tier: "spicy", marketId: "preview-3", question: "Will the new album take the top spot this Friday?", category: "Culture", world: 34, freezesAt: new Date(epoch + 4 * 3600000).toISOString(), open: true, mine: null },

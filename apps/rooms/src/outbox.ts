@@ -6,6 +6,11 @@
 //
 // Bounded: past OUTBOX.max waiting, the oldest are dropped (and logged). That
 // only happens after the API has been unreachable for a long while.
+//
+// The backoff after a failed send (5 s, doubling to 5 minutes, jittered) is
+// stored with the queue: a room naps after a few idle seconds and an empty
+// one is evicted within minutes, and a backoff kept only in memory started
+// over at 5 s every time, so thousands of rooms kept hammering a down API.
 
 export const OUTBOX = {
   max: 1000,
@@ -15,6 +20,13 @@ export const OUTBOX = {
   // of the 16 KB is room for the place, the copy and the JSON around them.
   maxBatchBytes: 12 * 1024,
   roundsPerDrain: 20, // batches per drain; the room's alarm sends the rest
+  // A drain starts no new batch after this long. The room's alarm waits for
+  // its drain, and syncs the directory only between drains; the directory
+  // forgets a room's members DIRECTORY_TTL_MS (180 s) after its last sync,
+  // so an API that is slow but answering mustn't hold the alarm for 20
+  // posts of up to postTimeoutMs each.
+  drainMs: 30_000,
+  postTimeoutMs: 10_000, // one effects post, before it counts as unreachable
   firstRetryMs: 5_000,
   maxRetryMs: 5 * 60_000,
 };
@@ -26,7 +38,8 @@ export type OutboxStorage = {
   delete(keys: string[]): Promise<unknown>;
 };
 
-type Meta = { head: number; tail: number }; // ids head..tail-1 are waiting
+// ids head..tail-1 are waiting; after failed sends, the next try waits for retryAt.
+type Meta = { head: number; tail: number; failures?: number; retryAt?: number | null };
 const META = "outbox";
 const fxKey = (id: number) => `fx:${String(id).padStart(12, "0")}`;
 const CHUNK = 100; // storage takes at most 128 keys a call
@@ -35,12 +48,13 @@ const utf8 = new TextEncoder();
 export class Outbox {
   private meta: Promise<Meta> | null = null;
   private sending: Promise<void> | null = null;
-  private failures = 0;
-  retryAt: number | null = null; // when to try again after a failed send
 
   constructor(
     private storage: OutboxStorage,
     private max = OUTBOX.max,
+    // 0..1: where in the upper half of its window a retry lands, so rooms
+    // that failed together don't all come back together.
+    private jitter: () => number = Math.random,
   ) {}
 
   private load(): Promise<Meta> {
@@ -55,10 +69,16 @@ export class Outbox {
     return this.meta;
   }
 
+  // When to try again after a failed send (null: no failure pending).
+  async retryAt(): Promise<number | null> {
+    return (await this.load()).retryAt ?? null;
+  }
+
   // After a failed send, wait for the retry time rather than trying again on
   // every new effect while the API is down.
-  due(now: number): boolean {
-    return this.retryAt === null || now >= this.retryAt;
+  async due(now: number): Promise<boolean> {
+    const at = await this.retryAt();
+    return at === null || now >= at;
   }
 
   async waiting(): Promise<number> {
@@ -99,9 +119,11 @@ export class Outbox {
 
   private async send(post: (effects: unknown[]) => Promise<number>, now: () => number) {
     const m = await this.load();
+    const started = now();
     let most = OUTBOX.batch; // effects per request; a 413 halves it
-    // loop-bound: at most OUTBOX.roundsPerDrain batches, and it stops when nothing is waiting
-    for (let round = 0; round < OUTBOX.roundsPerDrain && m.head < m.tail; round++) {
+    // loop-bound: at most OUTBOX.roundsPerDrain batches, none started after
+    // OUTBOX.drainMs, and it stops when nothing is waiting
+    for (let round = 0; round < OUTBOX.roundsPerDrain && m.head < m.tail && now() - started < OUTBOX.drainMs; round++) {
       const from = m.head;
       const keys = Array.from({ length: Math.min(m.tail, from + most) - from }, (_, i) => fxKey(from + i));
       const rows = await this.storage.get(keys);
@@ -128,17 +150,19 @@ export class Outbox {
       // effect means it's too big on its own: neither will ever succeed.
       const hopeless = status === 400 || status === 413;
       if (!ok && !hopeless) {
-        this.failures++;
-        this.retryAt = now() + Math.min(OUTBOX.maxRetryMs, OUTBOX.firstRetryMs * 2 ** (this.failures - 1));
-        console.warn(`rooms: effects not delivered (${status || "unreachable"}); ${m.tail - m.head} waiting, retry in ${this.retryAt - now()} ms`);
+        m.failures = (m.failures ?? 0) + 1;
+        const wait = Math.min(OUTBOX.maxRetryMs, OUTBOX.firstRetryMs * 2 ** (m.failures - 1));
+        m.retryAt = now() + Math.round(wait * (0.5 + this.jitter() / 2));
+        await this.storage.put({ [META]: { ...m } });
+        console.warn(`rooms: effects not delivered (${status || "unreachable"}); ${m.tail - m.head} waiting, retry in ${m.retryAt - now()} ms`);
         return;
       }
       if (!ok) console.error(`rooms: the API refused ${batch.length} effects (${status}); dropped them`);
       m.head = Math.max(m.head, to);
+      m.failures = 0;
+      m.retryAt = null;
       await this.storage.put({ [META]: { ...m } });
       await this.remove(keys.slice(0, to - from));
-      this.failures = 0;
-      this.retryAt = null;
     }
   }
 

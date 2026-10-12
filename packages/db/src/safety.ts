@@ -6,7 +6,7 @@ import {
   type ReportReason,
   crewNameKey,
 } from "@bp/core";
-import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
 import {
@@ -22,6 +22,7 @@ import {
   mutes,
   ratioEntries,
   reports,
+  residents,
   restrictions,
   rivalries,
   staff,
@@ -349,7 +350,10 @@ export const MAX_MODERATION_ATTEMPTS = 5;
 // Claims a batch with SKIP LOCKED (so parallel workers never check the same
 // item), asks the provider, and records the answer. If the provider fails,
 // nothing is marked clean: the items stay pending, and after 5 failed
-// attempts they go to staff as "error".
+// attempts they go to staff as "error". Flagged text the database holds
+// comes down in the same transaction as the verdict, so a verdict can never
+// commit without its takedown, and staff reviewing the item wait for both.
+// onFlagged runs after commit, for text that lives elsewhere (room lines).
 export async function runModerationBatch(
   db: Db,
   provider: ModerationProvider,
@@ -389,14 +393,25 @@ export async function runModerationBatch(
         .where(eq(moderationItems.id, b.id));
       if (r.flagged) {
         flagged++;
-        flaggedItems.push({ id: b.id, kind: b.kind, ref: b.ref, authorId: b.authorId, text: b.text, categories: r.categories });
+        const f = { id: b.id, kind: b.kind, ref: b.ref, authorId: b.authorId, text: b.text, categories: r.categories };
+        await takeDownFlagged(tx, f);
+        flaggedItems.push(f);
       }
     }
     return { checked: batch.length, flagged, failed: 0 };
   });
-  // Hooks run after commit (take the text down where it lives). Staff see
-  // every flagged and failed item in moderationQueue.
-  for (const f of flaggedItems) await opts.onFlagged?.(f);
+  // Every hook gets its turn, even if one fails; the first failure is thrown
+  // afterwards so the caller logs it. Staff see every flagged and failed
+  // item in moderationQueue.
+  let failure: unknown = null;
+  for (const f of flaggedItems) {
+    try {
+      await opts.onFlagged?.(f);
+    } catch (e) {
+      failure ??= e;
+    }
+  }
+  if (failure) throw failure;
   return outcome;
 }
 
@@ -415,10 +430,11 @@ type Takeable = { id?: string; kind: string; ref: string; text: string };
 
 // Takes flagged text down where it lives: board, crew and DM messages and
 // Ratio headlines are hidden; a pitch or crew name is swapped for the
-// placeholder above, but only while it still says what was flagged (a newer
-// pitch or a rename is checked on its own). Room lines live in the rooms
-// Worker, so the API takes those down. Resident names stay up: the handle is
-// fixed by a database guard, and staff deal with the resident instead.
+// placeholder above, and a resident's display name for their @handle, but
+// only while it still says what was flagged (a newer pitch or a rename is
+// checked on its own). Room lines live in the rooms Worker, so the API takes
+// those down. A handle can't change (a database guard), so a flagged handle
+// stays up and staff deal with the resident instead.
 export async function takeDownFlagged(db: Db, item: Takeable) {
   const { kind, ref, text } = item;
   if (typeof ref !== "string" || typeof text !== "string") return;
@@ -437,12 +453,14 @@ export async function takeDownFlagged(db: Db, item: Takeable) {
   } else if (kind === "crew_name") {
     // The name key stays, so nobody else can take the name while it's under review.
     if (UUID.test(ref)) await db.update(crews).set({ name: CREW_NAME_UNDER_REVIEW }).where(and(eq(crews.id, ref.toLowerCase()), eq(crews.name, text)));
+  } else if (kind === "resident_name") {
+    if (UUID.test(ref)) await db.update(residents).set({ name: sql`${residents.handle}` }).where(and(eq(residents.userId, ref.toLowerCase()), eq(residents.name, text)));
   }
 }
 
-// Staff found it was fine: the text goes back up. A pitch or crew name comes
-// back only if it still shows the placeholder and nothing newer has been
-// written there since.
+// Staff found it was fine: the text goes back up. A pitch, crew name or
+// resident's name comes back only if it still shows the placeholder and
+// nothing newer has been written there since.
 async function putBack(tx: Db, item: Takeable & { id: string }) {
   const { kind, ref, text } = item;
   // Compared in the database: a JavaScript Date drops the microseconds.
@@ -479,11 +497,19 @@ async function putBack(tx: Db, item: Takeable & { id: string }) {
         .set({ name: text })
         .where(and(eq(crews.id, ref.toLowerCase()), eq(crews.name, CREW_NAME_UNDER_REVIEW), eq(crews.nameKey, crewNameKey(text))));
     }
+  } else if (kind === "resident_name") {
+    if (UUID.test(ref) && !(await newer())) {
+      await tx
+        .update(residents)
+        .set({ name: text })
+        .where(and(eq(residents.userId, ref.toLowerCase()), sql`${residents.name} = ${residents.handle}`));
+    }
   }
 }
 
 // The staff queue: everything the AI check flagged, and everything it
 // couldn't check after 5 tries, that no one has reviewed yet. Oldest first.
+// A staff member's own text goes to someone else.
 export async function moderationQueue(db: Db, staffId: string) {
   await requireStaff(db, staffId);
   return db
@@ -500,7 +526,13 @@ export async function moderationQueue(db: Db, staffId: string) {
       checkedAt: moderationItems.checkedAt,
     })
     .from(moderationItems)
-    .where(and(inArray(moderationItems.status, ["flagged", "error"]), isNull(moderationItems.reviewedAt)))
+    .where(
+      and(
+        inArray(moderationItems.status, ["flagged", "error"]),
+        isNull(moderationItems.reviewedAt),
+        or(isNull(moderationItems.authorId), ne(moderationItems.authorId, staffId)),
+      ),
+    )
     .orderBy(asc(moderationItems.createdAt))
     .limit(200);
 }
@@ -517,6 +549,8 @@ export async function reviewModerationItem(db: Db, staffId: string, itemId: unkn
   return db.transaction(async (tx) => {
     const [item] = await tx.select().from(moderationItems).where(eq(moderationItems.id, itemId.toLowerCase())).for("no key update");
     if (!item || (item.status !== "flagged" && item.status !== "error") || item.reviewedAt) throw new SafetyError("NO_SUCH_ITEM", "nothing to review there");
+    // Nobody judges their own text, as with appeals.
+    if (item.authorId === staffId) throw new SafetyError("NOT_STAFF", "another staff member must review your own text");
     if (verdict === "restore") {
       if (item.status === "flagged") await putBack(tx, item);
     } else {

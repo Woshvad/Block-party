@@ -200,7 +200,10 @@ describe("rate limits", () => {
     expect(codes).toEqual([201, 201, 429]);
     const blocked = await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict });
     expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
-    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, via: strict })).status).toBe(201);
+    // Another address, fresh: the harness's default ones are shared with every
+    // test file, and their guest sign-ups this hour count against this limit.
+    const other = `100.64.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip: other, via: strict })).status).toBe(201);
   });
 
   it("writes are capped per player, reads counted separately", async () => {
@@ -408,6 +411,13 @@ describe("safety over HTTP", () => {
     const u = await resident();
     const [q] = await client`SELECT count(*)::int AS n FROM moderation_items WHERE author_id = ${u.userId} AND kind = 'resident_name'`;
     expect(q!.n).toBe(1);
+    // The name alone (so a flagged one can come down to the handle), and the handle on its own.
+    const queued = await client`SELECT kind, text FROM moderation_items WHERE author_id = ${u.userId} AND kind LIKE 'resident_%' ORDER BY kind`;
+    const [me] = await client`SELECT name, handle FROM residents WHERE user_id = ${u.userId}`;
+    expect(queued.map((r) => [r.kind, r.text])).toEqual([
+      ["resident_handle", me!.handle],
+      ["resident_name", me!.name],
+    ]);
     expect((await call("POST", "/internal/moderation/run", { headers: { "x-internal-secret": SECRET } })).status).toBe(503);
     const withAi = makeApp({ moderation: { classify: async (ts) => ts.map(() => ({ flagged: false, categories: [] })) } });
     const ran = await call("POST", "/internal/moderation/run", { headers: { "x-internal-secret": SECRET }, via: withAi });
@@ -466,7 +476,8 @@ describe("live rooms over HTTP", () => {
     await arrive(me.userId, "roof");
     const r = await ticketFor(me.token, "roof");
     const t = await verifyRoomTicket(r.body.ticket, TICKET_SECRET);
-    expect(Object.keys(t).sort()).toEqual(["age", "crew", "exp", "frens", "h", "place", "u", "v"]);
+    expect(Object.keys(t).sort()).toEqual(["age", "crew", "exp", "frens", "h", "hidden", "place", "u", "v"]);
+    expect((t as unknown as { hidden: unknown }).hidden).toEqual([]); // only for the previous rooms Worker: always empty
     for (const other of [blockedByMe, blockedMe, muted]) expect(JSON.stringify(t)).not.toContain(other.userId);
     expect(r.body.url.length).toBeLessThan(4096);
   });

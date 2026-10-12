@@ -132,6 +132,18 @@ describe("sessions", () => {
     expect(left.map((r) => r.id as string).sort()).toEqual([...kept].sort());
     expect(await resolveSession(db, g.sessionToken)).not.toBeNull();
   });
+
+  it("the sweep finds ended sessions by index, not by reading every session", async () => {
+    // A scan ruled out, the sweep's lookup must find an index for each way a
+    // session ends; without one the plan falls back to reading the table.
+    const plan = (await client.begin(async (tx) => {
+      await tx`SET LOCAL enable_seqscan = off`;
+      return tx`EXPLAIN SELECT id FROM sessions WHERE expires_at < ${"1990-01-01T00:00:00Z"}::timestamptz OR revoked_at < ${"1990-01-01T00:00:00Z"}::timestamptz LIMIT 5000`;
+    })) as unknown as Array<{ "QUERY PLAN": string }>;
+    const text = plan.map((r) => r["QUERY PLAN"]).join("\n");
+    expect(text).toMatch(/Index Cond: .*expires_at </);
+    expect(text).toMatch(/Index Cond: .*revoked_at </);
+  });
 });
 
 describe("telegram sign-in", () => {

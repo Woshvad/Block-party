@@ -17,8 +17,9 @@ Needs Node 22.12+ (vitest 5 needs it), pnpm 10, and Postgres 15 on localhost.
 ```bash
 pnpm install
 cp .env.example .env
-# Fresh local secrets, to paste over the placeholders in .env:
-node -e "for (const k of ['INTERNAL_SECRET', 'TICKET_SECRET', 'PON_PEPPER']) console.log(k + '=' + require('crypto').randomBytes(24).toString('base64url'))"
+# Fresh local secrets and a made-up bot token of the right shape, to paste
+# over the placeholders in .env:
+node -e "const r = (n) => require('crypto').randomBytes(n).toString('base64url'); for (const k of ['INTERNAL_SECRET', 'TICKET_SECRET', 'PON_PEPPER']) console.log(k + '=' + r(24)); console.log('TELEGRAM_BOT_TOKEN=' + (1e9 + require('crypto').randomInt(9e8)) + ':' + r(27))"
 createdb blockparty
 pnpm db:migrate
 pnpm test
@@ -29,7 +30,9 @@ The API refuses to run without a real-looking `TELEGRAM_BOT_TOKEN` (`<bot id>:<3
 
 Every package's scripts, the dev server and the test suites read this root `.env`, after a `.env` in their own package if there is one; a variable already set in the environment (as in CI) always wins.
 
-Tests drop and recreate `blockparty_test` on every run (the name must end in `_test`).
+Tests drop and recreate their databases on every run: the db suite uses `TEST_DATABASE_URL`'s (`blockparty_test`; the name must end in `_test`), and the API suite one named after it (`blockparty_api_test`).
+
+A database migrated on a branch whose migrations were later renumbered (the safety lane's `0043_moderation_review`, now `0047`) can't move forward: drizzle applies only migrations newer than the last one it recorded, so it would skip `0043_market_feed` and then fail at `0047`. Drop and recreate it (`dropdb blockparty && createdb blockparty && pnpm db:migrate`).
 
 ## Bricks
 
@@ -68,7 +71,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    - **Aura:** exact integer math in hundredths, property-tested to reward saying what you really believe.
 24. **The Tower, part 2: settling, receipts and the Right List** (done).
    - **Settling:** when a market resolves, every locked call is scored once from the tick it locked on (half in the last 30 minutes; a Tail scores 0; a voided market scores nobody). Racing settlers can't double-score, and the database refuses it anyway.
-   - **Streaks:** a locked call records the day's streak, so streaks and their GM bonus finally grow.
+   - **Streaks:** a locked call records the day's streak, so streaks and their GM bonus finally grow. The poll notes the day it owes (`streak_grants`) with the lock and grants it once it has committed; a grant that fails, or a run cut off in between, is made by the next poll.
    - **Receipts:** a public link per call, signed so it can't be faked or guessed, sealed ("IN THE MEMPOOL") until the bell after settlement, then stamped CALLED IT or REKT with its Aura. Never an amount, a wallet, a user id or whether it was real.
    - **The Right List:** season Aura ÷ (settled calls + 15), revealed results only, 10 settled calls to appear, Tails excluded, rusty after 14 days without a call, and a new season starting from 25% of last season's Aura per call.
 25. **The Daily Slate** (done).
@@ -180,7 +183,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 
 **Owner items first.** None of these exist yet, and the config only holds marked placeholders for them (`OWNER ITEM` in both `wrangler.jsonc` files): the Cloudflare account, the Postgres database and its Hyperdrive id, the domains, the bot token from @BotFather, Polymarket's written OK for free calls, and somewhere to host the city.
 
-1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
+1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`. Pending migrations apply in one transaction, and the runner waits at most 5 seconds for a table lock, then stops with nothing changed: run it again when it's quiet. On a ledger of millions of entries, first build migration 0045's index without blocking writes, `CREATE INDEX CONCURRENTLY IF NOT EXISTS "gm_entries_account_time_idx" ON "gm_entries" USING btree ("account_id","created_at");`, and the migration then finds it there. Likewise migration 0049's two session indexes on a big sessions table (the statements are in its header).
 2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc` in place of `REPLACE_WITH_HYPERDRIVE_ID`.
 3. Domains. The config assumes the city at `https://blockparty.city` (the API's `ALLOWED_ORIGINS`), the API at `https://api.blockparty.city` (the rooms' `API_URL`) and the rooms at `https://rooms.blockparty.city` (the API's `ROOMS_URL`). Give each Worker its custom domain (the commented `routes` line in its `wrangler.jsonc`) or change those vars: on `workers.dev` alone the two Workers can't reach each other at these addresses.
 4. Secrets, with `wrangler secret put NAME` in each Worker's directory. A fresh shared secret: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
@@ -194,13 +197,13 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
    | `PON_PEPPER` | API | Hashes phone numbers and wallets for Proof of Neighbour. 32+ characters. The PoN routes still answer 503 until a phone or crypto-proof provider is configured too, and none is built yet. |
    | `OPENAI_API_KEY` | API | The AI moderation check (OpenAI's free moderation endpoint). |
    | `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | API | Privy sign-in (the app id and the verification key's PEM from the Privy dashboard). Without both, or with a key that won't load (it's logged), only `/v1/auth/privy` is off (503). |
-   | `BLOCKED_WORDS` | API and rooms | Optional. Staff's blocked words for chat, comma- or newline-separated. |
+   | `BLOCKED_WORDS` | API and rooms | Optional. Staff's blocked words for chat, display names, crew names and Mayor pitches, comma- or newline-separated. |
    | `CITY_URL` | API | Optional. The city's address, for the Open button on pushes (`<CITY_URL>/?n=<notification id>`); plain-text pushes without it. Playing within 6 hours of a push also counts as opening it. |
 
    The API refuses to serve without the bot token or with a secret it uses under 32 characters or still a `.env.example` placeholder: every request gets a 500, `/health` lists the problems by name, and the cron doesn't run.
 5. Vars live in `wrangler.jsonc`, not secrets. The API: `ODDS_SOURCE` (`polymarket`, the live read-only feed; `mock` for a sample feed on staging; unset, no markets and no Slate), `ALLOWED_ORIGINS`, `ROOMS_URL`, and the switches `FEATURE_DUELS`, `FEATURE_TOWER_LIGHTS` and `FEATURE_REAL_MONEY` (off unless `"on"`). The rooms: `API_URL`; `ACCESS_TTL_MS` is for tests only.
-6. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Rooms go first so they already accept the slimmer tickets a new API signs; an older rooms Worker refuses them. Check the API's `/health` says the schema is up to date. Rooms ask the API's `/internal/rooms/access` for each resident's blocks, mutes and restrictions when they join and trust the answer for 15 seconds; while it is unavailable, nobody can join, and a resident whose answer is older than that can't act. Optional on rooms: `BLOCKED_WORDS`, staff's blocked words for room chat (comma- or newline-separated).
-7. The city: `NEXT_PUBLIC_API_URL=https://<api domain> pnpm --filter @bp/city build`, then serve it over https from the address in `ALLOWED_ORIGINS` and point the bot's Mini App at it. The API's address is baked in at build time, and a production build stops if `NEXT_PUBLIC_API_URL` is unset or isn't https.
+6. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Rooms go first so they already ask the API for each resident's lists. For one release a new API's tickets still carry an empty `hidden` list, which an older rooms Worker requires, so rolling the rooms back still lets people in. Check the API's `/health` says the schema is up to date, and the rooms Worker's `/health` says `ok` (with a missing, short or placeholder `TICKET_SECRET` or `INTERNAL_SECRET` it lists the problem there and refuses every connection with a 500). Rooms ask the API's `/internal/rooms/access` for each resident's blocks, mutes and restrictions when they join and trust the answer for 15 seconds; while it is unavailable, nobody can join, and a resident whose answer is older than that can't act. Optional on rooms: `BLOCKED_WORDS`, staff's blocked words for room chat (comma- or newline-separated).
+7. The city: `NEXT_PUBLIC_API_URL=https://<api domain> NEXT_PUBLIC_TG_APP_URL=https://t.me/<bot>/<app> pnpm --filter @bp/city build`, then serve it over https from the address in `ALLOWED_ORIGINS` and point the bot's Mini App at it. Both are baked in at build time. A production build stops if `NEXT_PUBLIC_API_URL` is unset or isn't https. Without `NEXT_PUBLIC_TG_APP_URL` (the Mini App's own link, from @BotFather) it only warns, but crew invites are then web links, which inside Telegram open the in-app browser as a guest who can't join, and guests aren't offered the Mini App.
 
 ## Notes for later bricks
 
@@ -211,7 +214,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 - **Sharding and old idempotency keys.** A posting's idempotency hash includes its account ids, so retrying a mint or burn that was first posted before sharding (to a resident now on shard 1 to 15) is refused as a conflict. Harmless before launch; never re-shard a live database without a plan for in-flight retries.
 - **Mood hooks.** The bell grants Called It and REKT (`grantMood`); grids, Snaps and daily losses call `maybeTilt`; rooms call `grantMood(cozy)` and `endCozy`; a nap in your own bed grants Rested. Stakes and real trades must read `moodState(...).tilt` before accepting.
 - **Voting in person.** Now live: the API reads City Hall presence from the rooms Worker. Ballot secrecy holds against players and staff tools; a database superuser reading Postgres internals could still infer the most recent vote.
-- **Moderation wiring.** Chat must run `checkMessage` before sending, `enqueueModeration` after, attach evidence from stored messages when filing reports, and check `isRestricted(chat_mute)`, `isBlockedEitherWay`, `isMuted` and `allowNewDmThread`. The profanity list is empty by default: choose a maintained list and set it as `BLOCKED_WORDS` (comma- or newline-separated) on the API and rooms Workers. With `OPENAI_API_KEY` set, the minute cron runs the AI check over the queue; flagged text comes down where it lives (pitches and crew names show a placeholder) and waits in the staff console's Flagged tab with anything the check couldn't read. A flagged @handle can't be changed yet: the `resident_immutable` trigger fixes handles, so staff restrict the resident instead.
+- **Moderation wiring.** Chat must run `checkMessage` before sending, `enqueueModeration` after, attach evidence from stored messages when filing reports, and check `isRestricted(chat_mute)`, `isBlockedEitherWay`, `isMuted` and `allowNewDmThread`. The profanity list is empty by default: choose a maintained list and set it as `BLOCKED_WORDS` (comma- or newline-separated) on the API and rooms Workers. With `OPENAI_API_KEY` set, the minute cron runs the AI check over the queue; flagged text comes down where it lives (pitches and crew names show a placeholder, a display name shows the @handle) and waits in the staff console's Flagged tab with anything the check couldn't read. A flagged @handle can't be changed yet: the `resident_immutable` trigger fixes handles, so staff restrict the resident instead.
 - **Away list at scale.** `awayAt` scans residents seen in the last 7 days on each call (rooms cache it 15 minutes). Fine for the beta; before launch, precompute per place per slot.
 - **Notification hooks.** Later bricks call `notify(...)` for their events (faded, Snap, syndicate shake, warm-up settled, shift done). The daily scheduler (brick 22) pings for live streaks; once calls exist, add "something of theirs is riding" as a reason, and note streaks only advance when the calls brick calls `recordStreakDay`. The crew bot calls `crewBotPostAllowed` before posting. Telegram only delivers to residents who have started the bot; others come back as `no_channel`.
 - **Proof of Neighbour providers.** Plug in a phone verifier (Twilio Verify or similar), crypto-proof verifiers (Alchemy for wallet age, EAS on Base for Coinbase Verification, World ID) and a `PON_PEPPER`. Until then the routes answer 503.

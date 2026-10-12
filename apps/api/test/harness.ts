@@ -2,7 +2,8 @@ import { pickForMe, seededRandomInt, signTelegramInitData } from "@bp/core";
 import { createDb, ensureSystemAccounts } from "@bp/db";
 import { type AppConfig, createApp } from "../src/app";
 
-export const BOT = "999:API_TEST";
+// Shaped like a real token: the Worker refuses to serve with anything else.
+export const BOT = "999:API_TEST_TOKEN_0123456789abcdefghijkl";
 export const SECRET = "s".repeat(40);
 export const ORIGIN = "https://city.blockparty.test";
 

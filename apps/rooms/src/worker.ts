@@ -9,6 +9,7 @@ import {
   TicketError,
   checkMessage,
   chooseCopy,
+  parseBlockedWords,
   verifyRoomTicket,
 } from "@bp/core";
 import { type DirState, SYNC_MS, copyInfos, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "./directory";
@@ -59,6 +60,20 @@ function timingSafeEqual(a: string, b: string) {
 }
 
 const internalOk = (req: Request, env: Env) => env.INTERNAL_SECRET?.length >= 32 && timingSafeEqual(req.headers.get("x-internal-secret") ?? "", env.INTERNAL_SECRET);
+
+// Why this Worker can't run safely, by setting name, never value: a missing
+// or short secret lets anyone write tickets or call the internal routes, and
+// a .env.example placeholder is public. The same rules as the API's.
+export function configProblems(env: Partial<Pick<Env, "TICKET_SECRET" | "INTERNAL_SECRET">>): string[] {
+  const problems: string[] = [];
+  for (const name of ["TICKET_SECRET", "INTERNAL_SECRET"] as const) {
+    const value = env[name];
+    if (!value) problems.push(`${name} is not set`);
+    else if (value.length < 32) problems.push(`${name} must be 32+ characters`);
+    else if (/replace-(me|with)/i.test(value)) problems.push(`${name} is still the .env.example placeholder`);
+  }
+  return problems;
+}
 
 // How a room closes a socket. The city treats 4000-4002 as final and says
 // why (apps/city/src/roomSocket.ts); after anything else it reconnects.
@@ -111,12 +126,9 @@ function readAttachment(ws: WebSocket): Attachment | null {
   return a && typeof a.u === "string" ? a : null;
 }
 
-// BLOCKED_WORDS: comma- or newline-separated, trimmed, blanks ignored.
-export const parseBlockedWords = (raw: string | undefined): string[] =>
-  (raw ?? "")
-    .split(/[,\n]/)
-    .map((w) => w.trim())
-    .filter(Boolean);
+// BLOCKED_WORDS is read by the same parser as the API's, so one list blocks
+// the same text in rooms as on boards, crew chat and DMs.
+export { parseBlockedWords };
 
 const visitEnd = (userId: string) => ({ kind: "visit_end", userId, at: Date.now() }) as unknown as Effect;
 
@@ -125,7 +137,14 @@ const visitEnd = (userId: string) => ({ kind: "visit_end", userId, at: Date.now(
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/health") return json({ ok: true });
+    // Misconfigured: /health lists why, and everything else is refused, so a
+    // deploy with a bad secret is loud instead of quietly letting nobody in.
+    const problems = configProblems(env);
+    if (url.pathname === "/health") return json(problems.length ? { ok: false, config: problems } : { ok: true }, problems.length ? 500 : 200);
+    if (problems.length) {
+      console.error("rooms: refusing requests, the config is unsafe", { problems });
+      return json({ error: "MISCONFIGURED", message: "the rooms Worker isn't set up right; see /health" }, 500);
+    }
 
     if (url.pathname === "/connect") {
       if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "expected a websocket" }, 426);
@@ -446,13 +465,23 @@ export class RoomDO implements DurableObject {
 
   // --- Leaving -----------------------------------------------------------------
 
+  // A leave doesn't wait for an access check, and after a nap every member
+  // wakes with empty block lists. So "left" only goes where both sides'
+  // lists are known again: otherwise someone who blocked the leaver (or was
+  // blocked by them) would learn they'd been in the room. Everyone still
+  // gets the new headcount.
+  private leaving(ds: Delivery[], leaver: string): Delivery[] {
+    const leaverKnown = this.checkedAt.has(leaver);
+    return ds.map((d) => (d.event.t === "left" ? { ...d, to: leaverKnown ? d.to.filter((u) => this.checkedAt.has(u)) : [] } : d));
+  }
+
   private async disconnect(e: RoomEngine, userId: string, code: number, reason: string) {
     for (const ws of this.sockets(userId)) {
       ws.serializeAttachment(null);
       closeSocket(ws, code, reason);
     }
     const out = e.isHere(userId) ? e.leave(userId, Date.now()) : null;
-    if (out) this.deliver(out.deliveries);
+    if (out) this.deliver(this.leaving(out.deliveries, userId));
     this.forgetResident(userId);
     // The directory hears about it even when this room had already forgotten
     // them, so its entry can't outlive the socket.
@@ -465,11 +494,17 @@ export class RoomDO implements DurableObject {
   private async gone(ws: WebSocket) {
     const a = readAttachment(ws);
     if (!a) return;
-    const e = await this.ensure();
+    let e = await this.ensure();
     // Still connected on another socket (the newer tab): stay.
     if (this.sockets(a.u).some((s) => s !== ws && s.readyState === WebSocket.OPEN)) return;
+    // Lists unknown since a nap: ask once, so "left" reaches everyone who may
+    // see it (see leaving). If the API can't answer, fewer hear it.
+    if (!this.allKnown(e)) {
+      await this.check(e, []).catch(() => undefined);
+      e = await this.ensure();
+    }
     const out = e.leave(a.u, Date.now());
-    this.deliver(out.deliveries);
+    this.deliver(this.leaving(out.deliveries, a.u));
     this.forgetResident(a.u);
     await this.toDirectory("/left", { copy: this.copy, u: a.u });
     await this.afterEvent(e, [...out.effects, visitEnd(a.u)]);
@@ -514,10 +549,12 @@ export class RoomDO implements DurableObject {
   }
 
   private sendEffects() {
-    if (!this.outbox.due(Date.now())) return; // backing off; the alarm will try
+    const box = this.outbox;
     this.ctx.waitUntil(
-      this.outbox
-        .drain((batch) => this.postEffects(batch), () => Date.now())
+      box
+        .due(Date.now())
+        // Backing off: the alarm will try.
+        .then((due) => (due ? box.drain((batch) => this.postEffects(batch), () => Date.now()) : undefined))
         .then(() => this.scheduleAlarm())
         .catch((err) => console.error(`rooms: sending effects failed: ${String(err)}`)),
     );
@@ -531,7 +568,7 @@ export class RoomDO implements DurableObject {
         method: "POST",
         headers: { "content-type": "application/json", "x-internal-secret": this.env.INTERNAL_SECRET },
         body: JSON.stringify({ place: this.place, copy: this.copy, effects }),
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(OUTBOX.postTimeoutMs),
       });
       await res.body?.cancel();
       return res.status;
@@ -587,7 +624,7 @@ export class RoomDO implements DurableObject {
     const cozy = e?.nextWake(now);
     if (typeof cozy === "number") due.push(cozy);
     if (e && e.members.size > 0) due.push(this.syncedAt + SYNC_MS);
-    if (this.env.API_URL && (await this.outbox.waiting()) > 0) due.push(this.outbox.retryAt ?? now + OUTBOX.firstRetryMs);
+    if (this.env.API_URL && (await this.outbox.waiting()) > 0) due.push((await this.outbox.retryAt()) ?? now + OUTBOX.firstRetryMs);
     if (!due.length) return;
     const at = Math.max(now, Math.min(...due));
     if (at === this.alarmAt) return;
@@ -752,7 +789,9 @@ export class RoomDO implements DurableObject {
     this.deliver(out.deliveries);
     // Waking for the alarm already sent the member list; otherwise it's due.
     if (e.members.size > 0 && now - this.syncedAt >= SYNC_MS / 2) await this.syncDirectory(e);
-    if (this.env.API_URL && this.outbox.due(now)) await this.outbox.drain((batch) => this.postEffects(batch), () => Date.now());
+    // A drain starts no batch after OUTBOX.drainMs, so a slow API can't keep
+    // the next alarm (and its sync) waiting past the directory's memory.
+    if (this.env.API_URL && (await this.outbox.due(now))) await this.outbox.drain((batch) => this.postEffects(batch), () => Date.now());
     await this.afterEvent(e, out.effects);
   }
 }

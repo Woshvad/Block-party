@@ -22,8 +22,9 @@ const LOCAL = "http://local.invalid";
 
 // The file a model's texture was read from, as a path next to the model
 // ("/assets/kenney/roads/Textures/colormap.png"), or null when there's no
-// file to name: a picture packed inside the model, or a texture the loader
-// copied without saying where from. Those keep their own copy.
+// file to name: a picture packed inside the model (it keeps its own copy),
+// or a texture the loader copied without saying where from (a texCoord 1
+// slot is a clone of the map; it follows its source, see shareModelImages).
 export function imageUrl(modelUrl: string, gltf: Pick<LoadedGltf, "parser">, texture: object): string | null {
   const index = gltf.parser.associations.get(texture)?.textures;
   if (index === undefined) return null;
@@ -38,39 +39,51 @@ export function imageUrl(modelUrl: string, gltf: Pick<LoadedGltf, "parser">, tex
 // own cache. The GPU copy belongs to the renderer and goes with it.
 const sources = new Map<string, THREE.Source>();
 
-// Points the texture at the shared source for its file. The first texture
-// seen for a file lends its own source; a later one's copy is no longer used,
-// so a decoded bitmap is closed at once rather than left for the collector.
-export function shareImage(key: string, texture: THREE.Texture) {
+// The shared source for a file. The first source seen for it is the one
+// everyone shares.
+function sharedSource(key: string, own: THREE.Source): THREE.Source {
   const shared = sources.get(key);
-  if (!shared) {
-    sources.set(key, texture.source);
-    return;
-  }
-  if (texture.source === shared) return;
-  const own = texture.source.data as { close?: () => void } | null;
-  texture.source = shared;
-  if (own && own !== shared.data && typeof own.close === "function") own.close();
+  if (shared) return shared;
+  sources.set(key, own);
+  return own;
 }
 
 // Every texture in a freshly loaded model, pointed at the shared sources.
 // Once per model: the loader caches the model, so this runs on its first use.
+// It goes by source, not texture: the loader gives a texCoord 1 slot a clone
+// of the map, sharing the map's source but untraceable to a file, and a
+// clone left on a source whose picture was closed would draw nothing. So
+// every texture on a replaced source moves, and only then is the replaced
+// copy's decoded bitmap closed (rather than left for the collector).
 const done = new WeakSet<object>();
 export function shareModelImages(modelUrl: string, gltf: LoadedGltf) {
   if (done.has(gltf)) return;
   done.add(gltf);
+  const textures = new Set<THREE.Texture>();
   gltf.scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
     for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       for (const value of Object.values(material)) {
         const texture = value as THREE.Texture | null;
-        if (!texture?.isTexture) continue;
-        const key = imageUrl(modelUrl, gltf, texture);
-        if (key) shareImage(key, texture);
+        if (texture?.isTexture) textures.add(texture);
       }
     }
   });
+  const swap = new Map<THREE.Source, THREE.Source>();
+  for (const texture of textures) {
+    if (swap.has(texture.source)) continue;
+    const key = imageUrl(modelUrl, gltf, texture);
+    if (key) swap.set(texture.source, sharedSource(key, texture.source));
+  }
+  for (const texture of textures) {
+    const shared = swap.get(texture.source);
+    if (shared) texture.source = shared;
+  }
+  for (const [own, shared] of swap) {
+    const bitmap = own.data as { close?: () => void } | null;
+    if (own !== shared && bitmap && bitmap !== shared.data && typeof bitmap.close === "function") bitmap.close();
+  }
 }
 
 // The night window mask (see Kit.tsx), built once per image source rather

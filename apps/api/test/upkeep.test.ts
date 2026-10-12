@@ -1,19 +1,21 @@
+import type { OddsProvider } from "@bp/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { ipBucketKey } from "../src/app";
 import { runMinute } from "../src/cron";
-import { SECRET, call, client, close, db, makeApp, resident } from "./harness";
+import { SECRET, call, client, close, db, makeApp, resident, telegramInit } from "./harness";
 
 afterAll(close);
 
 describe("rate limits keep no client IPs", () => {
   it("per-IP buckets hold a keyed hash of the address, and still limit each address", async () => {
     const ip = `203.0.113.${Math.floor(Math.random() * 250)}`;
-    // Not the harness's sequential 10.0.x.y: other files may have used those in the last hour.
-    const other = `100.64.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
     const strict = makeApp({ limits: { guestsPerIpPerHour: 1 } });
     expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(201);
     expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(429);
-    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip: other, via: strict })).status).toBe(201); // another address
+    // Another address, fresh: the harness's default ones are shared with every
+    // test file, and their guest sign-ups this hour count against this limit of 1.
+    const other = `100.64.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip: other, via: strict })).status).toBe(201);
     expect((await call("GET", "/v1/receipts/not-a-receipt", { ip })).status).toBe(404);
 
     expect(await client`SELECT bucket FROM rate_limits WHERE bucket LIKE ${`%${ip}%`}`).toHaveLength(0);
@@ -21,6 +23,21 @@ describe("rate limits keep no client IPs", () => {
     expect(key).toMatch(/^[0-9a-f]{32}$/);
     const buckets = (await client`SELECT DISTINCT bucket FROM rate_limits WHERE bucket LIKE ${`%${key}%`}`).map((r) => r.bucket as string).sort();
     expect(buckets).toEqual([`ip:${key}:auth`, `ip:${key}:guest`, `receipt-ip:${key}`]);
+  });
+
+  it("Telegram sign-in keys its buckets the same way, and forged launch data shares the IP's auth budget", async () => {
+    const ip = `198.51.100.${Math.floor(Math.random() * 250)}`;
+    const strict = makeApp({ limits: { authPerIpPerMinute: 1 } });
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip, via: strict })).status).toBe(200);
+    // One guest sign-in uses up this address's auth budget; forged launch data
+    // then counts against the same bucket, not a second one of its own.
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(201);
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: "user=%7B%7D&hash=00", ageAck: true }, ip, via: strict })).status).toBe(429);
+
+    expect(await client`SELECT bucket FROM rate_limits WHERE bucket LIKE ${`%${ip}%`}`).toHaveLength(0);
+    const key = await ipBucketKey(SECRET, ip);
+    const buckets = (await client`SELECT DISTINCT bucket FROM rate_limits WHERE bucket LIKE ${`%${key}%`}`).map((r) => r.bucket as string).sort();
+    expect(buckets).toEqual([`ip:${key}:auth`, `ip:${key}:auth-telegram`, `ip:${key}:guest`]);
   });
 
   it("the hash is keyed with the server's secret", async () => {
@@ -57,5 +74,18 @@ describe("the minute cron's sweeps", () => {
     expect(await buckets()).toEqual([`open:${tag}`]);
     expect(await sessions()).toEqual([signedOutRecently]);
     expect((await call("GET", "/v1/me", { token: me.token })).status).toBe(200); // a live session is never touched
+  });
+});
+
+describe("the minute cron's odds", () => {
+  it("the Slate and the cast still run when the poll throws, and the poll's failure is its own", async () => {
+    // A provider pollOdds refuses outright: the poll job rejects.
+    const broken = { source: undefined, fetch: async () => [] } as unknown as OddsProvider;
+    const at = new Date();
+    at.setUTCMinutes(1, 0, 0); // no sweeps, no daily pings
+    const results = await runMinute(db, at, { odds: broken });
+    const job = (name: string) => results.find((r) => r.job === name);
+    expect(job("odds")).toMatchObject({ status: "rejected" });
+    expect(job("slate")).toMatchObject({ status: "fulfilled" });
   });
 });

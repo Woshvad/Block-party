@@ -73,6 +73,24 @@ describe("sharing a pack's palette", () => {
     expect((road.maps[0]!.source.data as Bitmap).closed).toBe(false);
   });
 
+  it("moves a texture the loader cloned without a record (a texCoord 1 slot) along with its map", () => {
+    const a = model("Textures/colormap.png");
+    shareModelImages("/assets/kenney/commercial/building-a.glb", a.gltf);
+    // A later model: its map is traceable, its aoMap is GLTFLoader's clone of
+    // the map (same source, no association).
+    const b = model("Textures/colormap.png");
+    const map = b.maps[0]!;
+    const own = map.source.data as Bitmap;
+    const ao = map.clone();
+    ((b.gltf.scene.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial).aoMap = ao;
+    expect(ao.source).toBe(map.source);
+    shareModelImages("/assets/kenney/commercial/building-b.glb", b.gltf);
+    expect(map.source).toBe(a.maps[0]!.source);
+    expect(ao.source).toBe(a.maps[0]!.source); // not left on the closed copy
+    expect(own.closed).toBe(true);
+    expect((ao.source.data as Bitmap).closed).toBe(false);
+  });
+
   it("handles a model once, however often it's used", () => {
     const a = model("Textures/colormap.png");
     shareModelImages("/assets/kenney/suburban/house.glb", a.gltf);

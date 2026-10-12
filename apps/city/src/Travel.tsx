@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ActionKeys } from "./actionKeys";
+import { actionKeysFor } from "./actionKeys";
 import { ApiError, type Api, type Whereabouts } from "./api";
 import { countdown, useNow } from "./clock";
 import { PLACE_INFO, RIDE_OPTIONS, type RideMode, areaOf, placeName } from "./places";
@@ -18,7 +18,7 @@ export default function Travel({ api, place, gm, ridesFree, onArrive, onCancel }
   const [where, setWhere] = useState<Whereabouts | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<RideMode | null>(null);
-  const [keys] = useState(() => new ActionKeys());
+  const keys = actionKeysFor("rides");
   const now = useNow(250);
 
   const look = async () => {

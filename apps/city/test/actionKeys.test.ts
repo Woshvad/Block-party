@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ActionKeys, outcomeUnknown } from "../src/actionKeys";
+import { ActionKeys, KEY_TTL_MS, actionKeysFor, outcomeUnknown, sessionKeys } from "../src/actionKeys";
 import { ApiError, createApi, memoryTokenStore } from "../src/api";
 
 // Numbered keys, so a test can say which one went out.
@@ -80,5 +80,45 @@ describe("idempotency keys", () => {
     expect(first).toBe("OFFLINE");
     expect(await keys.send("500", (k) => api.pot(500, k))).toEqual({ ok: true });
     expect(charges).toBe(1);
+  });
+});
+
+describe("keys outlive the screen", () => {
+  it("leaving after an ambiguous failure and coming back resends the same key; a reload too", async () => {
+    const g = globalThis as unknown as { window?: unknown };
+    const stored = new Map<string, string>();
+    g.window = { sessionStorage: { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v), removeItem: (k: string) => void stored.delete(k) } };
+    try {
+      let t = 0;
+      const make = counter();
+      const used: string[] = [];
+      // The pot deposit times out on one Crew screen...
+      await new ActionKeys(make, sessionKeys("crew-pot", () => t)).send("pot:500", (k) => (used.push(k), Promise.reject(new ApiError(0, "TIMEOUT", "x")))).catch(() => {});
+      // ...the player goes back and reopens Crew (a new screen, or a reload: a new store over the same session).
+      t += 60_000;
+      await new ActionKeys(make, sessionKeys("crew-pot", () => t)).send("pot:500", async (k) => void used.push(k));
+      expect(used).toEqual(["key-1", "key-1"]);
+      // Answered: the next deposit is a new one.
+      await new ActionKeys(make, sessionKeys("crew-pot", () => t)).send("pot:500", async (k) => void used.push(k));
+      expect(used).toEqual(["key-1", "key-1", "key-2"]);
+    } finally {
+      delete g.window;
+    }
+  });
+
+  it("a key left waiting longer than KEY_TTL_MS is a new action's, not a retry", async () => {
+    let t = 0;
+    const store = sessionKeys("rides", () => t);
+    const used: string[] = [];
+    const keys = new ActionKeys(counter(), store);
+    await keys.send("bike", (k) => (used.push(k), Promise.reject(new ApiError(0, "OFFLINE", "x")))).catch(() => {});
+    t += KEY_TTL_MS;
+    await keys.send("bike", async (k) => void used.push(k));
+    expect(used).toEqual(["key-1", "key-2"]);
+  });
+
+  it("the app's families share one set of keys each", () => {
+    expect(actionKeysFor("crew-pot")).toBe(actionKeysFor("crew-pot"));
+    expect(actionKeysFor("crew-pot")).not.toBe(actionKeysFor("home-shop"));
   });
 });

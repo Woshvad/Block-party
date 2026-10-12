@@ -39,12 +39,24 @@ describe("connecting", () => {
     weakApi.access.set("x", { userId: "x", hidden: [], blocked: [], chat: true, suspended: false });
     const weak = await startRooms(weakApi, { TICKET_SECRET: "short" });
     try {
-      const r = await weak.mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`, { headers: { upgrade: "websocket" } });
-      expect(r.webSocket).toBeNull();
+      // A plain request: the config check comes before the WebSocket one (a
+      // well-configured Worker answers this 426), and Miniflare's WebSocket
+      // client leaves a refused upgrade's socket open, which disposing this
+      // Worker mid-file resets as an uncaught ECONNRESET.
+      const r = await weak.mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`);
       expect(r.status).toBe(500);
+      expect(await r.json()).toMatchObject({ error: "MISCONFIGURED" });
+      // /health says what's wrong, by name.
+      const health = await weak.mf.dispatchFetch("http://rooms.test/health");
+      expect([health.status, await health.json()]).toEqual([500, { ok: false, config: ["TICKET_SECRET must be 32+ characters"] }]);
     } finally {
       await weak.dispose();
     }
+  });
+
+  it("a well-configured Worker says it's healthy", async () => {
+    const health = await dispatch("http://rooms.test/health");
+    expect([health.status, await health.json()]).toEqual([200, { ok: true }]);
   });
 
   it("welcomes you with who's here, and tells them you arrived", async () => {
@@ -341,6 +353,28 @@ describe("room effects", () => {
     expect(mine().every((x) => typeof x.id === "string")).toBe(true);
     expect(new Set(mine().map((x) => x.id)).size).toBe(2);
     a.ws.close();
+  }, 30_000);
+
+  it("a room that naps keeps backing off: waking doesn't send at once to an API that's down", async () => {
+    api.effectsAvailable = false;
+    // Only this room's posts: other tests' rooms may still be sending.
+    const tries = () => api.refusedPlaces.filter((p) => p === "home:backoff").length;
+    try {
+      const a = await connect("backoff-a", { place: "home:backoff" });
+      await a.next("welcome");
+      await quiet(300);
+      expect(tries()).toBe(1); // the join's visit: refused, backing off
+      // The room naps (its memory goes), then someone else comes in.
+      expect((await internal("/internal/forget?place=home:backoff&copy=0", { method: "POST" })).status).toBe(200);
+      const b = await connect("backoff-b", { place: "home:backoff" });
+      await b.next("welcome");
+      await quiet(300);
+      expect(tries()).toBe(1); // still inside the backoff: nothing sent
+      a.ws.close();
+      b.ws.close();
+    } finally {
+      api.effectsAvailable = true;
+    }
   }, 30_000);
 
   it("long lines held through an outage still arrive, in requests small enough for the API", async () => {
