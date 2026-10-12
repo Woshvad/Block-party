@@ -27,13 +27,13 @@ import {
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, notInArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { areFrens } from "./chat";
-import { recordStreakDay } from "./daily";
+import { grantOwedStreakDays } from "./daily";
 import { moodState } from "./moods";
 import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
 import { ratioHeadline } from "./ratio";
 import { isOnSlate, slateModifier } from "./slate";
-import { calls, crewMembers, feedPolls, marketTicks, markets, residents, tickets, users } from "./schema";
+import { calls, crewMembers, feedPolls, marketTicks, markets, residents, streakGrants, streaks, tickets, users } from "./schema";
 
 export class TowerError extends Error {
   constructor(
@@ -161,7 +161,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     let moved = 0;
     let bad = 0;
     const carried: string[] = []; // the open markets this poll carried
-    const streakDays = new Set<string>(); // residents with a call locked, for after the commit
+    const lockedFor = new Set<string>(); // residents with a call locked: owed today's streak day
     for (const m of feed) {
       if (!validFeed(m)) {
         bad++;
@@ -230,7 +230,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
           const half = !c.onSlate && market.freezesAt.getTime() - now.getTime() < TOWER.halfAuraLastMinutes * 60_000;
           await tx.update(calls).set({ status: "locked", tickId: tick!.id, lockedPrice: tick!.price, lockedAt: now, half }).where(eq(calls.id, c.id));
           // Your streak grows with your first call of the day (the cast has no streak, and no GM).
-          if (!NPC_IDS.includes(c.userId)) streakDays.add(c.userId);
+          if (!NPC_IDS.includes(c.userId)) lockedFor.add(c.userId);
           locked++;
         } else {
           await tx.update(calls).set({ status: "price_moved" }).where(eq(calls.id, c.id));
@@ -269,27 +269,32 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       await tx.update(calls).set({ status: "expired" }).where(eq(calls.id, c.id));
       if (c.ticket) await refundTicket(tx, c.userId, now);
     }
+    // Today's streak day, owed to each resident whose call this poll locked
+    // (unless today already counted for them): noted with the poll, so a
+    // grant that fails, or a run cut off after the commit, is made by the
+    // next poll instead of lost.
+    if (lockedFor.size) {
+      const counted = await tx
+        .select({ userId: streaks.userId })
+        .from(streaks)
+        .where(and(inArray(streaks.userId, [...lockedFor]), gte(streaks.lastDay, today)));
+      for (const r of counted) lockedFor.delete(r.userId);
+      if (lockedFor.size) await tx.insert(streakGrants).values([...lockedFor].map((userId) => ({ userId, cityDay: today }))).onConflictDoNothing();
+    }
     await tx.insert(feedPolls).values({ source: provider.source, ok: true, markets: feed.length, at: now, ...(bad ? { error: `${bad} malformed market(s) skipped` } : {}) });
-    return { ok: true as const, skipped: false as const, ticked, locked, moved, expired: stale.length, bad, streakDays: [...streakDays] };
+    return { ok: true as const, skipped: false as const, ticked, locked, moved, expired: stale.length, bad };
   });
   if (result.skipped) return result;
-  const { streakDays: residents, ...counts } = result;
   // Streak days are granted once the poll has committed, one resident per
   // transaction. Minted inside the poll, they held mint shards while it went
   // on to lock more residents: the reverse of gm's order (resident, then
-  // ledger), so a gm and the poll could deadlock. Every resident's grant is
-  // tried; if any failed, the first error is thrown once calls are settled.
-  let failed: { e: unknown } | null = null;
-  for (const userId of residents) {
-    try {
-      await recordStreakDay(db, userId, { now });
-    } catch (e) {
-      failed ??= { e };
-    }
-  }
+  // ledger), so a gm and the poll could deadlock. Every owed day is tried,
+  // this poll's and any an earlier one couldn't grant; if any failed, the
+  // first error is thrown once calls are settled (its note stays).
+  const failed = await grantOwedStreakDays(db);
   const settled = (await settleCalls(db, { now })).settled;
   if (failed) throw failed.e;
-  return { ...counts, settled };
+  return { ...result, settled };
 }
 
 // --- The city's calls ------------------------------------------------------------------

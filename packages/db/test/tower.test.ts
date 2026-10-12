@@ -8,6 +8,7 @@ import {
   createDb,
   ensureSystemAccounts,
   feedStatus,
+  grantOwedStreakDays,
   makeCall,
   marketView,
   myTickets,
@@ -671,6 +672,84 @@ describe("streak days and the poll", () => {
     const day = new Date(t).toISOString().slice(0, 10);
     for (const u of [x, y]) expect((await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 1, last_day: day });
     expect(await client`SELECT 1 FROM daily_gm WHERE user_id = ${y} AND city_day = ${day}`).toHaveLength(1);
+  });
+
+  it("a streak day whose grant fails after the poll commits is granted by the next poll", async () => {
+    const t = fresh();
+    const f = feed();
+    const [mx, my] = [f.add(t), f.add(t)];
+    await pollOdds(db, f.provider, { now: new Date(t) });
+    const [x, y] = [await makeResident(db), await makeResident(db)];
+    await makeCall(db, x, { marketId: await idOf(mx.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await makeCall(db, y, { marketId: await idOf(my.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    // y's streak row is held, and this poll gives up on a lock after 200 ms,
+    // so y's grant fails once the poll has locked both calls and committed.
+    await client`INSERT INTO streaks (user_id) VALUES (${y}) ON CONFLICT DO NOTHING`;
+    const impatient = createDb(process.env.TEST_DATABASE_URL!, { max: 2, connection: { lock_timeout: 200 } });
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM streaks WHERE user_id = ${y} FOR UPDATE`;
+    let first: Awaited<ReturnType<typeof settle<Awaited<ReturnType<typeof pollOdds>>>>>;
+    try {
+      first = await settle(pollOdds(impatient.db, f.provider, { now: new Date(t + MIN) }));
+    } finally {
+      await barrier`COMMIT`;
+      barrier.release();
+      await impatient.close();
+    }
+    expect(first.ok ? "ok" : String((first.e as { cause?: { code?: string } })?.cause?.code ?? first.e)).toBe("55P03"); // lock_not_available
+    expect((await client`SELECT status FROM calls WHERE user_id IN ${client([x, y])}`).map((r) => r.status)).toEqual(["locked", "locked"]);
+    const day = new Date(t).toISOString().slice(0, 10);
+    const streak = async (u: string) => (await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0];
+    expect(await streak(x)).toMatchObject({ current: 1, last_day: day });
+    expect(await streak(y)).toMatchObject({ current: 0, last_day: null });
+
+    // The next poll has nothing new to lock, and grants y's day all the same.
+    await pollOdds(db, f.provider, { now: new Date(t + 2 * MIN) });
+    expect(await streak(y)).toMatchObject({ current: 1, last_day: day });
+    expect(await client`SELECT 1 FROM gm_transactions WHERE idempotency_key = ${`streak_bonus:${y}:${day}`}`).toHaveLength(1);
+    expect(await client`SELECT 1 FROM streak_grants WHERE user_id IN ${client([x, y])}`).toHaveLength(0);
+  });
+
+  it("an owed streak day that a later day has already passed is dropped, not retried by every poll", async () => {
+    const t = fresh();
+    const f = feed();
+    f.add(t);
+    const u = await makeResident(db);
+    const [day, next] = [new Date(t).toISOString().slice(0, 10), new Date(t + D).toISOString().slice(0, 10)];
+    // A day owed from a poll whose grant never ran, after the next day counted.
+    await client`INSERT INTO streaks (user_id) VALUES (${u}) ON CONFLICT DO NOTHING`;
+    await client`UPDATE streaks SET current = 1, longest = 1, last_day = ${next} WHERE user_id = ${u}`;
+    await client`INSERT INTO streak_grants (user_id, city_day) VALUES (${u}, ${day})`;
+    expect(await pollOdds(db, f.provider, { now: new Date(t + D + MIN) })).toMatchObject({ ok: true });
+    expect((await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 1, last_day: next });
+    expect(await client`SELECT 1 FROM streak_grants WHERE user_id = ${u}`).toHaveLength(0);
+  });
+
+  it("a resident's owed days count in order: while an earlier one fails, a later one waits", async () => {
+    const t = fresh();
+    const u = await makeResident(db);
+    const [day, next] = [new Date(t).toISOString().slice(0, 10), new Date(t + D).toISOString().slice(0, 10)];
+    await client`INSERT INTO streak_grants (user_id, city_day) VALUES (${u}, ${day}), (${u}, ${next})`;
+    // The earlier day's note is held, so its grant (which clears the note) gives up.
+    const impatient = createDb(process.env.TEST_DATABASE_URL!, { max: 2, connection: { lock_timeout: 200 } });
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM streak_grants WHERE user_id = ${u} AND city_day = ${day} FOR UPDATE`;
+    let failed: Awaited<ReturnType<typeof grantOwedStreakDays>>;
+    try {
+      failed = await grantOwedStreakDays(impatient.db);
+    } finally {
+      await barrier`COMMIT`;
+      barrier.release();
+      await impatient.close();
+    }
+    expect(String((failed?.e as { cause?: { code?: string } })?.cause?.code)).toBe("55P03");
+    expect((await client`SELECT current FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 0 });
+    // Next time both count, the earlier first.
+    expect(await grantOwedStreakDays(db)).toBeNull();
+    expect((await client`SELECT current, last_day FROM streaks WHERE user_id = ${u}`)[0]).toMatchObject({ current: 2, last_day: next });
+    expect((await client`SELECT city_day FROM streak_days WHERE user_id = ${u} ORDER BY city_day`).map((r) => r.city_day)).toEqual([day, next]);
   });
 });
 

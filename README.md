@@ -71,7 +71,7 @@ A database migrated on a branch whose migrations were later renumbered (the safe
    - **Aura:** exact integer math in hundredths, property-tested to reward saying what you really believe.
 24. **The Tower, part 2: settling, receipts and the Right List** (done).
    - **Settling:** when a market resolves, every locked call is scored once from the tick it locked on (half in the last 30 minutes; a Tail scores 0; a voided market scores nobody). Racing settlers can't double-score, and the database refuses it anyway.
-   - **Streaks:** a locked call records the day's streak, so streaks and their GM bonus finally grow.
+   - **Streaks:** a locked call records the day's streak, so streaks and their GM bonus finally grow. The poll notes the day it owes (`streak_grants`) with the lock and grants it once it has committed; a grant that fails, or a run cut off in between, is made by the next poll.
    - **Receipts:** a public link per call, signed so it can't be faked or guessed, sealed ("IN THE MEMPOOL") until the bell after settlement, then stamped CALLED IT or REKT with its Aura. Never an amount, a wallet, a user id or whether it was real.
    - **The Right List:** season Aura ÷ (settled calls + 15), revealed results only, 10 settled calls to appear, Tails excluded, rusty after 14 days without a call, and a new season starting from 25% of last season's Aura per call.
 25. **The Daily Slate** (done).

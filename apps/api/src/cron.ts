@@ -39,7 +39,14 @@ export async function runMinute(
     jobs.rateLimitSweep = sweepRateLimits(db, new Date(at.getTime() - RATE_LIMIT_MAX_WINDOW_SECONDS * 1000));
     jobs.sessionSweep = sweepSessions(db, { now: at });
   }
-  if (deps.odds) jobs.odds = pollOdds(db, deps.odds, { now: at }).then(() => publishSlate(db, { now: at })).then(() => npcCalls(db, { now: at }));
+  if (deps.odds) {
+    // The Slate and the cast follow the poll whether or not it threw: a streak
+    // day the poll couldn't grant is its own failure (retried by the next
+    // poll), not a reason to hold back the day's Slate.
+    const poll = pollOdds(db, deps.odds, { now: at });
+    jobs.odds = poll;
+    jobs.slate = poll.catch(() => undefined).then(() => publishSlate(db, { now: at })).then(() => npcCalls(db, { now: at }));
+  }
   const moderation = deps.moderation;
   if (moderation) jobs.moderation = import("./moderation").then(({ runModerationJob }) => runModerationJob(db, moderation, deps.rooms ? { rooms: deps.rooms } : {}));
   const names = Object.keys(jobs);

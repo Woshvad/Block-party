@@ -1,3 +1,4 @@
+import type { OddsProvider } from "@bp/core";
 import { afterAll, describe, expect, it } from "vitest";
 import { ipBucketKey } from "../src/app";
 import { runMinute } from "../src/cron";
@@ -70,5 +71,18 @@ describe("the minute cron's sweeps", () => {
     expect(await buckets()).toEqual([`open:${tag}`]);
     expect(await sessions()).toEqual([signedOutRecently]);
     expect((await call("GET", "/v1/me", { token: me.token })).status).toBe(200); // a live session is never touched
+  });
+});
+
+describe("the minute cron's odds", () => {
+  it("the Slate and the cast still run when the poll throws, and the poll's failure is its own", async () => {
+    // A provider pollOdds refuses outright: the poll job rejects.
+    const broken = { source: undefined, fetch: async () => [] } as unknown as OddsProvider;
+    const at = new Date();
+    at.setUTCMinutes(1, 0, 0); // no sweeps, no daily pings
+    const results = await runMinute(db, at, { odds: broken });
+    const job = (name: string) => results.find((r) => r.job === name);
+    expect(job("odds")).toMatchObject({ status: "rejected" });
+    expect(job("slate")).toMatchObject({ status: "fulfilled" });
   });
 });

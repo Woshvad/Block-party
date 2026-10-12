@@ -188,6 +188,22 @@ export const streakDays = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.cityDay] })],
 );
 
+// Streak days a poll owes: written in the poll's transaction for each
+// resident whose call it locked, deleted in the transaction that grants the
+// day. A grant that fails, or a run cut off after the poll commits, leaves
+// its row for the next poll to grant.
+export const streakGrants = pgTable(
+  "streak_grants",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.cityDay] })],
+);
+
 // Earned, account-bound collectibles (streak cards now; Bell Stamps etc. later).
 export const badges = pgTable(
   "badges",
