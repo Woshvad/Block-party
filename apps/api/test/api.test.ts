@@ -200,7 +200,10 @@ describe("rate limits", () => {
     expect(codes).toEqual([201, 201, 429]);
     const blocked = await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict });
     expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
-    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, via: strict })).status).toBe(201);
+    // Another address, fresh: the harness's default ones are shared with every
+    // test file, and their guest sign-ups this hour count against this limit.
+    const other = `100.64.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip: other, via: strict })).status).toBe(201);
   });
 
   it("writes are capped per player, reads counted separately", async () => {

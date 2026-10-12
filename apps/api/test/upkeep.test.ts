@@ -12,7 +12,10 @@ describe("rate limits keep no client IPs", () => {
     const strict = makeApp({ limits: { guestsPerIpPerHour: 1 } });
     expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(201);
     expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(429);
-    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, via: strict })).status).toBe(201); // another address
+    // Another address, fresh: the harness's default ones are shared with every
+    // test file, and their guest sign-ups this hour count against this limit of 1.
+    const other = `100.64.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip: other, via: strict })).status).toBe(201);
     expect((await call("GET", "/v1/receipts/not-a-receipt", { ip })).status).toBe(404);
 
     expect(await client`SELECT bucket FROM rate_limits WHERE bucket LIKE ${`%${ip}%`}`).toHaveLength(0);
