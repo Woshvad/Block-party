@@ -39,8 +39,11 @@ describe("connecting", () => {
     weakApi.access.set("x", { userId: "x", hidden: [], blocked: [], chat: true, suspended: false });
     const weak = await startRooms(weakApi, { TICKET_SECRET: "short" });
     try {
-      const r = await weak.mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`, { headers: { upgrade: "websocket" } });
-      expect(r.webSocket).toBeNull();
+      // A plain request: the config check comes before the WebSocket one (a
+      // well-configured Worker answers this 426), and Miniflare's WebSocket
+      // client leaves a refused upgrade's socket open, which disposing this
+      // Worker mid-file resets as an uncaught ECONNRESET.
+      const r = await weak.mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`);
       expect(r.status).toBe(500);
       expect(await r.json()).toMatchObject({ error: "MISCONFIGURED" });
       // /health says what's wrong, by name.
