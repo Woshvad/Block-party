@@ -169,7 +169,11 @@ describe("the bell's Tower step", () => {
     const crewA = await Promise.all(Array.from({ length: 3 }, () => makeResident(db)));
     const crewB = await Promise.all(Array.from({ length: 4 }, () => makeResident(db)));
     for (const crew of [crewA, crewB]) {
-      await createCrew(db, crew[0]!, { name: `Bell ${randomUUID().slice(0, 6)}` });
+      const c = await createCrew(db, crew[0]!, { name: `Bell ${randomUUID().slice(0, 6)}` });
+      // Founded the day before the test day. Founded on the real date, the
+      // Bell Scores would settle its gm chain a day at a time up to these
+      // far-off test days, which takes many seconds.
+      await client`UPDATE crews SET created_at = ${new Date(s.d0 - D).toISOString()} WHERE id = ${c.id}`;
       for (const u of crew.slice(1)) await redeemInvite(db, u, (await createInvite(db, crew[0]!)).code);
     }
     const loner = await makeResident(db);

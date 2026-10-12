@@ -39,11 +39,15 @@ async function code(p: Promise<unknown>) {
     throw e;
   }
 }
-// An inviter and the newcomer who joined through their crew invite.
-async function pair() {
+// An inviter and the newcomer who joined through their crew invite. Given the
+// test day, the crew is founded the day before it: a crew whose members score
+// at the bell gets a Bell Score, and founded on the real date, that would
+// settle its gm chain a day at a time up to these far-off test days.
+async function pair(d0?: number) {
   const inviter = await makeResident(db);
   const newcomer = await makeResident(db);
-  await createCrew(db, inviter, { name: `Grudge ${randomUUID().slice(0, 6)}` });
+  const crew = await createCrew(db, inviter, { name: `Grudge ${randomUUID().slice(0, 6)}` });
+  if (d0 !== undefined) await client`UPDATE crews SET created_at = ${new Date(d0 - D).toISOString()} WHERE id = ${crew.id}`;
   await redeemInvite(db, newcomer, (await createInvite(db, inviter)).code);
   return { inviter, newcomer };
 }
@@ -77,7 +81,7 @@ afterAll(close);
 describe("the Grudge Match", () => {
   it("newcomer vs inviter on tomorrow's Slate: higher Aura takes the 20 GM pot", async () => {
     const d0 = freshDay();
-    const { inviter, newcomer } = await pair();
+    const { inviter, newcomer } = await pair(d0);
     const [n0, i0] = [await bal(newcomer), await bal(inviter)];
     const g = await offerGrudge(db, newcomer, { now: new Date(d0 - 12 * H) });
     expect(g.cityDay).toBe(new Date(d0).toISOString().slice(0, 10));

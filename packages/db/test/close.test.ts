@@ -49,7 +49,10 @@ describe("the Daily Close", () => {
     // A crew of 10 who all lean YES on "Coin flip one?" (city 70 vs world 50); one calls the Long Shot.
     const crowd = await Promise.all(Array.from({ length: 10 }, () => makeResident(db)));
     await client`UPDATE users SET proof_of_neighbour_at = now() WHERE id IN ${client(crowd as string[])}`;
-    await createCrew(db, crowd[0]!, { name: `Close ${randomUUID().slice(0, 6)}` });
+    const crew = await createCrew(db, crowd[0]!, { name: `Close ${randomUUID().slice(0, 6)}` });
+    // Founded the day before: founded on the real date, the bell's Bell Scores
+    // would settle its gm chain a day at a time up to 2035, which takes many seconds.
+    await client`UPDATE crews SET created_at = ${new Date(d0 - D).toISOString()} WHERE id = ${crew.id}`;
     for (const u of crowd.slice(1, 4)) await redeemInvite(db, u, (await createInvite(db, crowd[0]!)).code);
     for (const [i, u] of crowd.entries()) await makeCall(db, u, { marketId: ids[1], side: "yes", chance: i < 4 ? 70 : 72, seenPrice: 50 }, { now: at });
     // The bigger gap sits later on the Slate (Spicy one: world 30, city 79 vs the Coin Flip's 22).
