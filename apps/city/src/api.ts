@@ -284,7 +284,8 @@ export type ResidentDraft = { handle: string; name: string; look: Look; traits: 
 
 export type Resident = ResidentDraft & { userId: string; backstory: string; starterItem: string; hideCandleColor?: boolean };
 
-export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null };
+// telegramId: the Telegram account this session belongs to, if any.
+export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null; telegramId?: string | null };
 
 export const apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 

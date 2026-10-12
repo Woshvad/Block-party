@@ -16,6 +16,8 @@ import {
   FLOOR_FINISHES,
   LAWS,
   type PrivyVerifier,
+  TelegramAuthError,
+  verifyTelegramInitData,
   WALL_FINISHES,
   cryptoRandomInt,
   pickForMe,
@@ -127,6 +129,7 @@ import {
   setFinishes,
   signInWithPrivy,
   signInWithTelegram,
+  telegramChatId,
   startShift,
   storeCrewItem,
   storeItem,
@@ -226,6 +229,10 @@ import type { RoomsClient } from "./rooms-client";
 
 export type Limits = {
   authPerIpPerMinute: number;
+  // Telegram sign-ins whose launch data checks out: per Telegram account, and
+  // a much higher ceiling per IP (a carrier can put thousands behind one).
+  telegramAuthPerUserPerMinute: number;
+  telegramAuthPerIpPerMinute: number;
   guestsPerIpPerHour: number;
   writesPerUserPerMinute: number;
   readsPerUserPerMinute: number;
@@ -233,6 +240,8 @@ export type Limits = {
 
 export const DEFAULT_LIMITS: Limits = {
   authPerIpPerMinute: 30,
+  telegramAuthPerUserPerMinute: 10,
+  telegramAuthPerIpPerMinute: 600,
   guestsPerIpPerHour: 5,
   writesPerUserPerMinute: 120,
   readsPerUserPerMinute: 600,
@@ -445,9 +454,28 @@ export function createApp(cfg: AppConfig) {
     return c.json(r, 201);
   });
 
-  app.post("/v1/auth/telegram", authLimit, async (c) => {
+  // The Telegram account behind launch data, if its signature checks out (null if not).
+  async function telegramIdOf(initData: string) {
+    try {
+      return (await verifyTelegramInitData(initData, cfg.telegramBotToken, { now: Math.floor(now().getTime() / 1000) })).user.id;
+    } catch (e) {
+      if (e instanceof TelegramAuthError) return null;
+      throw e;
+    }
+  }
+
+  // Launch data that checks out is limited per Telegram account, with a high
+  // ceiling per IP: players behind one carrier IP all open the app at the
+  // bell. Anything else counts against the IP like every other sign-in.
+  app.post("/v1/auth/telegram", async (c) => {
     const b = await body(c);
     if (typeof b.initData !== "string" || b.initData.length > 4096) throw new ApiError(400, "INVALID_INPUT", "initData required", "initData");
+    const telegramId = await telegramIdOf(b.initData);
+    if (telegramId === null) await limit(c, `ip:${ip(c)}:auth`, limits.authPerIpPerMinute, 60);
+    else {
+      await limit(c, `ip:${ip(c)}:auth-telegram`, limits.telegramAuthPerIpPerMinute, 60);
+      await limit(c, `telegram:${telegramId}:auth`, limits.telegramAuthPerUserPerMinute, 60);
+    }
     const r = await signInWithTelegram(db, {
       initData: b.initData,
       botToken: cfg.telegramBotToken,
@@ -478,13 +506,16 @@ export function createApp(cfg: AppConfig) {
 
   app.get("/v1/me", auth, async (c) => {
     const userId = c.get("userId");
-    const [resident, crew, balance] = await Promise.all([getResident(db, userId), myCrew(db, userId), getBalance(db, userAccountId(userId))]);
+    const [resident, crew, balance, telegramId] = await Promise.all([getResident(db, userId), myCrew(db, userId), getBalance(db, userAccountId(userId)), telegramChatId(db, userId)]);
     return c.json({
       userId,
       status: c.get("status"),
       gm: balance,
       resident,
       crew: crew ? { id: crew.crew.id, name: crew.crew.name, role: crew.role } : null,
+      // The Telegram account this is (or null), so the Mini App can see a
+      // stored session is already the one it was opened as.
+      telegramId,
     });
   });
 

@@ -66,6 +66,14 @@ describe("auth", () => {
     expect(r.body.error).toMatchObject({ code: "TELEGRAM_AUTH_FAILED", message: "Telegram sign-in failed" });
   });
 
+  it("a session says which Telegram account it is, so the Mini App needn't sign in again", async () => {
+    const id = 71_000_000 + Math.floor(Math.random() * 1_000_000);
+    const tg = await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(id), ageAck: true } });
+    expect((await call("GET", "/v1/me", { token: tg.body.sessionToken })).body.telegramId).toBe(String(id));
+    const guest = await call("POST", "/v1/auth/guest", { body: { ageAck: true } });
+    expect((await call("GET", "/v1/me", { token: guest.body.sessionToken })).body.telegramId).toBeNull();
+  });
+
   it("Privy is off until configured", async () => {
     expect((await call("POST", "/v1/auth/privy", { body: { accessToken: "x" } })).status).toBe(503);
   });
@@ -203,6 +211,30 @@ describe("rate limits", () => {
     for (let i = 0; i < 3; i++) codes.push((await call("POST", "/v1/gm", { token: u.token, via: strict })).status);
     expect(codes).toEqual([200, 200, 429]);
     expect((await call("GET", "/v1/me", { token: u.token, via: strict })).status).toBe(200);
+  });
+
+  it("Telegram sign-ins that check out are limited per account, not per shared IP", async () => {
+    const strict = makeApp({ limits: { authPerIpPerMinute: 2, telegramAuthPerUserPerMinute: 2, telegramAuthPerIpPerMinute: 100 } });
+    const ip = `203.0.113.${Math.floor(Math.random() * 250)}`;
+    // Five players behind one carrier IP at the bell: all in.
+    const five = [];
+    for (let i = 0; i < 5; i++) five.push((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip, via: strict })).status);
+    expect(five).toEqual([200, 200, 200, 200, 200]);
+    // One account signing in over and over: its own limit.
+    const init = await telegramInit();
+    const again = [];
+    for (let i = 0; i < 3; i++) again.push((await call("POST", "/v1/auth/telegram", { body: { initData: init, ageAck: true }, ip, via: strict })).status);
+    expect(again).toEqual([200, 200, 429]);
+    // Launch data that doesn't check out still counts against the IP.
+    const forged = (await telegramInit()).replace(/hash=[0-9a-f]+/, `hash=${"0".repeat(64)}`);
+    const bad = [];
+    for (let i = 0; i < 3; i++) bad.push((await call("POST", "/v1/auth/telegram", { body: { initData: forged, ageAck: true }, ip, via: strict })).status);
+    expect(bad).toEqual([401, 401, 429]);
+    // ...and the IP's ceiling for good ones still holds.
+    const tight = makeApp({ limits: { telegramAuthPerIpPerMinute: 1 } });
+    const ip2 = `198.18.0.${Math.floor(Math.random() * 250)}`;
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip: ip2, via: tight })).status).toBe(200);
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip: ip2, via: tight })).status).toBe(429);
   });
 
   it("20 concurrent guest sign-ups from one IP with a cap of 5: exactly 5 succeed", async () => {

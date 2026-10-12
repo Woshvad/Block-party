@@ -13,13 +13,39 @@ export const screenFor = (me: Me): Screen => (me.resident ? { kind: "city", me }
 
 type BootApi = Pick<Api, "hasSession" | "me" | "guest" | "telegram">;
 
+// The Telegram account launch data says it's for, unchecked: it only decides
+// whether a stored session is worth asking the API about. Never trusted for
+// anything else; the API checks the signature whenever it signs anyone in.
+export function launchUserId(initData: string): string | null {
+  try {
+    const user = JSON.parse(new URLSearchParams(initData).get("user") ?? "null") as { id?: unknown } | null;
+    const id = user?.id;
+    return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
+
 // In Telegram the signed launch data decides who you are, every time: it claims
 // a guest session on this device, or switches to the Telegram account's owner.
+// A stored session that already belongs to that Telegram account is kept as it
+// is: signing in again on every launch spends the sign-in limit (a carrier's
+// shared IP at the bell) and rotates the session for nothing.
 // In a browser an existing session is reused; otherwise a guest is made, but
 // only after the 18+ notice.
 export async function boot(api: BootApi, env: { initData: string | null; ageAccepted: boolean }): Promise<Screen> {
   try {
     if (env.initData) {
+      const tgId = launchUserId(env.initData);
+      if (tgId && api.hasSession()) {
+        try {
+          const me = await api.me();
+          if (me.telegramId === tgId) return screenFor(me);
+        } catch (e) {
+          // A dead session (the API forgets it on 401): sign in below.
+          if (!(e instanceof ApiError && e.status === 401)) throw e;
+        }
+      }
       const signIn = async (retry: boolean): Promise<Screen | null> => {
         try {
           await api.telegram(env.initData!, env.ageAccepted);
