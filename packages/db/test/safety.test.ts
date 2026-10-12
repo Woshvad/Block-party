@@ -408,6 +408,20 @@ describe("flagged text stays down until staff review it", () => {
     expect((await residentRow(renamer)).name).toBe((await residentRow(renamer)).handle);
   });
 
+  it("staff never review their own flagged text: it goes to someone else", async () => {
+    const [mod, other] = [await staffer(), await staffer()];
+    const tag = randomUUID().slice(0, 6);
+    const crew = await createCrew(db, mod, { name: `Owncrew ${tag}` });
+    const item = await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: mod, text: crew.name });
+    await check([`Owncrew ${tag}`]);
+    expect((await moderationQueue(db, mod)).map((q) => q.id)).not.toContain(item.id);
+    expect((await moderationQueue(db, other)).map((q) => q.id)).toContain(item.id);
+    expect(await code(reviewModerationItem(db, mod, item.id, "restore"))).toBe("NOT_STAFF");
+    expect((await crewRow(crew.id)).name).toBe(CREW_NAME_UNDER_REVIEW);
+    await reviewModerationItem(db, other, item.id, "restore");
+    expect((await crewRow(crew.id)).name).toBe(`Owncrew ${tag}`);
+  });
+
   it("text the AI check never managed to read waits for staff, who can take it down", async () => {
     const [mod, poster] = [await staffer(), await makeResident(db)];
     const post = await postToBoard(db, poster, "city_hall", "unchecked words", { now: new Date(Date.UTC(2031, 5, 2)) });

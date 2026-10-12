@@ -6,7 +6,7 @@ import {
   type ReportReason,
   crewNameKey,
 } from "@bp/core";
-import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
 import {
@@ -495,6 +495,7 @@ async function putBack(tx: Db, item: Takeable & { id: string }) {
 
 // The staff queue: everything the AI check flagged, and everything it
 // couldn't check after 5 tries, that no one has reviewed yet. Oldest first.
+// A staff member's own text goes to someone else.
 export async function moderationQueue(db: Db, staffId: string) {
   await requireStaff(db, staffId);
   return db
@@ -511,7 +512,13 @@ export async function moderationQueue(db: Db, staffId: string) {
       checkedAt: moderationItems.checkedAt,
     })
     .from(moderationItems)
-    .where(and(inArray(moderationItems.status, ["flagged", "error"]), isNull(moderationItems.reviewedAt)))
+    .where(
+      and(
+        inArray(moderationItems.status, ["flagged", "error"]),
+        isNull(moderationItems.reviewedAt),
+        or(isNull(moderationItems.authorId), ne(moderationItems.authorId, staffId)),
+      ),
+    )
     .orderBy(asc(moderationItems.createdAt))
     .limit(200);
 }
@@ -528,6 +535,8 @@ export async function reviewModerationItem(db: Db, staffId: string, itemId: unkn
   return db.transaction(async (tx) => {
     const [item] = await tx.select().from(moderationItems).where(eq(moderationItems.id, itemId.toLowerCase())).for("no key update");
     if (!item || (item.status !== "flagged" && item.status !== "error") || item.reviewedAt) throw new SafetyError("NO_SUCH_ITEM", "nothing to review there");
+    // Nobody judges their own text, as with appeals.
+    if (item.authorId === staffId) throw new SafetyError("NOT_STAFF", "another staff member must review your own text");
     if (verdict === "restore") {
       if (item.status === "flagged") await putBack(tx, item);
     } else {
