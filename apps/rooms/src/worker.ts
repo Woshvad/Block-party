@@ -512,10 +512,12 @@ export class RoomDO implements DurableObject {
   }
 
   private sendEffects() {
-    if (!this.outbox.due(Date.now())) return; // backing off; the alarm will try
+    const box = this.outbox;
     this.ctx.waitUntil(
-      this.outbox
-        .drain((batch) => this.postEffects(batch), () => Date.now())
+      box
+        .due(Date.now())
+        // Backing off: the alarm will try.
+        .then((due) => (due ? box.drain((batch) => this.postEffects(batch), () => Date.now()) : undefined))
         .then(() => this.scheduleAlarm())
         .catch((err) => console.error(`rooms: sending effects failed: ${String(err)}`)),
     );
@@ -585,7 +587,7 @@ export class RoomDO implements DurableObject {
     const cozy = e?.nextWake(now);
     if (typeof cozy === "number") due.push(cozy);
     if (e && e.members.size > 0) due.push(this.syncedAt + SYNC_MS);
-    if (this.env.API_URL && (await this.outbox.waiting()) > 0) due.push(this.outbox.retryAt ?? now + OUTBOX.firstRetryMs);
+    if (this.env.API_URL && (await this.outbox.waiting()) > 0) due.push((await this.outbox.retryAt()) ?? now + OUTBOX.firstRetryMs);
     if (!due.length) return;
     const at = Math.max(now, Math.min(...due));
     if (at === this.alarmAt) return;
@@ -750,7 +752,7 @@ export class RoomDO implements DurableObject {
     this.deliver(out.deliveries);
     // Waking for the alarm already sent the member list; otherwise it's due.
     if (e.members.size > 0 && now - this.syncedAt >= SYNC_MS / 2) await this.syncDirectory(e);
-    if (this.env.API_URL && this.outbox.due(now)) await this.outbox.drain((batch) => this.postEffects(batch), () => Date.now());
+    if (this.env.API_URL && (await this.outbox.due(now))) await this.outbox.drain((batch) => this.postEffects(batch), () => Date.now());
     await this.afterEvent(e, out.effects);
   }
 }

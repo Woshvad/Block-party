@@ -88,29 +88,57 @@ describe("the effects outbox", () => {
     expect([...data.keys()]).toEqual(["outbox"]);
   });
 
+  // No jitter: each retry lands at the end of its window.
+  const latest = () => 1;
+
   it("keeps everything through failures, backing off, and a fresh outbox picks up where it was", async () => {
     const { storage } = memoryStorage();
-    const box = new Outbox(storage);
+    const box = new Outbox(storage, OUTBOX.max, latest);
     await box.add(effects(2));
     let status = 503;
     const posts: unknown[][] = [];
     const post = async (b: unknown[]) => (posts.push(b), status);
     await box.drain(post, () => T);
-    expect(box.retryAt).toBe(T + OUTBOX.firstRetryMs);
+    expect(await box.retryAt()).toBe(T + OUTBOX.firstRetryMs);
     await box.drain(post, () => T);
-    expect(box.retryAt).toBe(T + 2 * OUTBOX.firstRetryMs);
+    expect(await box.retryAt()).toBe(T + 2 * OUTBOX.firstRetryMs);
     status = 0; // unreachable counts the same
     for (let i = 0; i < 20; i++) await box.drain(post, () => T);
-    expect(box.retryAt).toBe(T + OUTBOX.maxRetryMs);
+    expect(await box.retryAt()).toBe(T + OUTBOX.maxRetryMs);
     // A nap: a new outbox over the same storage still has both, under the same ids.
-    const again = new Outbox(storage);
+    const again = new Outbox(storage, OUTBOX.max, latest);
     expect(await again.waiting()).toBe(2);
     status = 200;
     const sent: Array<{ id: string }> = [];
     await again.drain(async (b) => (sent.push(...(b as never[])), 200), () => T);
     expect(sent.map((x) => x.id)).toEqual(["0", "1"]);
     expect(posts.every((b) => JSON.stringify(b) === JSON.stringify(posts[0]))).toBe(true); // every retry was the same batch
-    expect(again.retryAt).toBeNull();
+    expect(await again.retryAt()).toBeNull();
+  });
+
+  it("the backoff survives a nap or an eviction: a fresh outbox waits, and keeps doubling", async () => {
+    const { storage } = memoryStorage();
+    const box = new Outbox(storage, OUTBOX.max, latest);
+    await box.add(effects(1));
+    await box.drain(async () => 503, () => T);
+    await box.drain(async () => 503, () => T);
+    // The room naps: a new outbox over the same storage.
+    const woken = new Outbox(storage, OUTBOX.max, latest);
+    expect(await woken.retryAt()).toBe(T + 2 * OUTBOX.firstRetryMs);
+    expect(await woken.due(T + OUTBOX.firstRetryMs)).toBe(false);
+    expect(await woken.due(T + 2 * OUTBOX.firstRetryMs)).toBe(true);
+    await woken.drain(async () => 503, () => T + 2 * OUTBOX.firstRetryMs);
+    expect(await new Outbox(storage, OUTBOX.max, latest).retryAt()).toBe(T + 6 * OUTBOX.firstRetryMs); // the third failure: 4x
+  });
+
+  it("jitters each retry within the upper half of its window", async () => {
+    const at = async (jitter: number) => {
+      const box = new Outbox(memoryStorage().storage, OUTBOX.max, () => jitter);
+      await box.add(effects(1));
+      await box.drain(async () => 503, () => T);
+      return (await box.retryAt())! - T;
+    };
+    expect([await at(0), await at(0.5), await at(1)]).toEqual([OUTBOX.firstRetryMs / 2, (OUTBOX.firstRetryMs * 3) / 4, OUTBOX.firstRetryMs]);
   });
 
   it("drops a batch the API calls malformed (400) instead of retrying it forever", async () => {
@@ -199,7 +227,7 @@ describe("the effects outbox", () => {
     expect(taken).toEqual([0, 1, 2, 3, 4, 6, 7]);
     expect(tries.map((t) => t.length)).toEqual([8, 4, 2, 2, 2, 1, 1, 1, 1]);
     expect(await box.waiting()).toBe(0);
-    expect(box.retryAt).toBeNull();
+    expect(await box.retryAt()).toBeNull();
   });
 });
 

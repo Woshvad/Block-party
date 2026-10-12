@@ -343,6 +343,28 @@ describe("room effects", () => {
     a.ws.close();
   }, 30_000);
 
+  it("a room that naps keeps backing off: waking doesn't send at once to an API that's down", async () => {
+    api.effectsAvailable = false;
+    // Only this room's posts: other tests' rooms may still be sending.
+    const tries = () => api.refusedPlaces.filter((p) => p === "home:backoff").length;
+    try {
+      const a = await connect("backoff-a", { place: "home:backoff" });
+      await a.next("welcome");
+      await quiet(300);
+      expect(tries()).toBe(1); // the join's visit: refused, backing off
+      // The room naps (its memory goes), then someone else comes in.
+      expect((await internal("/internal/forget?place=home:backoff&copy=0", { method: "POST" })).status).toBe(200);
+      const b = await connect("backoff-b", { place: "home:backoff" });
+      await b.next("welcome");
+      await quiet(300);
+      expect(tries()).toBe(1); // still inside the backoff: nothing sent
+      a.ws.close();
+      b.ws.close();
+    } finally {
+      api.effectsAvailable = true;
+    }
+  }, 30_000);
+
   it("long lines held through an outage still arrive, in requests small enough for the API", async () => {
     effects.length = 0;
     const lines = () => effects.flatMap((e) => e.effects).filter((x) => x.line?.userId === "outbox-long");
