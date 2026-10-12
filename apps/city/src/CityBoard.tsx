@@ -266,7 +266,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   }, []);
   return (
     <div className="city-board" hidden={!active}>
-      {/* Mock values until the API is wired in phase 1. */}
+      {/* The live banner: City Hall's Mayor and this week's Law, from the API. */}
       <button className="banner" onClick={onOpenHall} disabled={!onOpenHall} aria-label="Open City Hall">
         {h?.mayor ? (
           <>
