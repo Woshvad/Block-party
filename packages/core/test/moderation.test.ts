@@ -385,7 +385,8 @@ describe("staff's blocked words", () => {
     const ctx = { ...OLD, blockedWords: parseBlockedWords("сука, сука блять") };
     // Latin c and a among the Cyrillic letters: the same word to the eye.
     expect(reason("ты cукa", ctx)).toBe("BLOCKED_WORD");
-    expect(reason("сукa блять", { ...OLD, blockedWords: parseBlockedWords("сука блять") })).toBe("BLOCKED_WORD");
+    const phrase = { ...OLD, blockedWords: parseBlockedWords("сука блять") };
+    expect(reason("сукa блять", phrase)).toBe("BLOCKED_WORD");
     expect(reason("cyka blyat is a meme", ctx)).toBe("OK"); // all Latin: another word
   });
 
