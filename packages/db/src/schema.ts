@@ -1477,6 +1477,10 @@ export const grudgeMatches = pgTable(
   (t) => [
     uniqueIndex("grudge_once_per_pair").on(sql`LEAST(${t.newcomerId}, ${t.inviterId})`, sql`GREATEST(${t.newcomerId}, ${t.inviterId})`),
     index("grudge_day").on(t.cityDay, t.status),
+    // One resident's matches, either side: their open stakes (read with every
+    // day's first gm, for the drip) and their match list.
+    index("grudge_newcomer").on(t.newcomerId, t.status),
+    index("grudge_inviter").on(t.inviterId, t.status),
     check("grudge_two_people", sql`${t.newcomerId} <> ${t.inviterId}`),
     check("grudge_winner", sql`(${t.status} = 'settled') = (${t.winnerId} IS NOT NULL) AND (${t.winnerId} IS NULL OR ${t.winnerId} IN (${t.newcomerId}, ${t.inviterId}))`),
   ],

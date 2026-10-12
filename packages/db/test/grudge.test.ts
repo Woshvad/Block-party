@@ -138,6 +138,19 @@ describe("the Grudge Match", () => {
     expect(await staked()).toEqual([0, 0]);
   });
 
+  it("one resident's matches are found by index, not by reading every match (the drip reads them each day)", async () => {
+    // A scan ruled out, the lookup openGmStakes makes must find an index on
+    // each side; without one the plan falls back to reading the whole table.
+    const u = randomUUID();
+    const plan = (await client.begin(async (tx) => {
+      await tx`SET LOCAL enable_seqscan = off`;
+      return tx`EXPLAIN SELECT count(*) FROM grudge_matches WHERE (newcomer_id = ${u} AND status IN ('offered', 'active')) OR (inviter_id = ${u} AND status = 'active')`;
+    })) as unknown as Array<{ "QUERY PLAN": string }>;
+    const text = plan.map((r) => r["QUERY PLAN"]).join("\n");
+    expect(text).toMatch(/Index Cond: .*newcomer_id = /);
+    expect(text).toMatch(/Index Cond: .*inviter_id = /);
+  });
+
   it("a day whose bell never ran: the next bell still settles its matches", async () => {
     const d0 = freshDay();
     const p1 = await crewlessPair();
