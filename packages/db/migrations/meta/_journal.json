@@ -302,6 +302,34 @@
       "when": 1791573749102,
       "tag": "0042_more_shards",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1791744877426,
+      "tag": "0043_market_feed",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1791758332809,
+      "tag": "0044_mood_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791764107811,
+      "tag": "0045_ledger_time_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1791766480422,
+      "tag": "0046_grudge_user_index",
+      "breakpoints": true
     }
   ]
 }

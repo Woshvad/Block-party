@@ -81,11 +81,18 @@ export type FeedMarket = {
   price: number; // YES, whole percent
   resolved: boolean | null; // null: not yet; true/false: YES/NO happened
   voided: boolean;
+  closed?: boolean; // trading has stopped: frozen from now on, until the result is final
 };
+
+// A market the database holds that isn't final yet, as we last stored it.
+export type KnownMarket = Omit<FeedMarket, "resolved" | "voided" | "closed">;
 
 export interface OddsProvider {
   readonly source: string;
-  fetch(now: Date): Promise<FeedMarket[]>;
+  // `known` is this source's markets we still hold open or frozen. A feed that
+  // only lists what's trading (Polymarket) looks those up again by id, so a
+  // market that has left its listing can still close, resolve or void.
+  fetch(now: Date, known?: readonly KnownMarket[]): Promise<FeedMarket[]>;
 }
 
 // --- A deterministic mock feed (development and tests) -------------------------
@@ -150,8 +157,15 @@ export function mockProvider(specs: () => readonly MockMarketSpec[]): OddsProvid
   };
 }
 
+// The credit line under odds we show. Only Polymarket's own prices carry its
+// name; the sample feed's are made up, and say so.
+export function oddsCredit(source: string): string {
+  return source === "polymarket" ? "Odds via Polymarket · Not affiliated" : "Sample odds · Not real";
+}
+
 // A rolling set of sample markets for development and staging: each city day
 // gets a handful across the tiers and categories, so the Floor is never empty.
+// They're invented: shown under oddsCredit("mock"), never Polymarket's name.
 export function sampleMarkets(now: Date, days = 3): MockMarketSpec[] {
   const out: MockMarketSpec[] = [];
   const day0 = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());

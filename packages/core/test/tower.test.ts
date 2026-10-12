@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { TOWER, auraCenti, chanceOnSide, median, mockPrice, mockProvider, sideOpen, sliderStart, ticketsAfter, vibeGap } from "../src";
+import { TOWER, auraCenti, chanceOnSide, median, mockPrice, mockProvider, oddsCredit, sideOpen, sliderStart, ticketsAfter, vibeGap } from "../src";
 
 describe("Aura", () => {
   it("matches the plan's worked examples", () => {
@@ -128,6 +128,11 @@ describe("the mock feed", () => {
     const after = await p.fetch(new Date("2029-01-01T23:00Z"));
     expect(typeof after[0]!.resolved).toBe("boolean");
     expect(after[1]).toMatchObject({ resolved: null, voided: true });
+  });
+
+  it("is credited as sample odds, never as Polymarket's", () => {
+    expect(oddsCredit(mockProvider(() => []).source)).toBe("Sample odds · Not real");
+    expect(oddsCredit("polymarket")).toBe("Odds via Polymarket · Not affiliated");
   });
 });
 

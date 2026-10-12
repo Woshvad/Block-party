@@ -123,8 +123,27 @@ describe("the Halving", () => {
   it("5 bell runners at once: the Halving happens once", async () => {
     const u = await richResident(10000);
     const results = await Promise.all(Array.from({ length: 5 }, () => runBell(db, { now: bellOf(6), only: ["halving"] })));
-    expect(results.filter((r) => r.ran.halving !== "already done")).toHaveLength(1);
+    // The others found the bell busy, or the step already done.
+    expect(results.filter((r) => r.ran.halving !== undefined && r.ran.halving !== "already done")).toHaveLength(1);
     expect(await bal(u)).toBe(6000);
+  });
+
+  it("a runner that finds the bell busy returns at once instead of queueing", async () => {
+    const u = await richResident(6000);
+    const holder = await client.reserve();
+    await holder`SELECT pg_advisory_lock(hashtext('bell_runner'))`;
+    try {
+      const waited = new Promise<"queued">((r) => setTimeout(() => r("queued"), 5_000));
+      const out = await Promise.race([runBell(db, { now: bellOf(9), only: ["halving"] }), waited]);
+      expect(out).toEqual({ bellDay: seasonLastDay(9), ran: {}, busy: true });
+      expect(await bal(u)).toBe(6000);
+    } finally {
+      await holder`SELECT pg_advisory_unlock(hashtext('bell_runner'))`;
+      holder.release();
+    }
+    // Free again: the next minute's runner does the work.
+    expect((await runBell(db, { now: bellOf(9, 0, 6), only: ["halving"] })).ran.halving).toMatchObject({ season: 9 });
+    expect(await bal(u)).toBe(4000);
   });
 
   it("a purchase can't slip in between the Halving reading a balance and burning it", async () => {
@@ -189,6 +208,10 @@ describe("other bell steps", () => {
     const second = await runBell(db, { now: new Date(sat.getTime() + 60_000), only: ["rent"] });
     expect(second.ran.rent).toBe("already done");
     expect(await bal(u)).toBe(800);
+    // On a Saturday, rent is the bell's first step: before anyone can spend,
+    // and before tonight's stakes pay out.
+    const order = await runBell(db, { now: new Date(sat.getTime() + 2 * 60_000), only: ["chains", "rent"] });
+    expect(Object.keys(order.ran)).toEqual(["rent", "chains"]);
   }, 120_000);
 
   it("settles crew chains and records each step with its result", async () => {

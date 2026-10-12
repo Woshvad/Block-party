@@ -183,7 +183,8 @@ async function refund(tx: Db, d: Duel, who: "c" | "o", amount: number) {
 
 // --- Snap, Retreat, Last Call -------------------------------------------------------
 
-// SNAP: once each, doubles the pot (both stakes). Never while tilted.
+// SNAP: once each, doubles the pot (both stakes). Never while either side is
+// tilted: it doubles the other side's stake too, and Tilted caps GM stakes.
 export async function snap(db: Db, userId: string, duelId: unknown, opts: { now?: Date } = {}) {
   const now = opts.now ?? new Date();
   if ((await moodState(db, userId, { now })).tilt.tilted) throw new DuelError("TILTED", "no Snaps while you're tilted");
@@ -195,6 +196,7 @@ export async function snap(db: Db, userId: string, duelId: unknown, opts: { now?
     if (!beforeLock(await marketOf(tx, d.marketId), now)) throw new DuelError("MARKET_CLOSED", "the market has locked");
     if (me === "c" ? d.snapChallenger : d.snapOpponent) throw new DuelError("SNAP_USED", "one Snap each");
     if (!canDouble(d.stakeChallenger) || !canDouble(d.stakeOpponent)) throw new DuelError("AT_THE_CAP", "the pot is at its cap");
+    if ((await moodState(tx, me === "c" ? d.opponentId : d.challengerId, { now })).tilt.tilted) throw new DuelError("TILTED", "they're tilted: no Snaps until it clears");
     for (const [who, stake] of [["c", d.stakeChallenger], ["o", d.stakeOpponent]] as const) {
       try {
         await transfer(tx, { from: userAccountId(who === "c" ? d.challengerId : d.opponentId), to: duelAccountId(d.id), amount: stake, kind: "duel_snap", idempotencyKey: `duel:${d.id}:snap:${me}:${who}` });

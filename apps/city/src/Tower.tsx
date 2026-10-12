@@ -43,7 +43,7 @@ export default function Tower({ api, onBunker }: { api: Api; onBunker?: (place: 
           </button>
         ))}
         <p className="muted">Off-Slate calls take a ticket. 3 more at every bell, up to 9.</p>
-        <p className="credit">Odds via Polymarket · Not affiliated</p>
+        {feed.data?.credit && <p className="credit">{feed.data.credit}</p>}
       </section>
       {calling && (
         <CallSheet

@@ -21,6 +21,9 @@ export type BellOptions = {
   // balance is read under lock. Throw to simulate a crash; await to let
   // another writer try to race in.
   onHalvingAccount?: (accountId: string, index: number, balanceRead: number) => void | Promise<void>;
+  // Test hook: called just before each step runs. Throw to simulate that
+  // step failing partway through the bell.
+  onStep?: (step: string) => void | Promise<void>;
   // Run only these steps (ops tooling and tests). The default runs every due step.
   only?: Array<"chains" | "rent" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts">;
 };
@@ -68,6 +71,7 @@ async function stepRent(db: Db, now: Date, pageSize: number): Promise<StepResult
   let paid = 0;
   let couch = 0;
   let sublet = 0;
+  let owed = 0;
   const fetch = (after: string, limit: number) =>
     db
       .select({ id: sql<string>`${residents.userId}::text` })
@@ -80,12 +84,13 @@ async function stepRent(db: Db, now: Date, pageSize: number): Promise<StepResult
       for (const o of await collectRent(db, r.id, { now })) {
         if (o.status === "paid") paid++;
         else if (o.status === "couch") couch++;
+        else if (o.status === "owed") owed++;
         else sublet++;
       }
       checked++;
     }
   }
-  return { residents: checked, paid, couch, sublet };
+  return { residents: checked, paid, couch, sublet, owed };
 }
 
 // Halves and burns the excess above 2,000 on every resident balance and crew
@@ -155,7 +160,11 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
   const bellDay = addDays(today, -1);
   const pageSize = opts.pageSize ?? 200;
 
-  const due: Array<{ day: string; step: string; run: () => Promise<StepResult> }> = [
+  const due: Array<{ day: string; step: string; run: () => Promise<StepResult> }> = [];
+  // Saturday: rent comes first, before anyone can spend, and before tonight's
+  // stakes pay out (rent counts them as the resident's own GM).
+  if (isSaturday(today)) due.push({ day: bellDay, step: "rent", run: () => stepRent(db, now, pageSize) });
+  due.push(
     { day: bellDay, step: "chains", run: () => stepChains(db, now, pageSize) },
     // After the chains, so Bell Scores see tonight's chain lengths.
     { day: bellDay, step: "tower", run: () => stepTower(db, bellDay, now) },
@@ -164,8 +173,7 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     { day: bellDay, step: "alts", run: async () => ({ ...(await runAltChecks(db, { now })) }) },
     // Last: the paper reads the scores, moods and lines above.
     { day: bellDay, step: "close", run: () => stepClose(db, bellDay, now) },
-  ];
-  if (isSaturday(today)) due.push({ day: bellDay, step: "rent", run: () => stepRent(db, now, pageSize) });
+  );
   // Monday 00:00: last week's count closes and the new Mayor is sworn in.
   if (cityWeekday(today) === 1) {
     due.push({ day: bellDay, step: "election", run: async () => ({ ...(await finalizeElection(db, addDays(today, -7), { now })) }) });
@@ -180,13 +188,19 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
   const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts")) : due;
 
   // One runner at a time: a transaction-scoped advisory lock held for the
-  // whole run. Steps do their own work in their own transactions; the done
-  // check and the record both go through the lock holder.
+  // whole run. A runner that finds it taken returns at once (busy) instead of
+  // queueing: the cron calls every minute, and a long Saturday bell mustn't
+  // gather a line of waiting runners, each holding a connection.
+  //
+  // Steps do their own work in their own transactions, and each step's record
+  // commits on its own the moment the step finishes. If a later step fails,
+  // the earlier ones stay done and never run again.
+  const ran: Record<string, StepResult | "already done"> = {};
   return db.transaction(async (lockTx) => {
-    await lockTx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('bell_runner'))`);
-    const ran: Record<string, StepResult | "already done"> = {};
+    const [lock] = await lockTx.execute<{ ok: boolean }>(sql`SELECT pg_try_advisory_xact_lock(hashtext('bell_runner')) AS ok`);
+    if (!lock?.ok) return { bellDay, ran, busy: true };
     for (const d of selected) {
-      const [done] = await lockTx
+      const [done] = await db
         .select()
         .from(bellSteps)
         .where(and(eq(bellSteps.bellDay, d.day), eq(bellSteps.step, d.step)));
@@ -194,11 +208,12 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
         ran[d.step] = "already done";
         continue;
       }
+      await opts.onStep?.(d.step);
       const result = await d.run();
-      await lockTx.insert(bellSteps).values({ bellDay: d.day, step: d.step, result });
+      await db.insert(bellSteps).values({ bellDay: d.day, step: d.step, result });
       ran[d.step] = result;
     }
-    return { bellDay, ran };
+    return { bellDay, ran, busy: false };
   });
 }
 

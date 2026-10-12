@@ -122,6 +122,11 @@ export const gmEntries = pgTable(
     check("gm_entries_nonzero", sql`${t.amount} <> 0`),
     index("gm_entries_tx_idx").on(t.txId),
     index("gm_entries_account_idx").on(t.accountId, t.id),
+    // Reports over a time window (the reel's burn, the Drip Committee) read
+    // the system accounts' entries for that window only. Without it they
+    // scanned every entry those accounts ever had, one leg of every mint and
+    // burn in the city's history.
+    index("gm_entries_account_time_idx").on(t.accountId, t.createdAt),
   ],
 );
 
@@ -621,6 +626,21 @@ export const moods = pgTable(
     check("moods_cleared_consistent", sql`(${t.clearedAt} IS NULL) = (${t.clearedBy} IS NULL)`),
     check("moods_ends_after_start", sql`${t.endsAt} IS NULL OR ${t.endsAt} > ${t.startedAt}`),
   ],
+);
+
+// Grants that happen once per resident per occasion, such as the bell's
+// CALLED IT, REKT (with its free Copium) and grid tilt for one bell day. A bell
+// step that runs again after a crash finds the row and grants nothing more.
+export const moodGrants = pgTable(
+  "mood_grants",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    key: text("key").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
 );
 
 // Free Copium earned from REKTs. Never bought, never transferred.
@@ -1200,11 +1220,16 @@ export const markets = pgTable(
     status: marketStatus("status").notNull().default("open"),
     outcome: boolean("outcome"),
     price: integer("price").notNull(),
+    // Carried, open, by the latest good poll of its feed. One the feed has
+    // dropped keeps its last price, so it's off the Floor and takes no calls.
+    inFeed: boolean("in_feed").notNull().default(false),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("markets_source_external").on(t.source, t.externalId),
+    // Every poll reads its source's markets that aren't final yet.
+    index("markets_unsettled").on(t.source, t.freezesAt).where(sql`${t.status} IN ('open', 'frozen')`),
     check("markets_price", sql`${t.price} BETWEEN 1 AND 99`),
     check("markets_resolved", sql`(${t.status} = 'resolved') = (${t.outcome} IS NOT NULL)`),
     check("markets_order", sql`${t.settlesBy} >= ${t.freezesAt}`),
@@ -1452,6 +1477,10 @@ export const grudgeMatches = pgTable(
   (t) => [
     uniqueIndex("grudge_once_per_pair").on(sql`LEAST(${t.newcomerId}, ${t.inviterId})`, sql`GREATEST(${t.newcomerId}, ${t.inviterId})`),
     index("grudge_day").on(t.cityDay, t.status),
+    // One resident's matches, either side: their open stakes (read with every
+    // day's first gm, for the drip) and their match list.
+    index("grudge_newcomer").on(t.newcomerId, t.status),
+    index("grudge_inviter").on(t.inviterId, t.status),
     check("grudge_two_people", sql`${t.newcomerId} <> ${t.inviterId}`),
     check("grudge_winner", sql`(${t.status} = 'settled') = (${t.winnerId} IS NOT NULL) AND (${t.winnerId} IS NULL OR ${t.winnerId} IN (${t.newcomerId}, ${t.inviterId}))`),
   ],

@@ -723,7 +723,9 @@ describe("the Tower over HTTP", () => {
     const got = (await call("GET", `/v1/tower/calls/${made.body.id}`, { token: me.token, via: tower })).body;
     expect(["locked", "price_moved"]).toContain(got.status); // the mock walks by the minute
     const view = (await call("GET", `/v1/tower/markets/${mine.id}`, { token: me.token, via: tower })).body;
-    expect(view).toMatchObject({ source: "Odds via Polymarket", world: expect.any(Number) });
+    // The mock feed's odds are made up, and credited as such.
+    expect(view).toMatchObject({ source: "Sample odds · Not real", world: expect.any(Number) });
+    expect((await call("GET", "/v1/tower/feed", { token: me.token, via: tower })).body).toMatchObject({ paused: false, credit: "Sample odds · Not real" });
     expect((await call("POST", "/v1/tower/calls", { token: me.token, via: tower, body: { marketId: mine.id, side: "sideways", chance: 50, seenPrice: 40 } })).status).toBe(400);
   });
 

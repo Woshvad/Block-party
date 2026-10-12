@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { type FeedMarket, type OddsProvider, addDays, userAccountId } from "@bp/core";
+import { type FeedMarket, type OddsProvider, addDays, cityDay, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   BellShowError,
+  bellStatus,
+  buyPiece,
   claimBellStamp,
   createCrew,
   createDb,
   createInvite,
   ensureSystemAccounts,
   getBalance,
+  gmDestroyed,
   makeCall,
   moodState,
   pollOdds,
@@ -16,6 +19,8 @@ import {
   redeemInvite,
   reel,
   runBell,
+  stepTower,
+  useCopium,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -117,12 +122,58 @@ describe("the bell's Tower step", () => {
     expect((await moodState(db, early, { now: at })).tilt.tilted).toBe(false);
   });
 
+  it("a later step failing leaves the Tower step done: it isn't run again, and no second free Copium", async () => {
+    const s = await slateDay();
+    const loser = await makeResident(db);
+    await makeCall(db, loser, { marketId: s.ids[1], side: "no", chance: 30, seenPrice: 50 }, { now: new Date(s.d0 + 9 * H) });
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 9 * H + MIN) });
+    s.ms[1]!.resolved = true;
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 21 * H) });
+    const bell = new Date(s.d0 + D + 5 * MIN);
+    const jam = (step: string) => {
+      if (step === "close") throw new Error("the paper jammed");
+    };
+    await expect(runBell(db, { now: bell, only: ["tower", "close"], onStep: jam })).rejects.toThrow("the paper jammed");
+    expect((await bellStatus(db, dayOf(s.d0))).map((r) => r.step)).toEqual(["tower"]);
+    // The next minute: the Tower step stays done; only the paper runs.
+    const again = await runBell(db, { now: new Date(bell.getTime() + MIN), only: ["tower", "close"] });
+    expect(again.ran.tower).toBe("already done");
+    expect(again.ran.close).not.toBe("already done");
+    expect((await moodState(db, loser, { now: new Date(bell.getTime() + 2 * MIN) })).copium.free).toBe(1);
+  });
+
+  it("a Tower step that runs twice (it crashed before being recorded) grants each mood once", async () => {
+    const s = await slateDay();
+    const u = await makeResident(db);
+    for (const [i, price] of [80, 50, 60, 30].entries()) await makeCall(db, u, { marketId: s.ids[i], side: "yes", chance: 99, seenPrice: price }, { now: new Date(s.d0 + 9 * H) });
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 9 * H + MIN) });
+    for (const m of s.ms) m.resolved = false;
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 21 * H) });
+    const bell = new Date(s.d0 + D + 5 * MIN);
+    await stepTower(db, dayOf(s.d0), bell);
+    const at = new Date(bell.getTime() + MIN);
+    const first = await moodState(db, u, { now: at });
+    expect(first.active.map((a) => a.mood).sort()).toEqual(["rekt", "tilted"]);
+    expect(first.copium.free).toBe(1);
+    // They spend the free Copium: REKT and Tilted clear.
+    await useCopium(db, u, randomUUID(), { now: at });
+    // The same step again, a minute later: no second free Copium, no fresh REKT or tilt.
+    await stepTower(db, dayOf(s.d0), new Date(at.getTime() + MIN));
+    const after = await moodState(db, u, { now: new Date(at.getTime() + 2 * MIN) });
+    expect(after.active).toEqual([]);
+    expect(after.copium.free).toBe(0);
+  });
+
   it("Bell Scores: a chip per CALLED IT by a crewmate, ×1.5 for a Long Shot caught; crewless winners score nothing", async () => {
     const s = await slateDay();
     const crewA = await Promise.all(Array.from({ length: 3 }, () => makeResident(db)));
     const crewB = await Promise.all(Array.from({ length: 4 }, () => makeResident(db)));
     for (const crew of [crewA, crewB]) {
-      await createCrew(db, crew[0]!, { name: `Bell ${randomUUID().slice(0, 6)}` });
+      const c = await createCrew(db, crew[0]!, { name: `Bell ${randomUUID().slice(0, 6)}` });
+      // Founded the day before the test day. Founded on the real date, the
+      // Bell Scores would settle its gm chain a day at a time up to these
+      // far-off test days, which takes many seconds.
+      await client`UPDATE crews SET created_at = ${new Date(s.d0 - D).toISOString()} WHERE id = ${c.id}`;
       for (const u of crew.slice(1)) await redeemInvite(db, u, (await createInvite(db, crew[0]!)).code);
     }
     const loner = await makeResident(db);
@@ -203,5 +254,32 @@ describe("which bell a result belongs to", () => {
     expect((await moodState(db, u, { now: new Date(s.d0 + D + 10 * MIN) })).active.map((a) => a.mood)).not.toContain("called_it");
     await runBell(db, { now: new Date(s.d0 + 2 * D + 5 * MIN), only: ["tower"] });
     expect((await moodState(db, u, { now: new Date(s.d0 + 2 * D + 10 * MIN) })).active.map((a) => a.mood)).toContain("called_it");
+  });
+});
+
+describe("the reel's burn", () => {
+  it("the Tower step counts the day's burn once, and the reel shows that count instead of summing again", async () => {
+    const d0 = freshDay();
+    const day = dayOf(d0);
+    const u = await makeResident(db);
+    const r = await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] });
+    expect(r.ran.tower).toMatchObject({ burned: await gmDestroyed(db, { from: new Date(d0), to: new Date(d0 + D) }) });
+    // Stands in for a ledger far too big to sum on every request: the reel
+    // must show what the bell counted.
+    await client`UPDATE bell_steps SET result = result || '{"burned": 4321}'::jsonb WHERE bell_day = ${day} AND step = 'tower'`;
+    expect((await reel(db, u, { now: new Date(d0 + D + 10 * MIN), bellDay: day }))!.burned).toBe(4321);
+  });
+
+  it("before the Tower step has counted it, the reel sums the day itself", async () => {
+    // Today by the database's clock, which stamps the entries: the only day
+    // with fresh burns in it. Nothing in the suite rings today's bell.
+    const [{ t }] = (await client`SELECT clock_timestamp() AS t`) as unknown as [{ t: string }];
+    const day = cityDay(new Date(t));
+    expect(await client`SELECT 1 FROM bell_steps WHERE bell_day = ${day} AND step = 'tower'`).toHaveLength(0);
+    const u = await makeResident(db);
+    await buyPiece(db, u, "sofa", randomUUID()); // 300 burned today
+    const r = await reel(db, u, { now: new Date(`${addDays(day, 1)}T00:10:00Z`), bellDay: day });
+    expect(r!.burned).toBeGreaterThanOrEqual(300);
+    expect(r!.burned).toBe(await gmDestroyed(db, { from: new Date(`${day}T00:00:00Z`), to: new Date(`${addDays(day, 1)}T00:00:00Z`) }));
   });
 });

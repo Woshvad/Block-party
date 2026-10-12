@@ -13,6 +13,7 @@ import {
   grantMood,
   makeCall,
   moodState,
+  openGmStakes,
   pollOdds,
   respond,
   retreat,
@@ -107,6 +108,20 @@ describe("a duel, start to finish", () => {
     expect((await moodState(db, s.b, { now: new Date(s.d0 + 21 * H + MIN) })).tilt.tilted).toBe(true);
     expect((await moodState(db, s.a, { now: new Date(s.d0 + 21 * H + MIN) })).tilt.tilted).toBe(false);
     expect(await settleDuels(db, { now: new Date(s.d0 + 22 * H) })).toMatchObject({ settled: 0 }); // once
+  });
+
+  it("duel stakes still count as each side's GM (rent, the broke floor) until the duel settles", async () => {
+    const s = await scene();
+    const staked = async () => [await openGmStakes(db, s.a), await openGmStakes(db, s.b)];
+    const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });
+    expect(await staked()).toEqual([10, 0]); // an offer holds only the challenger's ante
+    await respond(db, s.b, d.id, true, { now: s.at });
+    await snap(db, s.b, d.id, { now: s.at });
+    expect(await staked()).toEqual([20, 20]);
+    s.m.resolved = false; // NO: b wins
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 21 * H) });
+    await settleDuels(db, { now: new Date(s.d0 + 21 * H) });
+    expect(await staked()).toEqual([0, 0]);
   });
 
   it("retreat: the ante to the opponent, the rest burns, their stake comes back", async () => {
@@ -219,6 +234,17 @@ describe("the guards", () => {
     expect(await code(snap(db, s.b, "nope", { now: s.at }))).toBe("NO_SUCH_DUEL");
   });
 
+  it("no Snap against a tilted opponent either: it would double their stake past the cap", async () => {
+    const s = await scene();
+    const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });
+    await respond(db, s.b, d.id, true, { now: s.at });
+    await grantMood(db, s.b, "tilted", { now: s.at });
+    const [b0, e0] = [await bal(s.b), await escrow(d.id)];
+    expect(await code(snap(db, s.a, d.id, { now: new Date(s.at.getTime() + MIN) }))).toBe("TILTED");
+    expect([await bal(s.b), await escrow(d.id)]).toEqual([b0, e0]);
+    expect((await client`SELECT stake_opponent FROM duels WHERE id = ${d.id}`)[0]!.stake_opponent).toBe(10);
+  });
+
   it("a Snap the other side can't cover is refused, and nothing moves", async () => {
     const s = await scene();
     const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });
@@ -307,7 +333,10 @@ describe("in the reel", () => {
 describe("at the bell", () => {
   it("duels settle at the bell: a won Snap doubles the crew's Bell Score, and the reel and the paper print it", async () => {
     const s = await scene();
-    await createCrew(db, s.a, { name: `Snap ${randomUUID().slice(0, 6)}` });
+    const crew = await createCrew(db, s.a, { name: `Snap ${randomUUID().slice(0, 6)}` });
+    // Founded the day before: founded on the real date, the bell's Bell Scores
+    // would settle its gm chain a day at a time up to 2036, which takes many seconds.
+    await client`UPDATE crews SET created_at = ${new Date(s.d0 - D).toISOString()} WHERE id = ${crew.id}`;
     await setDuelPrefs(db, s.a, { allowNaming: true });
     await setDuelPrefs(db, s.b, { allowNaming: true });
     const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });

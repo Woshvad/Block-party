@@ -109,7 +109,7 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     cityHall: () => request<CityHall>("GET", "/v1/city-hall"),
     // 404 until the bell publishes the day's Slate: that's "not out yet", not an error.
     slate: () => request<Slate>("GET", "/v1/slate").catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))),
-    feed: () => request<{ paused: boolean; lastTickAt: string | null }>("GET", "/v1/tower/feed"),
+    feed: () => request<{ paused: boolean; lastTickAt: string | null; credit: string | null }>("GET", "/v1/tower/feed"),
     market: (id: string) => request<MarketView>("GET", `/v1/tower/markets/${encodeURIComponent(id)}`),
     call: (c: { marketId: string; side: Side; chance: number; seenPrice: number }) => request<CallMade>("POST", "/v1/tower/calls", c),
     myCall: (id: string) => request<CallStatus>("GET", `/v1/tower/calls/${encodeURIComponent(id)}`),

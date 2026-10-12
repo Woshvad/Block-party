@@ -4,6 +4,7 @@ import {
   type CrewRole,
   DEFAULT_BANNER,
   type JoinPolicy,
+  burnAccountFor,
   can,
   crewNameKey,
   crewPotAccountId,
@@ -16,7 +17,7 @@ import {
 } from "@bp/core";
 import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { burn, getBalance, openEscrowAccount, transfer } from "./ledger";
+import { burn, getBalance, lockAccounts, openEscrowAccount, transfer } from "./ledger";
 import { crewInvites, crewJoinRequests, crewMembers, crews, inviters, residents } from "./schema";
 
 export type CrewErrorCode =
@@ -413,10 +414,14 @@ export async function transferLead(db: Db, actorId: string, targetId: string) {
   });
 }
 
-// Dissolving burns the pot: pot GM never goes back to members.
+// Dissolving burns the pot: pot GM never goes back to members. The pot is read
+// under the ledger's lock, so a Lights bid or a syndicate stake leaving it at
+// the same moment is either in the burn or already gone, never both. Anything
+// paid back to a dissolved crew later (a syndicate's winnings, a Lights
+// refund) burns where it would have been paid in.
 async function dissolveLocked(tx: Db, crewId: string) {
   const pot = crewPotAccountId(crewId);
-  const balance = await getBalance(tx, pot);
+  const balance = (await lockAccounts(tx, [pot, burnAccountFor(pot)])).get(pot) ?? 0;
   if (balance > 0) {
     await burn(tx, { accountId: pot, amount: balance, kind: "crew_dissolve", idempotencyKey: `crew_dissolve:${crewId}` });
   }

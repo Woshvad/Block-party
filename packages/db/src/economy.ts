@@ -21,6 +21,7 @@ import {
 } from "@bp/core";
 import { and, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
+import { openGmStakes } from "./daily";
 import { lockAccounts, mint, post } from "./ledger";
 import { crewMembers, dailyGm, gmAccounts, rentCharges, residents, shifts, users } from "./schema";
 
@@ -63,12 +64,13 @@ async function lastActiveBefore(tx: Db, userId: string, day: string, movedIn: st
   return g && g.d > movedIn ? g.d : movedIn;
 }
 
-export type RentOutcome = { saturday: string; status: "paid" | "couch" | "sublet"; amount: number };
+// "owed" is never stored: that Saturday stays unrecorded and is tried again.
+export type RentOutcome = { saturday: string; status: "paid" | "couch" | "sublet" | "owed"; amount: number };
 
 // Charges every Saturday's rent the resident owes up to today, oldest first,
 // at most MAX_RENT_WEEKS back (older ones are forgiven, never stacked).
-// Idempotent. The bell job runs it at each Saturday bell, before anyone can
-// spend, so nobody can dodge rent by spending first.
+// Idempotent. The bell job runs it first thing at each Saturday bell, before
+// anyone can spend, so nobody can dodge rent by spending first.
 export async function collectRent(db: Db, userId: string, opts: { now?: Date } = {}): Promise<RentOutcome[]> {
   const today = cityDay(opts.now ?? new Date());
   return db.transaction(async (tx) => {
@@ -94,10 +96,22 @@ export async function collectRent(db: Db, userId: string, opts: { now?: Date } =
       // between "can they pay?" and the charge.
       const balance = (await lockAccounts(tx, [userAccountId(userId), burnAccountFor(userAccountId(userId)), SYS_PURSE])).get(userAccountId(userId)) ?? 0;
       if (balance < RENT.tenement) {
-        // Can't pay: a week on the crew's couch (or the bench). Never debt.
-        await tx.insert(rentCharges).values({ userId, saturday, status: "couch" });
-        out.push({ saturday, status: "couch", amount: 0 });
-        continue;
+        // GM out on stakes is still theirs: parking it in a stake over the
+        // bell doesn't make anyone too poor to pay. Read after the wallet's
+        // lock, so a stake coming home right now is counted once, not twice.
+        const staked = await openGmStakes(tx, userId);
+        if (balance + staked < RENT.tenement) {
+          // Can't pay: a week on the crew's couch (or the bench). Never debt.
+          await tx.insert(rentCharges).values({ userId, saturday, status: "couch" });
+          out.push({ saturday, status: "couch", amount: 0 });
+          continue;
+        }
+        // They can pay, but part of it is out on stakes. Never debt: this
+        // Saturday stays unrecorded, and so do the ones after it, until a later
+        // run (next Saturday's bell) finds the GM back in the wallet. If the
+        // stakes are lost by then, that run sends them to the couch.
+        out.push({ saturday, status: "owed", amount: 0 });
+        break;
       }
       const { burn, purse } = rentSplit(RENT.tenement);
       const res = await post(tx, {
@@ -258,6 +272,18 @@ export async function collectAwayShift(db: Db, userId: string, opts: { now?: Dat
 }
 
 // --- The Drip Committee minutes (internal dashboard) -----------------------
+
+// Just the GM destroyed over a window: everything paid into the burn shards
+// and the Purse, the same total as economyReport's totalDestroyed. The reel
+// needs only this, not the flows by kind or the median balance.
+export async function gmDestroyed(db: Db, opts: { from: Date; to: Date }): Promise<number> {
+  const [r] = await db.execute<{ total: string }>(sql`
+    SELECT COALESCE(SUM(amount), 0)::text AS total
+    FROM gm_entries
+    WHERE account_id IN (${sql.join([...BURN_SHARDS, SYS_PURSE].map((id) => sql`${id}`), sql`, `)})
+      AND created_at >= ${opts.from.toISOString()}::timestamptz AND created_at < ${opts.to.toISOString()}::timestamptz`);
+  return Number(r!.total);
+}
 
 // GM created vs destroyed over a window, on net flows: only the mint and the
 // sinks count; GM moving between players doesn't. Rent's Purse share counts

@@ -1,0 +1,108 @@
+[
+  {
+    "slug": "bitcoin-above-on-october-12-2026",
+    "markets": [
+      {
+        "id": "5330074",
+        "question": "Will the price of Bitcoin be above $80,000 on October 12?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.9925\", \"0.0075\"]",
+        "endDate": "2026-10-12T16:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "5330077",
+        "question": "Will the price of Bitcoin be above $82,000 on October 12?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.945\", \"0.055\"]",
+        "endDate": "2026-10-12T16:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "5330080",
+        "question": "Will the price of Bitcoin be above $84,000 on October 12?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.455\", \"0.545\"]",
+        "endDate": "2026-10-12T16:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "5330083",
+        "question": "Will the price of Bitcoin be above $86,000 on October 12?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.0485\", \"0.9515\"]",
+        "endDate": "2026-10-12T16:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "5330087",
+        "question": "Will the price of Bitcoin be above $90,000 on October 12?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.0015\", \"0.9985\"]",
+        "endDate": "2026-10-12T16:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  },
+  {
+    "slug": "clarity-act-signed-into-law-in-2026",
+    "markets": [
+      {
+        "id": "1163699",
+        "question": "Clarity Act (H.R.3633) signed into law in 2026?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.0505\", \"0.9495\"]",
+        "endDate": "2027-01-01T05:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  },
+  {
+    "slug": "what-price-will-bitcoin-hit-in-october-2026",
+    "markets": [
+      {
+        "id": "5170734",
+        "question": "Will Bitcoin reach $90,000 in October?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.385\", \"0.615\"]",
+        "endDate": "2026-11-01T04:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "5170735",
+        "question": "Will Bitcoin reach $87,500 in October?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.575\", \"0.425\"]",
+        "endDate": "2026-11-01T04:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      },
+      {
+        "id": "5170736",
+        "question": "Will Bitcoin reach $85,000 in October?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"1\", \"0\"]",
+        "endDate": "2026-11-01T04:00:00Z",
+        "closed": true,
+        "acceptingOrders": false,
+        "umaResolutionStatus": "resolved"
+      },
+      {
+        "id": "5170738",
+        "question": "Will Bitcoin dip to $80,000 in October?",
+        "outcomes": "[\"Yes\", \"No\"]",
+        "outcomePrices": "[\"0.535\", \"0.465\"]",
+        "endDate": "2026-11-01T04:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  }
+]
