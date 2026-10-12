@@ -8,7 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // The bundled API Worker, running in workerd (the Cloudflare runtime) through
 // Miniflare, talking to the test Postgres over TCP the way Hyperdrive will.
 // Catches what Node-only tests can't: bundling, nodejs_compat, sockets.
-// Shaped like a real bot token: the Worker refuses to start on anything else.
+
+// Shaped like a real bot token: the Worker refuses to serve with anything else.
 const BOT = "777000:WORKER_RUNTIME_TEST_TOKEN_0123456789";
 const SECRET = "w".repeat(40);
 const ORIGIN = "https://city.blockparty.test";
@@ -53,7 +54,7 @@ const call = async (method: string, path: string, opts: { token?: string; body?:
   return { status: res.status, body: (await res.json().catch(() => null)) as any };
 };
 
-const launchData = (id: number, bot = BOT) => signTelegramInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id }) }, bot);
+const launchData = (id: number) => signTelegramInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id }) }, BOT);
 
 describe("the API on the Workers runtime", () => {
   it("health reads the schema over a real socket", async () => {
