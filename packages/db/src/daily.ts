@@ -1,8 +1,8 @@
-import { GM, GRUDGE, STREAK_PIECES, type StreakState, advanceStreak, cityDay, dripFor, nextBell, streakView, userAccountId } from "@bp/core";
+import { GM, GRUDGE, STREAK_PIECES, type StreakState, advanceStreak, cityDay, dripFor, mintAccountFor, nextBell, streakView, userAccountId } from "@bp/core";
 import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { grantEarned } from "./home";
-import { burn, mint } from "./ledger";
+import { burn, lockAccounts, mint } from "./ledger";
 import { badges, cityPositions, dailyGm, duels, gmEntries, gmAccounts, gmTransactions, grudgeMatches, streakDays, streaks, users } from "./schema";
 
 export class DailyError extends Error {
@@ -92,6 +92,10 @@ export async function sayGm(db: Db, userId: string, opts: { now?: Date } = {}): 
       return { cityDay: day, already: true, drip: existing.drip, brokeFloor: existing.brokeFloor, balance: b!.balance };
     }
 
+    // Read under the wallet's lock (taken as the mint below will take it, in
+    // the ledger's order), as rent does: a stake paying out between reading
+    // the balance and reading the open stakes would count in neither.
+    await lockAccounts(tx, [mintAccountFor(acct), acct]);
     const netWorth = await gmNetWorth(tx, userId, now);
     const { amount, brokeFloor } = dripFor(netWorth);
     const res = await mint(tx, {

@@ -113,6 +113,36 @@ describe("gm and the drip", () => {
     expect(await code(sayGm(db, randomUUID()))).toBe("UNKNOWN_USER");
   });
 
+  it("a payout landing as they tap gm counts once: net worth is read under the wallet's lock", async () => {
+    const r = await resident({ gm: 60 });
+    const waiters = async (k: number) => {
+      const deadline = Date.now() + 10_000;
+      // loop-bound: polls until k sessions wait on a lock, or the deadline
+      while ((await n(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)) < k) {
+        if (Date.now() > deadline) throw new Error(`only some of ${k} waiters arrived`);
+        await new Promise((res) => setTimeout(res, 10));
+      }
+    };
+    // Something holds the wallet; a bell payout of 500 queues on it, then the gm tap.
+    const barrier = await client.reserve();
+    await barrier`BEGIN`;
+    await barrier`SELECT 1 FROM gm_accounts WHERE id = ${r.acct} FOR NO KEY UPDATE`;
+    let payout: Promise<unknown>;
+    let gm: ReturnType<typeof sayGm>;
+    try {
+      payout = mint(db, { accountId: r.acct, amount: 500, kind: "test_payout", idempotencyKey: randomUUID() });
+      await waiters(1);
+      gm = sayGm(db, r.id);
+      await waiters(2);
+    } finally {
+      await barrier`COMMIT`;
+      barrier.release();
+    }
+    await payout!;
+    // 560 by the time it's read: the plain drip, not the broke floor's 100.
+    expect(await gm!).toMatchObject({ drip: 50, brokeFloor: false, balance: 610 });
+  });
+
   it("20 racing gm taps pay one drip, and every tap succeeds", async () => {
     const r = await resident({ gm: 500 });
     const settled = await race("daily_gm", 20, Array.from({ length: 20 }, () => () => sayGm(db, r.id)));
