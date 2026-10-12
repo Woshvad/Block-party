@@ -13,6 +13,7 @@ import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
 import { useBackLayer } from "./back";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
+import { boardShown } from "./boardMode";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
@@ -225,19 +226,20 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
     void poll();
     return () => { live = false; clearTimeout(timer); };
   }, [api, active]);
-  const hall = useLoad(() => api.cityHall(), [api]);
-  const slate = useLoad(() => api.slate(), [api]);
-  // Back on the board after another screen: the Mayor, the Law and the
-  // Slate's calls may have changed meanwhile.
-  const shown = useRef(active);
+  // City Hall and the Slate, fetched once the board is first shown and again
+  // on each return to it (boardShown). Mounted hidden, they wait.
+  const seen = useRef({ shown: active, everShown: active });
+  const hall = useLoad(() => (seen.current.everShown ? api.cityHall() : Promise.resolve(undefined)), [api]);
+  const slate = useLoad(() => (seen.current.everShown ? api.slate() : Promise.resolve(undefined)), [api]);
   useEffect(() => {
-    if (active && !shown.current) {
+    const step = boardShown(seen.current, active);
+    seen.current = { shown: active, everShown: step.everShown };
+    if (step.fetch) {
       void hall.reload();
       void slate.reload();
     }
-    shown.current = active;
   }, [active]);
-  const now = useNow(1000);
+  const now = useNow(1000, active);
   const h = hall.data;
   const s = slate.data;
   const bellAt = s?.bellAt ?? nextBell(now);
