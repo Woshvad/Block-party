@@ -376,15 +376,26 @@ describe("the plan's weekly math, end to end", () => {
   });
 
   it("a window report reads only that window's entries, through the (account, time) index", async () => {
-    // Forcing an index shows which one can serve the window: with only the
-    // (account, id) index, created_at is a filter over the accounts' whole history.
-    const plan = (await client.begin(async (tx) => {
-      await tx`SET LOCAL enable_seqscan = off`;
-      return tx`EXPLAIN SELECT SUM(amount) FROM gm_entries WHERE account_id IN ('sys:burn', 'sys:city_purse') AND created_at >= now() - interval '1 day' AND created_at < now()`;
-    })) as unknown as Array<{ "QUERY PLAN": string }>;
-    const text = plan.map((r) => r["QUERY PLAN"]).join("\n");
+    // With only the (account, id) index, created_at is a filter over the
+    // accounts' whole history. A test ledger is too small for the planner to
+    // prefer one index over the other, so inside a transaction that's rolled
+    // back, the (account, id) index is set aside and a scan is ruled out: the
+    // window can only be served by an index that knows created_at.
+    let text = "";
+    await client
+      .begin(async (tx) => {
+        await tx`SET LOCAL enable_seqscan = off`;
+        await tx`DROP INDEX gm_entries_account_idx`;
+        const plan = (await tx`EXPLAIN SELECT SUM(amount) FROM gm_entries WHERE account_id IN ('sys:burn', 'sys:city_purse') AND created_at >= now() - interval '1 day' AND created_at < now()`) as unknown as Array<{ "QUERY PLAN": string }>;
+        text = plan.map((r) => r["QUERY PLAN"]).join("\n");
+        throw new Error("roll back");
+      })
+      .catch((e: unknown) => {
+        if ((e as Error).message !== "roll back") throw e;
+      });
     expect(text).toContain("gm_entries_account_time_idx");
     expect(text).toMatch(/Index Cond: .*created_at/);
+    expect(await client`SELECT 1 FROM pg_indexes WHERE indexname = 'gm_entries_account_idx'`).toHaveLength(1); // still there
   });
 
   it("an empty window reports no ratio rather than dividing by zero", async () => {
