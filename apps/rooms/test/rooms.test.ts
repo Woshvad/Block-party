@@ -324,4 +324,29 @@ describe("room effects", () => {
     expect(new Set(mine().map((x) => x.id)).size).toBe(2);
     a.ws.close();
   }, 30_000);
+
+  it("long lines held through an outage still arrive, in requests small enough for the API", async () => {
+    effects.length = 0;
+    const lines = () => effects.flatMap((e) => e.effects).filter((x) => x.line?.userId === "outbox-long");
+    // About 4 KB each: five of them are more than the API takes in one request.
+    const long = (i: number) => `${i} ${"é".repeat(1990)}`;
+    api.effectsAvailable = false;
+    const a = await connect("outbox-long", { place: "home:outbox-long" });
+    try {
+      await a.next("welcome");
+      for (let i = 0; i < 5; i++) {
+        a.send({ t: "chat", text: long(i) });
+        await a.next("chat");
+      }
+      await quiet(300);
+    } finally {
+      api.effectsAvailable = true;
+    }
+    const deadline = Date.now() + 15_000;
+    // loop-bound: polls until the deadline
+    while (Date.now() < deadline && lines().length < 5) await quiet(250);
+    expect(lines().map((x) => x.line.text)).toEqual([0, 1, 2, 3, 4].map(long));
+    expect(api.effectsTooLarge).toBe(0);
+    a.ws.close();
+  }, 30_000);
 });

@@ -10,6 +10,10 @@
 export const OUTBOX = {
   max: 1000,
   batch: 50,
+  // The API refuses a body over 16 KB (maxBody in apps/api/src/app.ts), and
+  // one room line can be about 8 KB, so a batch is cut by size too. The rest
+  // of the 16 KB is room for the place, the copy and the JSON around them.
+  maxBatchBytes: 12 * 1024,
   roundsPerDrain: 20, // batches per drain; the room's alarm sends the rest
   firstRetryMs: 5_000,
   maxRetryMs: 5 * 60_000,
@@ -26,6 +30,7 @@ type Meta = { head: number; tail: number }; // ids head..tail-1 are waiting
 const META = "outbox";
 const fxKey = (id: number) => `fx:${String(id).padStart(12, "0")}`;
 const CHUNK = 100; // storage takes at most 128 keys a call
+const utf8 = new TextEncoder();
 
 export class Outbox {
   private meta: Promise<Meta> | null = null;
@@ -94,26 +99,44 @@ export class Outbox {
 
   private async send(post: (effects: unknown[]) => Promise<number>, now: () => number) {
     const m = await this.load();
+    let most = OUTBOX.batch; // effects per request; a 413 halves it
     // loop-bound: at most OUTBOX.roundsPerDrain batches, and it stops when nothing is waiting
     for (let round = 0; round < OUTBOX.roundsPerDrain && m.head < m.tail; round++) {
       const from = m.head;
-      const to = Math.min(m.tail, from + OUTBOX.batch);
-      const keys = Array.from({ length: to - from }, (_, i) => fxKey(from + i));
+      const keys = Array.from({ length: Math.min(m.tail, from + most) - from }, (_, i) => fxKey(from + i));
       const rows = await this.storage.get(keys);
-      const batch = keys.map((k) => rows.get(k)).filter((x) => x !== undefined);
+      // Oldest first, as many as fit in one request, and always at least one.
+      const batch: unknown[] = [];
+      let bytes = 0;
+      let to = from;
+      for (const k of keys) {
+        const fx = rows.get(k);
+        const size = fx === undefined ? 0 : utf8.encode(JSON.stringify(fx)).length;
+        if (batch.length && bytes + size > OUTBOX.maxBatchBytes) break;
+        if (fx !== undefined) batch.push(fx);
+        bytes += size;
+        to++;
+      }
       const status = batch.length ? await post(batch) : 200;
+      // Too big for the API after all: send fewer at a time.
+      if (status === 413 && batch.length > 1) {
+        most = Math.max(1, Math.floor(batch.length / 2));
+        continue;
+      }
       const ok = status >= 200 && status < 300;
-      if (!ok && status !== 400) {
+      // A 400 means the batch itself is malformed, and a 413 for a single
+      // effect means it's too big on its own: neither will ever succeed.
+      const hopeless = status === 400 || status === 413;
+      if (!ok && !hopeless) {
         this.failures++;
         this.retryAt = now() + Math.min(OUTBOX.maxRetryMs, OUTBOX.firstRetryMs * 2 ** (this.failures - 1));
         console.warn(`rooms: effects not delivered (${status || "unreachable"}); ${m.tail - m.head} waiting, retry in ${this.retryAt - now()} ms`);
         return;
       }
-      // A 400 means the batch itself is malformed and never will succeed.
-      if (!ok) console.error(`rooms: the API refused ${batch.length} effects as malformed; dropped them`);
+      if (!ok) console.error(`rooms: the API refused ${batch.length} effects (${status}); dropped them`);
       m.head = Math.max(m.head, to);
       await this.storage.put({ [META]: { ...m } });
-      await this.remove(keys);
+      await this.remove(keys.slice(0, to - from));
       this.failures = 0;
       this.retryAt = null;
     }

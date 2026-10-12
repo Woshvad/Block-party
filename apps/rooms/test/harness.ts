@@ -19,7 +19,11 @@ export const fakeApi = () => ({
   effects: [] as Posted[],
   effectsAvailable: true,
   effectsRefused: 0, // effect posts answered with a 503
+  effectsTooLarge: 0, // effect posts over the API's body limit, answered with a 413
 });
+
+// The real API refuses a request body over 16 KB (maxBody in apps/api/src/app.ts).
+export const API_BODY_LIMIT = 16 * 1024;
 export type FakeApi = ReturnType<typeof fakeApi>;
 
 export type Client = { ws: WebSocket; events: Array<Record<string, any>>; next: (t: string, ms?: number) => Promise<Record<string, any>>; send: (m: unknown) => void; closed: Promise<number> };
@@ -48,7 +52,12 @@ export async function startRooms(api: FakeApi, bindings: Record<string, string> 
           api.effectsRefused++;
           return new Response("unavailable", { status: 503 });
         }
-        api.effects.push(await req.json());
+        const text = await req.text();
+        if (new TextEncoder().encode(text).length > API_BODY_LIMIT) {
+          api.effectsTooLarge++;
+          return new Response("request body too large", { status: 413 });
+        }
+        api.effects.push(JSON.parse(text));
       }
       if (path === "/internal/rooms/away") {
         // Two dimmed residents on the watch party floor; garbage elsewhere must not break a room.

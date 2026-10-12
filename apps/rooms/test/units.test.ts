@@ -157,6 +157,49 @@ describe("the effects outbox", () => {
     expect(sent).toEqual([0, 1]); // the second was picked up by the next round of the same drain
     expect(await box.waiting()).toBe(0);
   });
+
+  // The API refuses a request body over 16 KB with a 413 (maxBody in
+  // apps/api/src/app.ts). A room line can be 2,000 characters of up to 4
+  // bytes each, so a count-only batch of long lines would be refused every
+  // time and hold up everything behind it.
+  it("keeps every request under the API's 16 KB body limit, however long the lines", async () => {
+    const { storage } = memoryStorage();
+    const box = new Outbox(storage);
+    const longest = (n: number) => ({ kind: "moderate", n, line: { id: `l${n}`, userId: crypto.randomUUID(), handle: "h".repeat(20), text: "\u{1F600}".repeat(2000), at: T } });
+    await box.add(Array.from({ length: 12 }, (_, i) => longest(i)));
+    await box.add(effects(30, 12)); // and small ones behind them
+    const bodies: number[] = [];
+    const sent: number[] = [];
+    await box.drain(async (b) => {
+      // The request the room sends, with the longest place name there can be.
+      bodies.push(new TextEncoder().encode(JSON.stringify({ place: "x".repeat(64), copy: 999_999, effects: b })).length);
+      sent.push(...(b as Array<{ n: number }>).map((x) => x.n));
+      return 200;
+    }, () => T);
+    expect(sent).toEqual(Array.from({ length: 42 }, (_, i) => i));
+    expect(Math.max(...bodies)).toBeLessThanOrEqual(16 * 1024);
+    expect(await box.waiting()).toBe(0);
+  });
+
+  it("a 413 sends fewer at a time; one effect the API still won't take is dropped, not retried forever", async () => {
+    const { storage } = memoryStorage();
+    const box = new Outbox(storage);
+    await box.add(effects(8));
+    // An API that takes at most 2 effects a request, and never effect 5.
+    const tries: number[][] = [];
+    const taken: number[] = [];
+    await box.drain(async (b) => {
+      const ns = (b as Array<{ n: number }>).map((x) => x.n);
+      tries.push(ns);
+      if (ns.length > 2 || ns.includes(5)) return 413;
+      taken.push(...ns);
+      return 200;
+    }, () => T);
+    expect(taken).toEqual([0, 1, 2, 3, 4, 6, 7]);
+    expect(tries.map((t) => t.length)).toEqual([8, 4, 2, 2, 2, 1, 1, 1, 1]);
+    expect(await box.waiting()).toBe(0);
+    expect(box.retryAt).toBeNull();
+  });
 });
 
 describe("the per-socket bucket", () => {
