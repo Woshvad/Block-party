@@ -12,3 +12,9 @@ Observed in the local development build, Codex in-app desktop browser, `/design-
 Viewport was restored after measurement. Different camera framing/culling explains some geometry variation. Heap varies with garbage collection; these samples do not establish a leak. The meter counts frames over approximately one second and is affected by browser visibility/throttling. No hardware/GPU or sustained thermal benchmark was collected. These results do not establish phone performance.
 
 Next performance acceptance: production build on a real mid-range phone inside Telegram, fixed day/night and diner camera positions, warm-up followed by a sustained run, including median/p95 frame time, reconnect, memory growth and touch responsiveness. Compare identical camera and crowd configurations before optimizing additional visual layers.
+
+## 12 October: what the meter counts now
+
+The table above counted the main pass only. Since 12 October the `?perf` meter counts every pass, shadows included, and also shows GPU geometries, textures and shader programs. In a local dev build at the default 1280 × 720 view, with frames stepped by hand because the browser pane was in the background, the same city read 256 draw calls and 794k triangles, where the main pass alone was 147. That is one snapshot, not a benchmark, and it is above the plan's 100–150 budget once shadows count.
+
+Also new: kit models share one palette texture per pack instead of uploading a copy each, and there's a low quality tier (device pixel ratio 1, no antialiasing, no shadows, no sidewalk walkers or night lamps), picked from the device or forced with `?quality=low|high` or Graphics in Me. Neither has been measured on a phone. The acceptance run described above, on a real mid-range phone inside Telegram, is still the next step, and should be done on both tiers.

@@ -10,6 +10,31 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 - **Local settings:** the shared `.env` at the repo root (every script, the dev server and the test suites read it, after any `.env` in their own package; no symlinks needed) has `ODDS_SOURCE=polymarket`, so the local API polls live Polymarket. Use `mock` to work offline.
 - **Running it:** `.claude/launch.json` starts the city on :3100, the API on :8787 (set `LOCAL_CRON=1` for the minute cron) and rooms on :8788. To sign in, a dev button on the guest screen says "claim as a Telegram tester". `?perf` on the city shows draw calls, triangles and memory.
 
+## Review fixes (12 October 2026)
+
+An outside review (a static read of the whole repo, then fixes with tests) ran on 11 and 12 October. The fixes are on the branch `fix/review-findings`, built on `feat/backend-bricks`. It was committed locally and **not pushed**: open a pull request and let CI run before merging. On its last commit, typecheck, every package's suite and the city build passed on a Windows dev machine against Postgres 15: core 664, db 850, API 652, rooms 54 and city 263 tests (before the review: 562, 774, 608, 21 and 138). The API suite took 49 minutes there.
+
+What it fixed:
+
+- **CI never ran.** The workflow only triggered on `main`, which doesn't exist. It now runs on every push and PR, on Node 22 (vitest 5 needs it) and Postgres 15, and builds the city. The tests also run on Windows, and each checkout gets its own test databases.
+- **Tower: live calls never settled.** The Polymarket feed now looks up the markets we hold among Gamma's closed ones: resolved YES or NO, a 50/50 final voids, and a result that's only "proposed" waits (the carry-or-void timeout is still the owner's call). Markets that leave the feed freeze and stop taking calls. An empty or unreadable poll counts as failed, every request has a timeout, and sample odds say "Sample odds · Not real", never "Odds via Polymarket".
+- **Economy.** Rent counts GM held in open stakes and runs first on Saturdays. Each bell step records itself when it finishes, so a failure later in the bell doesn't replay it. A missed day's Grudge and Tower Lights escrow settles at the next bell. The odds poll no longer grants streak days inside its transaction (it could deadlock with gm). The ledger has a time index, so the reel and the economy report stop scanning all history.
+- **Safety.** The minute cron runs the AI moderation check when `OPENAI_API_KEY` is set; flagged text comes down where it lives, and staff have a Flagged tab. `BLOCKED_WORDS` applies on every send path, in the API and the rooms. Lookalike letters (Cyrillic, Greek and more) are folded, more link tricks are caught, boards are limited to real places, and starting a phone check no longer says whether the number is taken.
+- **Players.** Pushes carry an Open button once `CITY_URL` is set, and playing soon after a push counts as opening it, so active players aren't throttled to weekly pushes. Mod Shifts resume after leaving the screen. A retry after a lost reply reuses its idempotency key instead of paying twice.
+- **Rooms.** Each socket is rate-limited before any I/O, access is cached for 15 seconds instead of fetched for every action, and block lists are out of tickets and socket attachments. Presence is reconciled, so a dropped socket can't vote in person for weeks. Room effects go through a stored outbox, and a suspension closes with its own code (4002).
+- **API and deploy.** The API refuses to run with a missing or placeholder bot token or a secret under 32 characters, the rooms Worker refuses connections with a missing or weak secret, and both say why on `/health`. Failed cron jobs are logged by name. The app is built once per isolate. `wrangler.jsonc` and README "Deploying" list every var and secret, with `OWNER ITEM` placeholders for what doesn't exist yet. A production city build fails without an https `NEXT_PUBLIC_API_URL`.
+- **City.** Error boundaries with a 2D fallback and Retry, so one failed model download no longer takes the app down. The Telegram BackButton, safe areas, start links (`i-<code>` for crew invites, `n-<id>` for pushes) and closing confirmation. Odds boards say when the feed is paused. Place names show at the phone's starting zoom, with headcounts in their own badge. Kit models share one texture per pack, the board stays mounted between tabs, and there's a low quality tier (`?quality=low|high`, or Graphics in Me).
+
+Still open after it (engineering; the owner's items are in section 3 below):
+
+- **Nothing has run inside Telegram or on a phone.** The BackButton, safe areas, start links and the low tier need a device check, and the frame-rate test is still to do. The `?perf` meter now counts every pass, shadows included, so its numbers are higher than the old 146 draw calls (main pass only).
+- **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
+- **A staff rename for flagged @handles.** The handle trigger blocks it; staff restrict the resident instead.
+- **Promised but inert:** four alert toggles have no producer, and Contrarian Day and NOTHING Day have copy but no rules.
+- **An asset pipeline** (compressed GLBs, unused models removed, immutable cache headers once the city has hosting).
+- **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
+- **Profile the API suite.** It took 15 to 50 minutes on a dev machine; CI allows 90.
+
 ## What exists (one paragraph each)
 
 - **Backend (bricks 1–40).** Accounts, gm and the drip, streaks, residents, crews and gm chains, homes and Build mode, rent and jobs, the bell, moods, City Hall, moderation, live rooms (Durable Objects) and chat, rides, away life, notifications, the Tower (calls, Aura, Slate, bell show, duels, City and Crew markets, Right List), syndicates, the Crew League, Bunkers, Ratio, Tower Lights, and real-money controls (off). It also has the **Receipt Binder** query (`receiptBinder` in `packages/db/src/tower.ts`).
@@ -54,9 +79,11 @@ Still open:
 - [ ] **Resolution policy:** UMA can settle late. Decide whether the card carries to the next bell or is voided.
 - [ ] **Verified builder tier** (needed for real trades) and the **legal opinion** (Gate 2). Real money stays off until both are done.
 - [ ] **Telegram bot token and domain.** These are needed for the real Mini App launch and the frame-rate test inside Telegram.
-- [ ] **Proof of Neighbour providers** (phone and crypto verifiers, `PON_PEPPER`). The routes return 503 until then.
+- [ ] **Proof of Neighbour providers** (phone and crypto verifiers). `PON_PEPPER` is wired; the routes return 503 until a provider is built and configured.
+- [ ] **Cloudflare account, Postgres, the Hyperdrive id, domains and the city's hosting.** `wrangler.jsonc` marks each as an `OWNER ITEM`; README "Deploying" lists the steps.
+- [ ] **A privacy and retention policy**, before account deletion and export can be built.
 
-Note: PARKED.md still says the odds worker is "not started". The odds worker and price-tick store now exist, so the remaining Polymarket items are the four above.
+PARKED.md was brought up to date on 12 October: the odds worker, the tick store and resolution ingestion exist; the items above are what's left.
 
 ## Ground rules (they've kept the project honest)
 
