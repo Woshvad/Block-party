@@ -180,7 +180,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 
 **Owner items first.** None of these exist yet, and the config only holds marked placeholders for them (`OWNER ITEM` in both `wrangler.jsonc` files): the Cloudflare account, the Postgres database and its Hyperdrive id, the domains, the bot token from @BotFather, Polymarket's written OK for free calls, and somewhere to host the city.
 
-1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
+1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`. Pending migrations apply in one transaction, and the runner waits at most 5 seconds for a table lock, then stops with nothing changed: run it again when it's quiet. On a ledger of millions of entries, first build migration 0045's index without blocking writes, `CREATE INDEX CONCURRENTLY IF NOT EXISTS "gm_entries_account_time_idx" ON "gm_entries" USING btree ("account_id","created_at");`, and the migration then finds it there.
 2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc` in place of `REPLACE_WITH_HYPERDRIVE_ID`.
 3. Domains. The config assumes the city at `https://blockparty.city` (the API's `ALLOWED_ORIGINS`), the API at `https://api.blockparty.city` (the rooms' `API_URL`) and the rooms at `https://rooms.blockparty.city` (the API's `ROOMS_URL`). Give each Worker its custom domain (the commented `routes` line in its `wrangler.jsonc`) or change those vars: on `workers.dev` alone the two Workers can't reach each other at these addresses.
 4. Secrets, with `wrangler secret put NAME` in each Worker's directory. A fresh shared secret: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
