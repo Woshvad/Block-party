@@ -30,9 +30,10 @@ export class NotifyError extends Error {
   }
 }
 
-// Delivery: Telegram bot messages now, home-screen push later.
+// Delivery: Telegram bot messages now, home-screen push later. The id lets
+// the message carry a button that opens the city and marks it opened.
 export interface NotificationSender {
-  send(userId: string, text: string): Promise<"sent" | "no_channel" | "error">;
+  send(userId: string, text: string, notificationId?: string): Promise<"sent" | "no_channel" | "error">;
 }
 
 type Prefs = typeof notificationPrefs.$inferSelect;
@@ -97,6 +98,13 @@ export async function notify(db: Db, userId: string, kind: NotifyKind, values: R
 
 // Sends what's due, re-checking every limit at send time under a per-resident
 // lock (two dispatchers can never both squeeze under the cap).
+//
+// Each push is claimed before it goes out: the limits are checked, the wording
+// chosen and the row marked sent (reason "sending") in one transaction, and
+// only once that has committed is the message sent. So a lost commit can never
+// send a push twice, and no lock is held while Telegram answers. A push whose
+// answer never comes back (the Worker died mid-send) keeps reason "sending":
+// it counts as sent for the limits and is never sent again.
 export async function runNotificationBatch(db: Db, sender: NotificationSender, opts: { now?: Date; batch?: number } = {}) {
   const now = opts.now ?? new Date();
   const due = await db
@@ -107,7 +115,7 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
     .limit(opts.batch ?? 100);
   const tally = { sent: 0, suppressed: 0, failed: 0, retry: 0, deferred: 0 };
   for (const { id } of due) {
-    const r = await db.transaction(async (tx) => {
+    const claim = await db.transaction(async (tx) => {
       const [n] = await tx.select().from(notifications).where(and(eq(notifications.id, id), eq(notifications.status, "queued"))).for("no key update", { skipLocked: true });
       if (!n) return null;
       await tx.execute(sql`SELECT 1 FROM users WHERE id = ${n.userId} FOR NO KEY UPDATE`);
@@ -127,8 +135,18 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
       }
       const localDay = local.day;
 
+      // "back": they were playing at some point in the few hours after it was
+      // sent (a new session or a heartbeat), which counts as opening it even if
+      // they came in some other way than the push's button.
       const sentRecent = await tx
-        .select({ template: notifications.template, sentAt: notifications.sentAt, openedAt: notifications.openedAt, localDay: notifications.localDay, text: notifications.text })
+        .select({
+          template: notifications.template,
+          sentAt: notifications.sentAt,
+          openedAt: notifications.openedAt,
+          localDay: notifications.localDay,
+          text: notifications.text,
+          back: sql<boolean>`EXISTS (SELECT 1 FROM play_sessions s WHERE s.user_id = ${notifications.userId} AND s.last_seen_at >= ${notifications.sentAt} AND s.started_at <= ${notifications.sentAt} + make_interval(hours => ${NOTIFY.backWithinHours}))`,
+        })
         .from(notifications)
         .where(and(eq(notifications.userId, n.userId), eq(notifications.status, "sent")))
         .orderBy(desc(notifications.sentAt))
@@ -140,7 +158,7 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
       let streak = 0;
       let farewellSent = false;
       for (const s of sentRecent) {
-        if (s.openedAt) break;
+        if (s.openedAt || s.back) break;
         if (s.text?.endsWith(FAREWELL)) farewellSent = true;
         if (s.sentAt!.getTime() > ignoredCutoff) continue; // too recent to call ignored
         streak++;
@@ -161,21 +179,38 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
       // Values (handles) can't smuggle in money talk, not even as buy_now or usdc-drop.
       if (NEVER_SAY.test(text.replace(FAREWELL, "").replace(/[_\-.]+/g, " "))) return suppress("unsafe_text");
 
-      const result = await sender.send(n.userId, text);
-      if (result === "no_channel") return suppress("no_channel");
-      if (result === "error") {
-        const attempts = n.attempts + 1;
-        // Back off 5, then 10 minutes; the third failure is final.
-        await tx
-          .update(notifications)
-          .set({ attempts, scheduledFor: new Date(now.getTime() + attempts * 5 * 60_000), ...(attempts >= 3 ? { status: "failed" as const, reason: "send_failed" } : {}) })
-          .where(eq(notifications.id, n.id));
-        return attempts >= 3 ? ("failed" as const) : ("retry" as const);
-      }
-      await tx.update(notifications).set({ status: "sent", template, text, localDay, sentAt: now }).where(eq(notifications.id, n.id));
-      return "sent" as const;
+      await tx.update(notifications).set({ status: "sent", reason: "sending", template, text, localDay, sentAt: now }).where(eq(notifications.id, n.id));
+      return { userId: n.userId, text, attempts: n.attempts };
     });
-    if (r) tally[r]++;
+    if (!claim) continue;
+    if (typeof claim === "string") {
+      tally[claim]++;
+      continue;
+    }
+
+    const result = await sender.send(claim.userId, claim.text, id);
+    // Not sent after all: the claim is undone, so it no longer counts.
+    const unsent = { sentAt: null, template: null, text: null, localDay: null };
+    if (result === "sent") {
+      await db.update(notifications).set({ reason: null }).where(eq(notifications.id, id));
+      tally.sent++;
+    } else if (result === "no_channel") {
+      await db.update(notifications).set({ status: "suppressed", reason: "no_channel", ...unsent }).where(eq(notifications.id, id));
+      tally.suppressed++;
+    } else {
+      const attempts = claim.attempts + 1;
+      // Back off 5, then 10 minutes; the third failure is final.
+      await db
+        .update(notifications)
+        .set({
+          ...unsent,
+          attempts,
+          scheduledFor: new Date(now.getTime() + attempts * 5 * 60_000),
+          ...(attempts >= 3 ? { status: "failed" as const, reason: "send_failed" } : { status: "queued" as const, reason: null }),
+        })
+        .where(eq(notifications.id, id));
+      tally[attempts >= 3 ? "failed" : "retry"]++;
+    }
   }
   return tally;
 }

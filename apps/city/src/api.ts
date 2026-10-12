@@ -247,6 +247,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     answerShift: (id: string, answers: boolean[]) => request<{ score: number; pay: number }>("POST", `/v1/shifts/${encodeURIComponent(id)}/answers`, { answers }),
     collectShift: (id: string) => request<{ pay: number; replayed: boolean }>("POST", `/v1/shifts/${encodeURIComponent(id)}/collect`),
     awayShift: () => request<Record<string, unknown>>("POST", "/v1/shifts/away"),
+    // The shift to come back to after leaving the view or reloading, or null.
+    currentShift: () => request<ShiftNow | null>("GET", "/v1/shifts/current"),
 
     // --- Real money (off until the legal opinion; never in the Mini App)
     realGate: (b: { marketId?: string; amountCents?: number; deviceLocationOk?: boolean; deviceCountry?: string } = {}) => request<{ ok: true } | { ok: false; reason: string }>("POST", "/v1/real/gate", b),
@@ -271,6 +273,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     resolveCityMarket: (id: string, result: "yes" | "no" | "void") => request<Record<string, unknown>>("POST", `/v1/staff/city-markets/${encodeURIComponent(id)}/resolve`, { result }),
     hideRatio: (id: string) => request<{ hidden: boolean }>("POST", `/v1/staff/ratio/${encodeURIComponent(id)}/hide`),
     altFlags: () => request<Record<string, unknown>[]>("GET", "/v1/staff/alt-flags"),
+    staffModeration: () => request<Array<{ id: string; kind: string; ref: string; authorId: string | null; text: string; status: string; categories: string[]; createdAt: string }>>("GET", "/v1/staff/moderation"),
+    reviewModeration: (id: string, verdict: "restore" | "remove") => request<Record<string, unknown>>("POST", `/v1/staff/moderation/${encodeURIComponent(id)}/review`, { verdict }),
     countrySwitch: (code: string, on: boolean) => request<Record<string, unknown>>("PUT", `/v1/staff/countries/${encodeURIComponent(code)}`, { on }),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
@@ -346,7 +350,11 @@ export type Moods = {
   play: { sessionMinutes: number };
   copium: { free: number; price: number };
 };
-export type Pon = { ageOk: boolean; verified: string[]; neighbours: number; neighboursNeeded: number; proofOfNeighbour: boolean; since: string | null };
+// A Mod Shift as the server sees it: the queue only while it can be answered;
+// pay null until it's decided (handed in, or the answer window missed).
+export type ShiftNow = { shiftId: string; items: { text: string }[] | null; answerBy: string; endsAt: string; answered: boolean; score: number | null; pay: number | null; collectable: boolean };
+// neighbours is null once proven: the mark is kept for good, so rooms aren't counted again.
+export type Pon = { ageOk: boolean; verified: string[]; neighboursNeeded: number; since: string | null } & ({ proofOfNeighbour: false; neighbours: number } | { proofOfNeighbour: true; neighbours: null });
 export type Prefs = { timeZone: string; quietStart: number; quietEnd: number; alerts: string[]; bell2h: boolean; pushOff: boolean };
 export type Restriction = { id: string; kind: string; reason: string; startsAt: string; endsAt: string | null };
 export type Law = { id: string; name: string; touches: string[]; effects: Record<string, unknown> };

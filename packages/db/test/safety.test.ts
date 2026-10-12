@@ -2,8 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { ModerationProvider } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  CREW_NAME_UNDER_REVIEW,
+  PITCH_UNDER_REVIEW,
   SafetyError,
   activeRestrictions,
+  createCrew,
+  editCrew,
+  moderationQueue,
+  postToBoard,
+  reviewModerationItem,
+  takeDownFlagged,
   allowNewDmThread,
   appealRestriction,
   blockUser,
@@ -274,6 +282,114 @@ describe("the AI moderation queue", () => {
     const [a, b] = await Promise.all([runModerationBatch(db, meet, { batchSize: 20 }), runModerationBatch(db, meet, { batchSize: 20 })]);
     expect([a.checked, b.checked]).toEqual([20, 20]);
     expect(new Set(seen).size).toBe(40);
+  });
+});
+
+describe("flagged text stays down until staff review it", () => {
+  const flagAll = (words: string[]): ModerationProvider => ({
+    classify: async (ts) => ts.map((t) => ({ flagged: words.some((w) => t.includes(w)), categories: ["harassment"] })),
+  });
+  // Runs the AI check over this test's items only, with the takedown hook the API uses.
+  async function check(words: string[]) {
+    await client`UPDATE moderation_items SET status = 'clean' WHERE status = 'pending' AND NOT (text LIKE ANY (${words.map((w) => `%${w}%`)}))`;
+    await runModerationBatch(db, flagAll(words), { onFlagged: (f) => takeDownFlagged(db, f) });
+  }
+  let weekN = 0;
+  // A candidacy written straight in, in a week of its own long ago.
+  async function candidate(u: string, pitch: string) {
+    const week = new Date(Date.UTC(2019, 0, 7 + 7 * weekN++)).toISOString().slice(0, 10);
+    await client`INSERT INTO elections (week) VALUES (${week}) ON CONFLICT DO NOTHING`;
+    await client`INSERT INTO candidates (week, user_id, pitch, declared_at) VALUES (${week}, ${u}, ${pitch}, now())`;
+    const item = await enqueueModeration(db, { kind: "pitch", ref: `${week}:${u}`, authorId: u, text: pitch });
+    return { week, item };
+  }
+  const pitchOf = async (week: string, u: string) => (await client`SELECT pitch FROM candidates WHERE week = ${week} AND user_id = ${u}`)[0]!.pitch;
+  const crewRow = async (id: string) => (await client`SELECT name, name_key FROM crews WHERE id = ${id}`)[0]!;
+
+  it("a flagged pitch, crew name and post come down; staff see them, and restore or remove each", async () => {
+    const [mod, lead, poster, outsider] = [await staffer(), await makeResident(db), await makeResident(db), await makeResident(db)];
+    const tag = randomUUID().slice(0, 6);
+    const crew = await createCrew(db, lead, { name: `Slurcrew ${tag}` });
+    const crewItem = await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: lead, text: crew.name });
+    const { week, item: pitchItem } = await candidate(lead, `Slurpitch ${tag} for Mayor`);
+    const post = await postToBoard(db, poster, "city_hall", `slurpost ${tag}`, { now: new Date(Date.UTC(2031, 5, 1)) });
+    const [postItem] = await client`SELECT id FROM moderation_items WHERE ref = ${post.id}`;
+    const nameKey = (await crewRow(crew.id)).name_key;
+
+    await check([`Slurcrew ${tag}`, `Slurpitch ${tag}`, `slurpost ${tag}`]);
+    expect(await crewRow(crew.id)).toEqual({ name: CREW_NAME_UNDER_REVIEW, name_key: nameKey }); // the key stays reserved
+    expect(await pitchOf(week, lead)).toBe(PITCH_UNDER_REVIEW);
+    expect((await client`SELECT hidden FROM messages WHERE id = ${post.id}`)[0]!.hidden).toBe(true);
+
+    // Staff only, oldest first, with the original text to judge.
+    expect(await code(moderationQueue(db, outsider))).toBe("NOT_STAFF");
+    const queued = (await moderationQueue(db, mod)).filter((q) => [crewItem.id, pitchItem.id, postItem!.id].includes(q.id));
+    expect(queued.map((q) => [q.kind, q.text, q.status])).toEqual([
+      ["crew_name", `Slurcrew ${tag}`, "flagged"],
+      ["pitch", `Slurpitch ${tag} for Mayor`, "flagged"],
+      ["board", `slurpost ${tag}`, "flagged"],
+    ]);
+    expect(queued[0]!.categories).toEqual(["harassment"]);
+
+    expect(await code(reviewModerationItem(db, outsider, crewItem.id, "restore"))).toBe("NOT_STAFF");
+    expect(await code(reviewModerationItem(db, mod, crewItem.id, "maybe"))).toBe("INVALID_INPUT");
+    expect(await code(reviewModerationItem(db, mod, "not-an-id", "restore"))).toBe("NO_SUCH_ITEM");
+    expect(await reviewModerationItem(db, mod, crewItem.id, "restore")).toMatchObject({ review: "restored", reviewedBy: mod });
+    expect((await crewRow(crew.id)).name).toBe(`Slurcrew ${tag}`);
+    await reviewModerationItem(db, mod, pitchItem.id, "remove");
+    expect(await pitchOf(week, lead)).toBe(PITCH_UNDER_REVIEW);
+    await reviewModerationItem(db, mod, postItem!.id, "restore");
+    expect((await client`SELECT hidden FROM messages WHERE id = ${post.id}`)[0]!.hidden).toBe(false);
+
+    // Reviewed items leave the queue, and can't be reviewed twice.
+    const ids = (await moderationQueue(db, mod)).map((q) => q.id);
+    for (const id of [crewItem.id, pitchItem.id, postItem!.id]) expect(ids).not.toContain(id);
+    expect(await code(reviewModerationItem(db, mod, pitchItem.id, "restore"))).toBe("NO_SUCH_ITEM");
+  });
+
+  it("only what was flagged comes down, and a restore never overwrites something newer", async () => {
+    const [mod, lead, runner] = [await staffer(), await makeResident(db), await makeResident(db)];
+    const tag = randomUUID().slice(0, 6);
+    // Renamed before the check got to it: the new name stays up.
+    const crew = await createCrew(db, lead, { name: `Oldname ${tag}` });
+    await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: lead, text: crew.name });
+    await editCrew(db, lead, { name: `Newname ${tag}` });
+    await check([`Oldname ${tag}`]);
+    expect((await crewRow(crew.id)).name).toBe(`Newname ${tag}`);
+
+    // Hidden, then a new pitch: restoring the old one leaves the new one alone.
+    const { week, item } = await candidate(runner, `Firstpitch ${tag}`);
+    await check([`Firstpitch ${tag}`]);
+    expect(await pitchOf(week, runner)).toBe(PITCH_UNDER_REVIEW);
+    await client`UPDATE candidates SET pitch = ${`Secondpitch ${tag}`} WHERE week = ${week} AND user_id = ${runner}`;
+    const second = await enqueueModeration(db, { kind: "pitch", ref: `${week}:${runner}`, authorId: runner, text: `Secondpitch ${tag}` });
+    await check([`Secondpitch ${tag}`]);
+    await reviewModerationItem(db, mod, item.id, "restore");
+    expect(await pitchOf(week, runner)).toBe(PITCH_UNDER_REVIEW); // still the second pitch's hold, not the first pitch back
+    await reviewModerationItem(db, mod, second.id, "restore");
+    expect(await pitchOf(week, runner)).toBe(`Secondpitch ${tag}`);
+  });
+
+  it("text the AI check never managed to read waits for staff, who can take it down", async () => {
+    const [mod, poster] = [await staffer(), await makeResident(db)];
+    const post = await postToBoard(db, poster, "city_hall", "unchecked words", { now: new Date(Date.UTC(2031, 5, 2)) });
+    const [item] = await client`UPDATE moderation_items SET status = 'error', attempts = 5 WHERE ref = ${post.id} RETURNING id`;
+    expect((await moderationQueue(db, mod)).find((q) => q.id === item!.id)).toMatchObject({ status: "error", text: "unchecked words" });
+    await reviewModerationItem(db, mod, item!.id, "remove");
+    expect((await client`SELECT hidden FROM messages WHERE id = ${post.id}`)[0]!.hidden).toBe(true);
+    // A resident's name is listed too (the handle can't change; staff act on the resident).
+    const named = await enqueueModeration(db, { kind: "resident_name", ref: poster, authorId: poster, text: "slurhandle Slur Name" });
+    await client`UPDATE moderation_items SET status = 'flagged' WHERE id = ${named.id}`;
+    expect((await moderationQueue(db, mod)).map((q) => q.id)).toContain(named.id);
+    expect(await reviewModerationItem(db, mod, named.id, "remove")).toMatchObject({ review: "removed" });
+  });
+
+  it("a review is all or nothing, recorded once by the database", async () => {
+    const mod = await staffer();
+    const it1 = await enqueueModeration(db, { kind: "chat", ref: "g1", authorId: null, text: "x" });
+    await expect(client`UPDATE moderation_items SET reviewed_at = now() WHERE id = ${it1.id}`).rejects.toThrow(/moderation_items_review/);
+    await expect(client`UPDATE moderation_items SET reviewed_at = now(), review = 'whatever' WHERE id = ${it1.id}`).rejects.toThrow(/moderation_items_review/);
+    expect(await code(reviewModerationItem(db, mod, it1.id, "remove"))).toBe("NO_SUCH_ITEM"); // never flagged
   });
 });
 

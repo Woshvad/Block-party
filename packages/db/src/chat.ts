@@ -1,4 +1,4 @@
-import { CAST, PLACE_RE, checkMessage, npcById } from "@bp/core";
+import { AREAS, CAST, PLACE_RE, checkMessage, npcById } from "@bp/core";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
@@ -108,9 +108,13 @@ export async function frensOf(db: Db, userId: string) {
 
 type Channel = { kind: "board" | "crew" | "dm"; channel: string };
 
-async function post(db: Db, authorId: string, where: Channel, text: unknown, opts: { now: Date; firstDm?: boolean }) {
+// What every send path takes: the clock, and staff's blocked words (the API
+// reads them from its BLOCKED_WORDS setting).
+export type SendOptions = { now?: Date; blockedWords?: readonly string[] };
+
+async function post(db: Db, authorId: string, where: Channel, text: unknown, opts: { now: Date; firstDm?: boolean; blockedWords?: readonly string[] }) {
   if (await isRestricted(db, authorId, "chat_mute", opts.now)) throw new ChatError("CHAT_RESTRICTED", "you can't chat right now; see your restrictions");
-  const v = checkMessage(text, { accountAgeDays: await accountAgeDays(db, authorId, opts.now), firstDm: opts.firstDm });
+  const v = checkMessage(text, { accountAgeDays: await accountAgeDays(db, authorId, opts.now), firstDm: opts.firstDm, blockedWords: opts.blockedWords });
   if (!v.ok) throw new ChatError("MODERATED", v.message, v.reason);
   const rl = await hitRateLimit(db, `chat:${authorId}`, { limit: CHAT.postsPerMinute, windowSeconds: 60, now: opts.now });
   if (!rl.allowed) throw new ChatError("TOO_FAST", "slow down, ser");
@@ -154,31 +158,45 @@ async function read(db: Db, readerId: string, where: Channel, opts: { before?: u
     if (Number.isNaN(d.getTime())) throw new ChatError("INVALID_INPUT", "before must be a date");
     before = d;
   }
-  const hidden = await hiddenFor(db, readerId, opts.now);
+  // Blocked (either way) and muted authors are left out before the page is
+  // cut, so a muted spammer's 50 posts can't push everyone else off it.
+  const nowIso = opts.now.toISOString();
   const rows = await db
     .select({ id: messages.id, authorId: messages.authorId, text: messages.text, createdAt: messages.createdAt })
     .from(messages)
-    .where(and(eq(messages.kind, where.kind), eq(messages.channel, where.channel), eq(messages.hidden, false), before ? lt(messages.createdAt, before) : undefined))
+    .where(
+      and(
+        eq(messages.kind, where.kind),
+        eq(messages.channel, where.channel),
+        eq(messages.hidden, false),
+        before ? lt(messages.createdAt, before) : undefined,
+        sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${readerId} AND ${blocks.blockedId} = ${messages.authorId}) OR (${blocks.blockerId} = ${messages.authorId} AND ${blocks.blockedId} = ${readerId}))`,
+        sql`NOT EXISTS (SELECT 1 FROM ${mutes} WHERE ${mutes.muterId} = ${readerId} AND ${mutes.mutedId} = ${messages.authorId} AND (${mutes.until} IS NULL OR ${mutes.until} > ${nowIso}::timestamptz))`,
+      ),
+    )
     .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(CHAT.pageSize);
   // Every line from the cast carries its label.
-  return rows
-    .filter((r) => !hidden.has(r.authorId))
-    .map((r) => {
-      const k = npcById(r.authorId);
-      return k ? { ...r, npc: { name: CAST[k].name, label: CAST[k].label } } : r;
-    });
+  return rows.map((r) => {
+    const k = npcById(r.authorId);
+    return k ? { ...r, npc: { name: CAST[k].name, label: CAST[k].label } } : r;
+  });
 }
 
 // --- Boards ---------------------------------------------------------------------
 
+// The city's Boards: one for each public place, the street's on Crew Row.
+// Homes, Crew Houses and the Bunkers have none, and no other name opens one,
+// so nobody can set up an unlisted channel outside the DM rules.
+export const BOARDS: readonly string[] = [...AREAS.filter((a) => a !== "street"), "crew_row"];
+
 const boardPlace = (place: unknown) => {
-  if (typeof place !== "string" || !PLACE_RE.test(place) || place.includes(":")) throw new ChatError("INVALID_INPUT", "no such board");
+  if (typeof place !== "string" || !BOARDS.includes(place)) throw new ChatError("INVALID_INPUT", "no such board");
   return place;
 };
 
 // Slow mode when a Board is busy: one post per 30 seconds each.
-export async function postToBoard(db: Db, authorId: string, place: unknown, text: unknown, opts: { now?: Date } = {}) {
+export async function postToBoard(db: Db, authorId: string, place: unknown, text: unknown, opts: SendOptions = {}) {
   const now = opts.now ?? new Date();
   const p = boardPlace(place);
   const [busy] = await db
@@ -189,7 +207,7 @@ export async function postToBoard(db: Db, authorId: string, place: unknown, text
     const rl = await hitRateLimit(db, `slow:${p}:${authorId}`, { limit: 1, windowSeconds: CHAT.slowModeSeconds, now });
     if (!rl.allowed) throw new ChatError("SLOW_MODE", `slow mode: one post every ${CHAT.slowModeSeconds} seconds`);
   }
-  return post(db, authorId, { kind: "board", channel: p }, text, { now });
+  return post(db, authorId, { kind: "board", channel: p }, text, { now, blockedWords: opts.blockedWords });
 }
 
 export const readBoard = (db: Db, readerId: string, place: unknown, opts: { before?: unknown; now?: Date } = {}) =>
@@ -219,9 +237,9 @@ async function myCrewId(db: Db, userId: string) {
   return m.crewId;
 }
 
-export async function postToCrew(db: Db, authorId: string, text: unknown, opts: { now?: Date } = {}) {
+export async function postToCrew(db: Db, authorId: string, text: unknown, opts: SendOptions = {}) {
   const crewId = await myCrewId(db, authorId);
-  return post(db, authorId, { kind: "crew", channel: crewId }, text, { now: opts.now ?? new Date() });
+  return post(db, authorId, { kind: "crew", channel: crewId }, text, { now: opts.now ?? new Date(), blockedWords: opts.blockedWords });
 }
 
 export async function readCrew(db: Db, readerId: string, opts: { before?: unknown; now?: Date } = {}) {
@@ -231,7 +249,7 @@ export async function readCrew(db: Db, readerId: string, opts: { before?: unknow
 
 // --- DMs --------------------------------------------------------------------------
 
-export async function sendDm(db: Db, fromId: string, target: unknown, text: unknown, opts: { now?: Date } = {}) {
+export async function sendDm(db: Db, fromId: string, target: unknown, text: unknown, opts: SendOptions = {}) {
   const now = opts.now ?? new Date();
   const toId = await requireUser(db, target);
   if (toId === fromId) throw new ChatError("INVALID_INPUT", "you can't DM yourself");
@@ -250,7 +268,7 @@ export async function sendDm(db: Db, fromId: string, target: unknown, text: unkn
     .from(messages)
     .where(and(eq(messages.kind, "dm"), eq(messages.channel, thread!.id), eq(messages.authorId, fromId)))
     .limit(1);
-  const m = await post(db, fromId, { kind: "dm", channel: thread!.id }, text, { now, firstDm: !mine });
+  const m = await post(db, fromId, { kind: "dm", channel: thread!.id }, text, { now, firstDm: !mine, blockedWords: opts.blockedWords });
   return { threadId: thread!.id, message: m, notice: DM_NOTICE };
 }
 

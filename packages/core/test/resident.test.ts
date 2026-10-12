@@ -326,3 +326,27 @@ describe("seasons", () => {
     expect(seasonOf("2027-10-04")).toBe(14);
   });
 });
+
+describe("lookalike letters from other scripts", () => {
+  // Spelled by code point: Cyrillic а, е, о and Greek capital Μ and Α.
+  const ch = (cp: number) => String.fromCodePoint(cp);
+  const [a, e, o, M, A] = [ch(0x430), ch(0x435), ch(0x43e), ch(0x39c), ch(0x391)];
+
+  it.each([
+    ["the Faucet Fren NPC", `F${a}ucet Fr${e}n`],
+    ["the Mayor", `M${a}yor`],
+    ["the staff", `Bl${o}ck P${a}rty Team`],
+    ["the Mayor in Greek capitals", `${M}${A}YOR`],
+  ])("can't pass for %s", (_who, name) => {
+    expect(reason(() => normalizeName(name))).toBe("reserved");
+  });
+
+  it("every default-ignorable character comes out, not just the listed ones", () => {
+    expect(normalizeName(`Roof${String.fromCodePoint(0x1d173)}Rat`)).toBe("RoofRat"); // a musical format character
+    expect(normalizeName(`Roof${String.fromCodePoint(0x1bca0)}Rat`)).toBe("RoofRat"); // a shorthand format control
+  });
+
+  it("names written in those scripts are still fine", () => {
+    for (const n of ["Ольга", "Сергей Петров", "Ναταλία", "Αλέξης"]) expect(reason(() => normalizeName(n)), n).toBe("OK");
+  });
+});

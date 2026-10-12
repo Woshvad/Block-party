@@ -34,6 +34,7 @@ import {
   createGuest,
   createInvite,
   createResident,
+  currentShift,
   decideJoinRequest,
   depositToPot,
   dissolveCrew,
@@ -65,7 +66,6 @@ import {
   followBoard,
   frensOf,
   grantMood,
-  hideMessage,
   isBlockedEitherWay,
   myThreads,
   postToBoard,
@@ -90,6 +90,8 @@ import {
   reportSla,
   resolveReport,
   restrictUser,
+  moderationQueue,
+  reviewModerationItem,
   runModerationBatch,
   unblockUser,
   unmuteUser,
@@ -178,7 +180,6 @@ import {
   voteRatio,
   hideRatioEntry,
   pickRatioPrompt,
-  takeDownRatioEntry,
   bidLights,
   lightsBoard,
   staffAltFlags,
@@ -221,6 +222,7 @@ import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
 import { cors } from "hono/cors";
 import { ApiError, toResponse } from "./errors";
+import { takeDown } from "./moderation";
 import type { RoomsClient } from "./rooms-client";
 
 export type Limits = {
@@ -254,7 +256,8 @@ export type AppConfig = {
   presence?: PresenceCheck;
   // The AI moderation check (OpenAI's free endpoint in production).
   moderation?: ModerationProvider;
-  // Staff-maintained blocked words for chat.
+  // Staff-maintained blocked words (the BLOCKED_WORDS setting, read with
+  // parseBlockedWords), checked on every chat and Ratio send.
   blockedWords?: readonly string[];
   // The live rooms: presence, evidence and takedowns, plus tickets to get in.
   rooms?: RoomsClient;
@@ -282,6 +285,16 @@ type C = Context<{ Variables: Vars }>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEM = /^[A-Za-z0-9_-]{8,100}$/;
+
+// What a per-IP rate-limit bucket holds instead of the address: an HMAC of
+// it keyed with the server's internal secret, so the stored buckets can't be
+// turned back into IPs by hashing guesses (and old ones are swept anyway).
+export async function ipBucketKey(secret: string, ip: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(`rate-limit-ip:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(ip)));
+  return [...mac.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 function timingSafeEqual(a: string, b: string) {
   if (a.length !== b.length) return false;
@@ -332,6 +345,7 @@ export function createApp(cfg: AppConfig) {
   app.notFound((c) => c.json({ error: { code: "NOT_FOUND", message: "no such route", requestId: c.get("requestId") } }, 404));
 
   const ip = (c: C) => (cfg.clientIpHeader && c.req.header(cfg.clientIpHeader)) || "unknown";
+  const ipKey = (c: C) => ipBucketKey(cfg.internalSecret, ip(c));
 
   async function limit(c: C, bucket: string, max: number, windowSeconds: number) {
     const r = await hitRateLimit(db, bucket, { limit: max, windowSeconds, now: now() });
@@ -404,11 +418,13 @@ export function createApp(cfg: AppConfig) {
   };
 
   const authLimit = async (c: C, next: () => Promise<void>) => {
-    await limit(c, `ip:${ip(c)}:auth`, limits.authPerIpPerMinute, 60);
+    await limit(c, `ip:${await ipKey(c)}:auth`, limits.authPerIpPerMinute, 60);
     await next();
   };
 
   const opts = () => ({ now: now() });
+  // For the routes that send text: the clock plus staff's blocked words.
+  const sendOpts = () => ({ now: now(), ...(cfg.blockedWords ? { blockedWords: cfg.blockedWords } : {}) });
 
   // --- Public --------------------------------------------------------------
 
@@ -429,7 +445,7 @@ export function createApp(cfg: AppConfig) {
 
   app.post("/v1/auth/guest", authLimit, async (c) => {
     const b = await body(c);
-    await limit(c, `ip:${ip(c)}:guest`, limits.guestsPerIpPerHour, 3600);
+    await limit(c, `ip:${await ipKey(c)}:guest`, limits.guestsPerIpPerHour, 3600);
     const r = await createGuest(db, { ageAck: b.ageAck === true });
     return c.json(r, 201);
   });
@@ -590,7 +606,13 @@ export function createApp(cfg: AppConfig) {
     return c.json(crew, 201);
   });
   app.get("/v1/crews/mine", auth, async (c) => c.json(await mine(c)));
-  app.patch("/v1/crews/mine", auth, async (c) => c.json(await editCrew(db, c.get("userId"), await body(c))));
+  app.patch("/v1/crews/mine", auth, async (c) => {
+    const b = await body(c);
+    const crew = await editCrew(db, c.get("userId"), b);
+    // A new name gets the same AI check as the first one.
+    if (b.name !== undefined) await enqueueModeration(db, { kind: "crew_name", ref: crew.id, authorId: c.get("userId"), text: crew.name });
+    return c.json(crew);
+  });
   app.get("/v1/open-tables", auth, async (c) => c.json(await openTables(db)));
   app.get("/v1/crews/:id", auth, async (c) => {
     const crew = await getCrew(db, uuid(c, "id"));
@@ -741,6 +763,14 @@ export function createApp(cfg: AppConfig) {
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw new ApiError(400, "INVALID_INPUT", "from and to must be dates, from before to");
     return c.json(await reportSla(db, { from, to, now: now() }));
   });
+  // What the AI check flagged, or couldn't check, waiting for a person.
+  app.get("/v1/staff/moderation", auth, async (c) => c.json(await moderationQueue(db, c.get("userId"))));
+  app.post("/v1/staff/moderation/:id/review", auth, async (c) => {
+    const item = await reviewModerationItem(db, c.get("userId"), uuid(c, "id"), (await body(c)).verdict, opts());
+    // A removed room line comes down in the room as well.
+    if (item.review === "removed" && item.kind === "room") await takeDown(db, cfg.rooms)(item);
+    return c.json(item);
+  });
 
   // --- Live rooms ----------------------------------------------------------
 
@@ -852,7 +882,7 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ok: true });
   });
   app.get("/v1/boards/:place", auth, async (c) => c.json(await readBoard(db, c.get("userId"), c.req.param("place"), { before: c.req.query("before"), now: now() })));
-  app.post("/v1/boards/:place", auth, async (c) => c.json(await postToBoard(db, c.get("userId"), c.req.param("place"), (await body(c)).text, opts()), 201));
+  app.post("/v1/boards/:place", auth, async (c) => c.json(await postToBoard(db, c.get("userId"), c.req.param("place"), (await body(c)).text, sendOpts()), 201));
   app.post("/v1/boards/:place/follow", auth, async (c) => {
     await followBoard(db, c.get("userId"), c.req.param("place"));
     return c.json({ ok: true });
@@ -862,10 +892,10 @@ export function createApp(cfg: AppConfig) {
     return c.json({ ok: true });
   });
   app.get("/v1/crews/mine/chat", auth, async (c) => c.json(await readCrew(db, c.get("userId"), { before: c.req.query("before"), now: now() })));
-  app.post("/v1/crews/mine/chat", auth, async (c) => c.json(await postToCrew(db, c.get("userId"), (await body(c)).text, opts()), 201));
+  app.post("/v1/crews/mine/chat", auth, async (c) => c.json(await postToCrew(db, c.get("userId"), (await body(c)).text, sendOpts()), 201));
   app.get("/v1/dms", auth, async (c) => c.json(await myThreads(db, c.get("userId"))));
   app.get("/v1/dms/:threadId", auth, async (c) => c.json(await readDm(db, c.get("userId"), uuid(c, "threadId"), { before: c.req.query("before"), now: now() })));
-  app.post("/v1/dms/to/:userId", auth, async (c) => c.json(await sendDm(db, c.get("userId"), uuid(c, "userId"), (await body(c)).text, opts()), 201));
+  app.post("/v1/dms/to/:userId", auth, async (c) => c.json(await sendDm(db, c.get("userId"), uuid(c, "userId"), (await body(c)).text, sendOpts()), 201));
 
   // --- Moods ---------------------------------------------------------------
 
@@ -880,6 +910,8 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/shifts/away", auth, async (c) => c.json(await collectAwayShift(db, c.get("userId"), opts())));
   app.post("/v1/shifts/:id/answers", auth, async (c) => c.json(await submitShift(db, c.get("userId"), uuid(c, "id"), (await body(c)).answers, opts())));
   app.post("/v1/shifts/:id/collect", auth, async (c) => c.json(await collectShift(db, c.get("userId"), uuid(c, "id"), opts())));
+  // The shift to come back to (or null), so leaving the Shifts view never loses its pay.
+  app.get("/v1/shifts/current", auth, async (c) => c.json(await currentShift(db, c.get("userId"), opts())));
 
   // --- The Prediction Tower --------------------------------------------------
 
@@ -977,7 +1009,7 @@ export function createApp(cfg: AppConfig) {
     if (!r) throw new ApiError(404, "NOT_FOUND", "no Ratio of the Day yet (18:00 UTC)");
     return c.json(r);
   });
-  app.post("/v1/ratio", auth, async (c) => c.json(await submitRatio(db, c.get("userId"), (await body(c)).text, opts()), 201));
+  app.post("/v1/ratio", auth, async (c) => c.json(await submitRatio(db, c.get("userId"), (await body(c)).text, sendOpts()), 201));
   app.get("/v1/ratio/pair", auth, async (c) => c.json(await ratioPair(db, c.get("userId"), { ...opts(), where })));
   app.post("/v1/ratio/vote", auth, async (c) => {
     const b = await body(c);
@@ -1053,7 +1085,7 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
   // Public: anyone with the link sees the receipt, nobody can fake one.
   app.get("/v1/receipts/:token", async (c) => {
-    await limit(c, `receipt-ip:${ip(c)}`, limits.readsPerUserPerMinute, 60);
+    await limit(c, `receipt-ip:${await ipKey(c)}`, limits.readsPerUserPerMinute, 60);
     const id = cfg.receiptSecret ? await verifyReceiptToken(c.req.param("token"), cfg.receiptSecret) : null;
     const r = id ? await receipt(db, id, opts()) : null;
     if (!r) throw new ApiError(404, "NOT_FOUND", "no such receipt");
@@ -1105,21 +1137,9 @@ export function createApp(cfg: AppConfig) {
   app.post("/internal/bell", internal, async (c) => c.json(await runBell(db, opts())));
   app.post("/internal/moderation/run", internal, async (c) => {
     if (!cfg.moderation) throw new ApiError(503, "MODERATION_DISABLED", "no moderation provider configured");
-    return c.json(
-      await runModerationBatch(db, cfg.moderation, {
-        ...opts(),
-        // Take flagged content down where it lives.
-        onFlagged: async (f) => {
-          // A flagged Ratio headline comes down too.
-          if (f.kind === "board" && f.ref.startsWith("ratio:")) await takeDownRatioEntry(db, f.ref.slice(6));
-          else if (f.kind === "board" || f.kind === "crew" || f.kind === "dm") await hideMessage(db, f.ref);
-          if (f.kind === "room" && cfg.rooms) {
-            const [place, copy, lineId] = f.ref.split("#");
-            if (place && copy && lineId) await cfg.rooms.takedown(place, Number(copy), lineId).catch(() => undefined);
-          }
-        },
-      }),
-    );
+    // One batch, by hand; the minute cron runs the queue on its own. Flagged
+    // content comes down where it lives, the same way in both.
+    return c.json(await runModerationBatch(db, cfg.moderation, { ...opts(), onFlagged: takeDown(db, cfg.rooms) }));
   });
 
   // Who's wandering a place in their away life, for the rooms to draw dimmed.

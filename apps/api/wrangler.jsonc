@@ -12,8 +12,13 @@
   // Postgres through Hyperdrive: create it with `wrangler hyperdrive create`
   // and put its id here.
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "REPLACE_WITH_HYPERDRIVE_ID" }],
-  // Every minute: the bell (each step runs once), finished long actions, due pushes.
+  // Every minute: the bell (each step runs once), finished long actions, due
+  // pushes, and the AI moderation check once OPENAI_API_KEY is set.
   "triggers": { "crons": ["* * * * *"] },
+  // Optional: BLOCKED_WORDS, staff's blocked words (comma- or newline-
+  // separated), as a var here or as a secret. CITY_URL, the city's https
+  // address: pushes then carry an Open button that opens the city and marks
+  // the push opened (without it they are plain text).
   "vars": {
     "ALLOWED_ORIGINS": "https://blockparty.city,https://t.me",
     "ROOMS_URL": "https://rooms.blockparty.city"

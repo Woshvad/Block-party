@@ -54,7 +54,7 @@ export async function todaysRatio(db: Db, opts: { now?: Date } = {}) {
 }
 
 // One headline each, up to 80 characters, through the chat filter, until 23:00.
-export async function submitRatio(db: Db, userId: string, text: unknown, opts: { now?: Date } = {}) {
+export async function submitRatio(db: Db, userId: string, text: unknown, opts: { now?: Date; blockedWords?: readonly string[] } = {}) {
   const now = opts.now ?? new Date();
   const day = cityDay(now);
   const [p] = await db.select().from(ratioPrompts).where(eq(ratioPrompts.cityDay, day));
@@ -63,7 +63,7 @@ export async function submitRatio(db: Db, userId: string, text: unknown, opts: {
   const [r] = await db.select({ id: residents.userId }).from(residents).where(eq(residents.userId, userId));
   if (!r) throw new RatioError("NO_RESIDENT", "move in first");
   if (typeof text !== "string" || [...text.trim()].length < 1 || [...text.trim()].length > RATIO.maxChars) throw new RatioError("INVALID_INPUT", `a headline of up to ${RATIO.maxChars} characters`);
-  const v = checkMessage(text, { accountAgeDays: await accountAgeDays(db, userId, now) });
+  const v = checkMessage(text, { accountAgeDays: await accountAgeDays(db, userId, now), blockedWords: opts.blockedWords });
   if (!v.ok) throw new RatioError("MODERATED", v.message);
   if ([...v.text].length > RATIO.maxChars) throw new RatioError("INVALID_INPUT", `a headline of up to ${RATIO.maxChars} characters`);
   try {

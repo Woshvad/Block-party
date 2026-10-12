@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Api, Duel, Me } from "../api";
 import { countdown, until, useNow } from "../clock";
 import { label } from "../palette";
+import { handedIn, mark, shiftPayNow, shiftPhase, startedShift } from "../shiftState";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 import { handleOf, useWho } from "../who";
@@ -50,80 +51,113 @@ export default function Games({ api, me, onBack, onChanged }: { api: Api; me: Me
 type Act = ReturnType<typeof useAction>;
 
 // --- Shifts: spot the scams in 60 seconds, the shift runs 15 minutes, collect.
+// The shift lives on the server and is loaded when the view opens, so
+// switching games, going back or reloading never loses it or its pay.
 function Shifts({ api, act, onPaid }: { api: Api; act: Act; onPaid: () => void }) {
-  const [shift, setShift] = useState<{ shiftId: string; items: { text: string }[]; answerBy: string; endsAt: string } | null>(null);
+  const current = useLoad(() => api.currentShift(), [api]);
   const [answers, setAnswers] = useState<(boolean | null)[]>([]);
-  const [result, setResult] = useState<{ score: number; pay: number } | null>(null);
   const now = useNow(500);
-  const late = shift ? Date.parse(shift.answerBy) <= now : false;
-  const done = shift ? Date.parse(shift.endsAt) <= now : false;
-  return (
-    <section className="card">
-      {!shift ? (
-        <>
-          <p>
-            A Mod Shift: a queue of {SHIFT.items} messages. Mark each one a scam or fine, in 30 seconds. The shift then runs for {SHIFT.minutes} minutes and pays 10 to 12 GM by your score. {SHIFT.perDay} a day.
-          </p>
-          <div className="btnrow">
-            <button
-              className="btn"
-              disabled={act.pending}
-              onClick={() =>
-                act.run(() => api.startShift()).then((s) => {
-                  if (!s) return;
-                  setShift(s);
-                  setAnswers(s.items.map(() => null));
-                  setResult(null);
-                })
-              }
-            >
-              Start a shift
-            </button>
-            <button className="btn light" disabled={act.pending} onClick={() => act.run(() => api.awayShift(), (r) => `Away shift: +${String(r.pay ?? "")} GM`).then((x) => x && onPaid())}>
-              Collect my away shift
-            </button>
-          </div>
-          <p className="muted">The away shift (half pay) is for proven neighbours who said gm in the last day.</p>
-        </>
-      ) : !result ? (
-        <>
-          <p>
-            <b>Spot the scams</b> · {late ? "time's up" : `${countdown(Date.parse(shift.answerBy) - now)} left`}
-          </p>
-          {shift.items.map((it, i) => (
-            <div className="listrow" key={i}>
-              <span>{it.text}</span>
-              <span className="btnrow">
-                {/* Functional updates: quick taps in one frame must all count. */}
-                <button className={answers[i] === true ? "on" : ""} onClick={() => setAnswers((prev) => prev.map((a, j) => (j === i ? true : a)))}>
-                  Scam
-                </button>
-                <button className={answers[i] === false ? "on" : ""} onClick={() => setAnswers((prev) => prev.map((a, j) => (j === i ? false : a)))}>
-                  OK
-                </button>
-              </span>
-            </div>
-          ))}
+  const shift = current.data ?? null;
+  const phase = shiftPhase(shift, now);
+  if (current.data === undefined) {
+    return (
+      <section className="card">
+        <Loading error={current.error} retry={current.reload} />
+      </section>
+    );
+  }
+  if (!shift || phase === "none") {
+    return (
+      <section className="card">
+        <p>
+          A Mod Shift: a queue of {SHIFT.items} messages. Mark each one a scam or fine, in 30 seconds. The shift then runs for {SHIFT.minutes} minutes and pays 10 to 12 GM by your score. {SHIFT.perDay} a day.
+        </p>
+        <div className="btnrow">
           <button
             className="btn"
-            disabled={act.pending || answers.some((a) => a === null)}
-            onClick={() => act.run(() => api.answerShift(shift.shiftId, answers as boolean[]), (r) => `${r.score}/${SHIFT.items} right: ${r.pay} GM when the shift ends`).then((r) => r && setResult(r))}
+            disabled={act.pending}
+            onClick={() =>
+              act.run(() => api.startShift()).then((s) => {
+                if (!s) return;
+                setAnswers([]);
+                current.set(startedShift(s));
+              })
+            }
           >
-            Hand in
+            Start a shift
           </button>
-          {late && <p className="muted">Too late to hand in: the shift still pays the base 10 GM.</p>}
-        </>
+          <button className="btn light" disabled={act.pending} onClick={() => act.run(() => api.awayShift(), (r) => `Away shift: +${String(r.pay ?? "")} GM`).then((x) => x && onPaid())}>
+            Collect my away shift
+          </button>
+        </div>
+        <p className="muted">The away shift (half pay) is for proven neighbours who said gm in the last day.</p>
+      </section>
+    );
+  }
+  if (phase === "answering" && shift.items) {
+    const queue = shift.items;
+    const marks = queue.map((_, i) => answers[i] ?? null);
+    return (
+      <section className="card">
+        <p>
+          <b>Spot the scams</b> · {countdown(Date.parse(shift.answerBy) - now)} left
+        </p>
+        {queue.map((it, i) => (
+          <div className="listrow" key={i}>
+            <span>{it.text}</span>
+            <span className="btnrow">
+              {/* Functional updates: quick taps in one frame must all count. */}
+              <button className={marks[i] === true ? "on" : ""} onClick={() => setAnswers((prev) => mark(prev, queue.length, i, true))}>
+                Scam
+              </button>
+              <button className={marks[i] === false ? "on" : ""} onClick={() => setAnswers((prev) => mark(prev, queue.length, i, false))}>
+                OK
+              </button>
+            </span>
+          </div>
+        ))}
+        <button
+          className="btn"
+          disabled={act.pending || marks.some((a) => a === null)}
+          onClick={() =>
+            act.run(() => api.answerShift(shift.shiftId, marks as boolean[]), (r) => `${r.score}/${SHIFT.items} right: ${r.pay} GM when the shift ends`).then((r) => {
+              // Refused (too late, say): show what the server says the shift is now.
+              if (r) current.set(handedIn(shift, r));
+              else void current.reload();
+            })
+          }
+        >
+          Hand in
+        </button>
+      </section>
+    );
+  }
+  const done = Date.parse(shift.endsAt) <= now;
+  return (
+    <section className="card">
+      {phase === "scored" ? (
+        <p>
+          Scored <b>{shift.score}/{SHIFT.items}</b> · pays <b>{shiftPayNow(shift, phase)} GM</b>.
+        </p>
       ) : (
-        <>
-          <p>
-            Scored <b>{result.score}/{SHIFT.items}</b> · pays <b>{result.pay} GM</b>.
-          </p>
-          <p className="muted">{done ? "The shift is done." : `The shift ends in ${countdown(Date.parse(shift.endsAt) - now)}.`}</p>
-          <button className="btn" disabled={!done || act.pending} onClick={() => act.run(() => api.collectShift(shift.shiftId), (r) => `+${r.pay} GM`).then((x) => x && (setShift(null), onPaid()))}>
-            Collect
-          </button>
-        </>
+        <p>
+          Time's up: nothing was handed in, so the shift pays the base <b>{shiftPayNow(shift, phase)} GM</b>.
+        </p>
       )}
+      <p className="muted">{done ? "The shift is done." : `The shift ends in ${countdown(Date.parse(shift.endsAt) - now)}.`}</p>
+      <button
+        className="btn"
+        disabled={!done || act.pending}
+        onClick={() =>
+          act.run(() => api.collectShift(shift.shiftId), (r) => `+${r.pay} GM`).then((x) => {
+            if (!x) return;
+            onPaid();
+            void current.reload();
+          })
+        }
+      >
+        Collect
+      </button>
     </section>
   );
 }

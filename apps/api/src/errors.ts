@@ -141,6 +141,7 @@ const SAFETY: Record<SafetyErrorCode, number> = {
   NO_SUCH_APPEAL: 404,
   RESTRICTED: 403,
   DM_LIMIT: 429,
+  NO_SUCH_ITEM: 404,
 };
 
 const CHAT: Record<ChatErrorCode, number> = {

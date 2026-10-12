@@ -1,5 +1,6 @@
 import { validateMnemonic } from "@scure/bip39";
 import { wordlist as BIP39 } from "@scure/bip39/wordlists/english.js";
+import { foldLookalikes } from "./lookalikes";
 
 // Checks every message gets before it's sent. Pure, so it runs the same in the
 // API, in Workers and in rooms. The AI check runs after sending, in batches.
@@ -10,6 +11,11 @@ export const MODERATION = {
   newAccountDmThreadsPerDay: 5,
   reportDueHours: 24,
   reportsPerDay: 20,
+  // Staff notes (closing a report, deciding an appeal) and appeals need 10
+  // characters; a restriction needs a longer reason, which the player reads
+  // (the EU statement of reasons).
+  noteMinChars: 10,
+  reasonMinChars: 20,
 } as const;
 
 export const LINK_ALLOWLIST = [
@@ -58,7 +64,14 @@ export type Verdict =
 
 // --- Normalising ------------------------------------------------------------
 
-const INVISIBLE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f­͏؜ᅟᅠ឴឵᠋-᠏​-‏‪-‮⁠-⁯ㅤ﻿ﾠ\u{e0000}-\u{e007f}]/gu;
+// Characters that draw nothing: Unicode's default-ignorable code points (zero-
+// width spaces and joiners, direction marks, fillers, variation selectors, tag
+// characters) and control characters other than tabs and line breaks. One
+// slipped between "gm-drop" and ".xyz" would hide a link from the filters.
+// Emoji keep the joiners and presentation selectors that make them render:
+// straight after an emoji (or before a keycap) they can't split a word.
+const INVISIBLE =
+  /(?<![\p{Extended_Pictographic}\p{Emoji_Modifier}][\u200d\ufe0e\ufe0f]?)[\u200d\ufe0e\ufe0f](?!\u20e3)|(?![\t\n\r\u200d\ufe0e\ufe0f])[\p{Default_Ignorable_Code_Point}\p{Cc}]/gu;
 
 // What the filters read: compatibility forms folded, invisible characters
 // gone. (The text people see keeps emoji and accents.)
@@ -67,8 +80,10 @@ export function cleanText(input: string): string {
 }
 
 const leet: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", $: "s" };
+// Lookalike letters from other scripts read as the Latin ones they imitate,
+// so a Cyrillic "о" in "соnnect" doesn't hide the phrase.
 const squash = (s: string) =>
-  s
+  foldLookalikes(s.normalize("NFKD").replace(/\p{M}/gu, ""))
     .toLowerCase()
     .replace(/[0-9@$]/g, (c) => leet[c] ?? c)
     .replace(/[^a-z]/g, "");
@@ -180,16 +195,62 @@ function unDisguise(text: string): string {
     .replace(/[。．｡]/g, ".");
 }
 
-// Bare domains count as links only with a TLD people actually use for links;
-// "lol.wtf" or "end.Next" in a sentence are not links. Anything with a scheme
-// or www. always is.
-const TLDS = "com|net|org|io|xyz|gg|me|app|co|ai|sh|fi|to|ly|tv|cc|ru|cn|info|biz|site|online|link|click|top|live|fun|finance|money|exchange|claims?|gift|vip|pro|dev|so|lol|meme|world|art|club|store|shop|tech|us|uk|de|fr|ng|in|br|tr|kr|vn|cx|pw|tk|ml|ga|cf|gq|eth|sol";
+// Anything with a scheme or www. is a link. So is a bare name like
+// "gm-drop.sbs", "telegra.ph" or "claim.example.foo", judged by countsAsLink
+// below. Labels may be in any script ("gm-drор.xyz" with a Cyrillic о and р
+// is a real, registrable name). At most 10 labels before the ending: real
+// names never need more, and an unbounded run lets a message of one-letter
+// labels ("ж.ж.ж...") make the match backtrack for a quarter of a second.
+const LABEL = "[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?";
 const LINK = new RegExp(
-  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|\\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?:${TLDS})\\b(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
-  "gi",
+  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|(?<![\\p{L}\\p{N}_-])(?:${LABEL}\\.){1,10}(?:\\p{L}{2,24}|xn--[a-z0-9-]{1,59})(?![\\p{L}\\p{N}_-])(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
+  "giu",
 );
+
+// Every country code top-level domain, then the generic ones people link to
+// and the ones phishing favours (.sbs, .icu, .cyou, .bond...). An ending on
+// this list makes "label.tld" a link.
+const COUNTRY_TLDS =
+  "ac ad ae af ag ai al am ao aq ar as at au aw ax az ba bb bd be bf bg bh bi bj bm bn bo br bs bt bv bw by bz ca cc cd cf cg ch ci ck cl cm cn co cr cu cv cw cx cy cz de dj dk dm do dz ec ee eg er es et eu fi fj fk fm fo fr ga gb gd ge gf gg gh gi gl gm gn gp gq gr gs gt gu gw gy hk hm hn hr ht hu id ie il im in io iq ir is it je jm jo jp ke kg kh ki km kn kp kr kw ky kz la lb lc li lk lr ls lt lu lv ly ma mc md me mg mh mk ml mm mn mo mp mq mr ms mt mu mv mw mx my mz na nc ne nf ng ni nl no np nr nu nz om pa pe pf pg ph pk pl pm pn pr ps pt pw py qa re ro rs ru rw sa sb sc sd se sg sh si sj sk sl sm sn so sr ss st su sv sx sy sz tc td tf tg th tj tk tl tm tn to tr tt tv tw tz ua ug uk us uy uz va vc ve vg vi vn vu wf ws ye yt za zm zw";
+const GENERIC_TLDS =
+  "com net org info biz name pro mobi asia tel travel jobs cat coop aero museum int edu gov mil xxx " +
+  "app dev page xyz top icu sbs cfd bond cyou buzz click link live online site website store shop tech space fun club vip win bet loan work men date " +
+  "racing review stream download trade science party faith cricket accountant gdn kim bid webcam rest quest monster autos boats homes motorcycles yachts " +
+  "beauty hair skin makeup lat ltd lol mom pics uno one today world life news email digital network solutions services support help cloud host press ink " +
+  "zone tokyo nyc london berlin finance money exchange claims gift gifts cash capital fund investments markets trading credit loans meme art design " +
+  "studio agency company center systems ventures group global social media community chat wiki games casino poker bingo lotto blog best cool codes " +
+  "tools tips guru ninja rocks expert academy school college camp zip mov foo baby bar pub cafe red blue pink black green gold plus city town land " +
+  "house wtf fyi fit fan fans team vote video film events tickets sale deals promo discount inc llc gmbh bio eco foundation moe ooo mba tax lawyer rip";
+const KNOWN_TLDS = new Set([...COUNTRY_TLDS.split(" "), ...GENERIC_TLDS.split(" ")]);
+
+// A reply that lost its space after the full stop ("lol.no", "ok.so", "yes.me")
+// isn't an address, even when the ending is a real TLD.
+const CHAT_WORDS = new Set(
+  "lol lmao lmfao rofl ok okay kk yes yeah yep yup no nah nope gm gn ngl tbh imo idk omg wow haha hehe kek ty thx thanks pls plz yo hey hi hello bruh bro ser sir fr wtf damn nice cool true same wait sure oh ah hmm rip gg jk lfg wagmi ngmi rekt based so and but also well right done".split(
+    " ",
+  ),
+);
+
 // .eth and .sol names are handles, not links.
 const NOT_A_LINK = /^[a-z0-9-]+\.(?:eth|sol)$/i;
+
+// Whether a LINK match is really an address. A known ending makes it one
+// ("telegra.ph", "gm-drop.sbs"). So does an unknown ending when the rest
+// looks like an address: a path or port, a subdomain, or a digit or hyphen in
+// a name ("gm-drop.whatever", "claim.gm.whatever"). Plain "word.word" with an
+// unknown ending is a sentence that lost its space: "e.g.", "lol.ok",
+// "end.Next", "done.thanks".
+function countsAsLink(m: string): boolean {
+  if (/^(?:(?:https?|ftp):\/\/|www\.)/i.test(m)) return true;
+  const host = m.replace(/[:/].*$/s, "");
+  const rest = m.slice(host.length);
+  if (NOT_A_LINK.test(host)) return false;
+  const labels = host.toLowerCase().split(".");
+  const tld = labels.pop()!;
+  if (KNOWN_TLDS.has(tld) || tld.startsWith("xn--")) return !(labels.length === 1 && rest === "" && CHAT_WORDS.has(labels[0]!));
+  if (!/^[a-z]+$/.test(tld)) return false;
+  return rest !== "" || labels.length > 1 || labels.some((l) => /[\d-]/.test(l));
+}
 
 export function hostOf(link: string): string | null {
   try {
@@ -205,7 +266,7 @@ export function isAllowedHost(host: string): boolean {
 }
 
 export function findLinks(text: string): string[] {
-  return (unDisguise(text).match(LINK) ?? []).filter((l) => !NOT_A_LINK.test(l.replace(/\/.*$/, "")));
+  return (unDisguise(text).match(LINK) ?? []).filter(countsAsLink);
 }
 
 // Strips links the sender may not post, reading through disguises ("evil dot
@@ -213,7 +274,7 @@ export function findLinks(text: string): string[] {
 function stripLinks(text: string, allowAny: boolean): { text: string; stripped: number } {
   let stripped = 0;
   const out = unDisguise(text).replace(LINK, (m) => {
-    if (NOT_A_LINK.test(m.replace(/\/.*$/, ""))) return m;
+    if (!countsAsLink(m)) return m;
     const host = hostOf(m);
     if (allowAny && host && isAllowedHost(host)) return m;
     stripped++;
@@ -225,6 +286,59 @@ function stripLinks(text: string, allowAny: boolean): { text: string; stripped: 
 // Explorer links to a transaction are fine to share; the hash inside one is
 // not a secret.
 const EXPLORER_TX = /\b(?:www\.)?(?:etherscan\.io|basescan\.org|solscan\.io)\/tx\/[A-Za-z0-9]+/gi;
+
+// --- Blocked words ----------------------------------------------------------
+
+// Staff's list, from the BLOCKED_WORDS setting: comma- or newline-separated.
+// Case doesn't matter; blank entries and repeats are dropped.
+export function parseBlockedWords(raw?: string): string[] {
+  if (typeof raw !== "string") return [];
+  const words = raw
+    .split(/[,\r\n]+/)
+    .map((w) => w.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " "))
+    .filter((w) => /[\p{L}\p{N}]/u.test(w));
+  return [...new Set(words)];
+}
+
+// Latin letters, digits and the leetspeak stand-ins squash() reads.
+const LATIN_ENTRY = /^[a-z0-9@$\s'.-]+$/;
+
+// A blocked word counts as a whole word, read the way scam phrases are:
+// through leetspeak, lookalike letters and punctuation, so "b4dw0rd",
+// "bаdword" (Cyrillic а), "b.a.d.w.o.r.d" and "b a d w o r d" all match
+// "badword", while "notbadwordish" doesn't. An entry written in another
+// script is matched word for word as written.
+function hasBlockedWord(input: string, blocked: readonly string[]): boolean {
+  const tokens = cleanText(input).split(/\s+/).map(squash).filter(Boolean);
+  // Letters spaced out one at a time read as one word.
+  const spelled: string[] = [];
+  let run = "";
+  for (const t of [...tokens, ""]) {
+    if (t.length === 1) run += t;
+    else {
+      if (run.length > 1) spelled.push(run);
+      run = "";
+    }
+  }
+  const words: string[] = cleanText(input).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const tokenSet = new Set([...tokens, ...spelled]);
+  const wordSet = new Set(words);
+  // A multi-word entry matches the same words in a row.
+  const inARow = (list: string[], parts: string[], join: string) => {
+    const want = parts.join(join);
+    for (let i = 0; i + parts.length <= list.length; i++) if (list.slice(i, i + parts.length).join(join) === want) return true;
+    return false;
+  };
+  return blocked.some((entry) => {
+    const plain = entry.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+    if (LATIN_ENTRY.test(plain) && squash(plain)) {
+      const parts = plain.split(/\s+/).map(squash).filter(Boolean);
+      return parts.length === 1 ? tokenSet.has(parts[0]!) : inARow(tokens, parts, "") || tokenSet.has(parts.join(""));
+    }
+    const parts = entry.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+    return parts.length === 1 ? wordSet.has(parts[0]!) : parts.length > 1 && inARow(words, parts, " ");
+  });
+}
 
 // --- The verdict ----------------------------------------------------------
 
@@ -256,8 +370,7 @@ export function checkMessage(input: unknown, ctx: MessageContext): Verdict {
   if (SCAM_PHRASES.some((p) => squashed.includes(squash(p)))) {
     return { ok: false, reason: "SCAM", message: `That reads like a scam, so it wasn't sent. ${SECRET_WARNING}` };
   }
-  const words: string[] = cleanText(input).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  if (ctx.blockedWords?.some((w) => words.includes(w.toLowerCase()))) return { ok: false, reason: "BLOCKED_WORD", message: "that word isn't allowed here" };
+  if (ctx.blockedWords?.length && hasBlockedWord(input, ctx.blockedWords)) return { ok: false, reason: "BLOCKED_WORD", message: "that word isn't allowed here" };
 
   const { text, stripped } = stripLinks(input, ctx.accountAgeDays >= MODERATION.linksAfterDays);
   const flags: Array<"links_stripped" | "wallet_address"> = [];

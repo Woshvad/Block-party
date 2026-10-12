@@ -5,6 +5,7 @@ export const NOTIFY = {
   noRepeatDays: 5, // the same wording never twice within 5 days
   ignoredBeforeWeekly: 7, // after 7 ignored pushes, one a week
   ignoredAfterHours: 24, // a push not opened within a day counts as ignored
+  backWithinHours: 6, // playing within 6 hours of a push counts as opening it
   defaultQuietStart: 23,
   defaultQuietEnd: 8,
   staleAfterHours: 12, // a deferred ping older than this is dropped, not sent late

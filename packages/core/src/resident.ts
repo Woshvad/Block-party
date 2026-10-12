@@ -1,4 +1,5 @@
 import { type CityDay, daysBetween } from "./clock";
+import { foldLookalikes } from "./lookalikes";
 import { type RandomInt, pick, pickDistinct } from "./random";
 
 // --- Catalogue (MVP) ------------------------------------------------------
@@ -79,13 +80,12 @@ export class ResidentInputError extends Error {
   }
 }
 
-// Collapse a string to letters and digits, undo common leetspeak, so
-// "N0TH1NG_9000", "Faucet-Fren" and "bl0ckp4rty" match what they imitate.
+// Collapse a string to letters and digits, undo common leetspeak and
+// lookalike letters from other scripts, so "N0TH1NG_9000", "Faucet-Fren",
+// "bl0ckp4rty" and a Cyrillic "Fаucet Frеn" match what they imitate.
 export function skeleton(s: string): string {
   const leet: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", $: "s", "@": "a", "|": "i", "!": "i" };
-  return s
-    .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
+  return foldLookalikes(s.normalize("NFKD").replace(/\p{M}/gu, ""))
     .toLowerCase()
     .replace(/[0-9$@|!]/g, (c) => leet[c] ?? c)
     .replace(/[^a-z]/g, "");
@@ -163,10 +163,11 @@ export function validateHandle(input: unknown): string {
 }
 
 // Invisible and direction-changing characters that let one name pose as
-// another, plus Unicode tag characters (hidden "ASCII smuggling" text) and
-// variation selectors.
-const INVISIBLE =
-  /[\u0000-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]/gu;
+// another: Unicode's default-ignorable code points (zero-width spaces and
+// joiners, direction marks, fillers, variation selectors, tag characters for
+// hidden "ASCII smuggling" text), plus control characters. The chat filter in
+// moderation.ts reads the same property.
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cc}]/gu;
 const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
 const TAG = /[\u{e0020}-\u{e007f}]/u;
 const BLACK_FLAG = "\u{1f3f4}";

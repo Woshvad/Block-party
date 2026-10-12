@@ -31,6 +31,7 @@ beforeAll(async () => {
       TELEGRAM_BOT_TOKEN: BOT,
       INTERNAL_SECRET: SECRET,
       ALLOWED_ORIGINS: ORIGIN,
+      BLOCKED_WORDS: "workerbadword,\nanother one",
     },
   });
   await mf.ready;
@@ -61,6 +62,16 @@ describe("the API on the Workers runtime", () => {
     expect((await call("POST", "/v1/gm", { token })).status).toBe(200);
     expect((await call("POST", "/v1/home/buy", { token, body: { pieceId: "stool" }, headers: { "idempotency-key": crypto.randomUUID() } })).status).toBe(201);
     expect((await call("GET", "/v1/me", { token })).body.gm).toBe(1000 + 50 - 15);
+  });
+
+  it("BLOCKED_WORDS reaches the send paths", async () => {
+    const id = 800_000_000 + Math.floor(Math.random() * 99_999_999);
+    const initData = await signTelegramInitData({ auth_date: String(Math.floor(Date.now() / 1000)), user: JSON.stringify({ id }) }, BOT);
+    const token = (await call("POST", "/v1/auth/telegram", { body: { initData, ageAck: true } })).body.sessionToken;
+    expect((await call("POST", "/v1/resident", { token, body: { ...pickForMe(seededRandomInt(id)), handle: `wb${id.toString(36)}`.slice(0, 15), name: "Worker Words" } })).status).toBe(201);
+    const refused = await call("POST", "/v1/boards/city_hall", { token, body: { text: "you w0rkerbadword" } });
+    expect([refused.status, refused.body.error.field]).toEqual([422, "BLOCKED_WORD"]);
+    expect((await call("POST", "/v1/boards/city_hall", { token, body: { text: "gm from the worker" } })).status).toBe(201);
   });
 
   it("internal routes stay hidden without the secret, and work with it", async () => {

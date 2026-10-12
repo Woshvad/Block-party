@@ -98,6 +98,8 @@ describe("the Ratio of the Day", () => {
     expect(await code(submitRatio(db, u, "x".repeat(81), { now: at }))).toBe("INVALID_INPUT");
     // A pasted private key is refused outright.
     expect(await code(submitRatio(db, u, `key 0x${"a1".repeat(32)}`, { now: at }))).toBe("MODERATED");
+    // Staff's blocked words are refused here too.
+    expect(await code(submitRatio(db, u, "City is a b4dword", { now: at, blockedWords: ["badword"] }))).toBe("MODERATED");
     // Links never get in: the filter strips them.
     const linky = await makeResident(db);
     expect((await submitRatio(db, linky, "free money at scam.com now", { now: at })).text).toBe("free money at [link removed] now");

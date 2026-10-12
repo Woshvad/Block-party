@@ -6,7 +6,7 @@ import {
   newSessionToken,
   verifyTelegramInitData,
 } from "@bp/core";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { grantMoveIn } from "./daily";
 import { openUserAccount } from "./ledger";
@@ -81,6 +81,30 @@ export async function revokeAllSessions(db: Db, userId: string) {
     .update(sessions)
     .set({ revokedAt: new Date() })
     .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+}
+
+// How long a session that has ended (expired, or signed out, including by a
+// newer sign-in) is kept before the sweep deletes it. Every launch signs in
+// afresh, so without the sweep the table only grows.
+export const SESSION_KEEP_DAYS = 7;
+
+// Deletes sessions that ended more than keepDays ago, a batch at a time (the
+// minute cron runs it every 10 minutes). Returns how many went.
+export async function sweepSessions(db: Db, opts: { now?: Date; keepDays?: number; batch?: number; maxBatches?: number } = {}) {
+  const cutoff = new Date((opts.now ?? new Date()).getTime() - (opts.keepDays ?? SESSION_KEEP_DAYS) * 86_400_000).toISOString();
+  const batch = opts.batch ?? 5000;
+  const maxBatches = opts.maxBatches ?? 20;
+  let deleted = 0;
+  // loop-bound: at most maxBatches statements; a short batch means nothing older is left.
+  for (let i = 0; i < maxBatches; i++) {
+    const gone = await db.execute(sql`
+      DELETE FROM sessions WHERE id IN (
+        SELECT id FROM sessions WHERE expires_at < ${cutoff}::timestamptz OR revoked_at < ${cutoff}::timestamptz LIMIT ${batch})
+      RETURNING 1`);
+    deleted += gone.length;
+    if (gone.length < batch) break;
+  }
+  return deleted;
 }
 
 // --- Sign-in flows --------------------------------------------------------
