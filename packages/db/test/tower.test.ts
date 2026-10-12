@@ -788,6 +788,26 @@ describe("the live Polymarket feed, on recorded Gamma payloads", () => {
     expect(await marketView(db, u, otherRow.id, { now: new Date(at + 3 * MIN + 1000) })).toMatchObject({ status: "open", inFeed: false });
   });
 
+  it("after a switch of feed, the old feed's markets leave the Floor and freeze on time", async () => {
+    const t = fresh();
+    const [old, next] = [feed(), feed()];
+    const oldProvider: OddsProvider = { source: `old-${randomUUID().slice(0, 8)}`, fetch: (n) => old.provider.fetch(n) };
+    const nextProvider: OddsProvider = { source: `next-${randomUUID().slice(0, 8)}`, fetch: (n) => next.provider.fetch(n) };
+    const soon = old.add(t, { freezesAt: new Date(t + 2 * MIN), settlesBy: new Date(t + H) });
+    const later = old.add(t);
+    next.add(t);
+    await pollOdds(db, oldProvider, { now: new Date(t) });
+    const [soonId, laterId] = [await idOf(soon.externalId), await idOf(later.externalId)];
+    // ODDS_SOURCE changes: only the new feed polls from now on.
+    await pollOdds(db, nextProvider, { now: new Date(t + MIN) });
+    expect((await client`SELECT in_feed FROM markets WHERE id = ${laterId}`)[0]!.in_feed).toBe(false);
+    expect((await openMarkets(db, { now: new Date(t + MIN) })).map((m) => m.id)).not.toContain(laterId);
+    const u = await makeResident(db);
+    expect(await code(makeCall(db, u, { marketId: laterId, side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + MIN + 1000) }))).toBe("MARKET_CLOSED");
+    await pollOdds(db, nextProvider, { now: new Date(t + 3 * MIN) });
+    expect((await client`SELECT status FROM markets WHERE id = ${soonId}`)[0]!.status).toBe("frozen");
+  });
+
   it("tells the feed which markets something rides on, and which must stay live", async () => {
     const f = feed();
     let known: readonly KnownMarket[] = [];

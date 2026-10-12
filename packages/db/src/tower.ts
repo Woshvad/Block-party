@@ -241,14 +241,17 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     }
     // Markets this poll didn't carry: frozen once their time is up, listed or
     // not, and off the Floor meanwhile, because their last price is stale.
+    // Every source's, not just this one's: after ODDS_SOURCE changes (mock to
+    // polymarket on the same database), the old feed's markets would
+    // otherwise stay open, on the Floor and callable at prices nobody updates.
     await tx
       .update(markets)
       .set({ status: "frozen", inFeed: false })
-      .where(and(eq(markets.source, provider.source), eq(markets.status, "open"), lte(markets.freezesAt, now)));
+      .where(and(eq(markets.status, "open"), lte(markets.freezesAt, now)));
     await tx
       .update(markets)
       .set({ inFeed: false })
-      .where(and(eq(markets.source, provider.source), eq(markets.status, "open"), eq(markets.inFeed, true), notInArray(markets.id, carried)));
+      .where(and(eq(markets.status, "open"), eq(markets.inFeed, true), notInArray(markets.id, carried)));
     // Calls that can never lock: their market froze or ended first, or the feed
     // went quiet for too long. Tickets come back.
     const stale = await tx
