@@ -46,7 +46,11 @@ export async function signRoomTicket(t: Omit<RoomTicket, "v" | "exp">, secret: s
   if (!secret || secret.length < 32) throw new Error("room ticket secret must be 32+ characters");
   if (!PLACE_RE.test(t.place)) throw new Error("bad place");
   // Only the fields a ticket has: nothing else a caller passes gets signed.
-  const body: RoomTicket = {
+  // `hidden: []` is for the previous rooms Worker, which refuses a ticket
+  // without the list (it never used it: it asks the API at join). It keeps a
+  // rooms rollback, or a deploy out of order, from locking everyone out.
+  // Always empty. Drop it once no older rooms build can be deployed.
+  const body: RoomTicket & { hidden: [] } = {
     v: 1,
     u: t.u,
     h: t.h,
@@ -55,6 +59,7 @@ export async function signRoomTicket(t: Omit<RoomTicket, "v" | "exp">, secret: s
     frens: t.frens.slice(0, TICKET_MAX_FRENS),
     age: t.age,
     exp: Math.floor(now.getTime() / 1000) + TICKET_TTL_SECONDS,
+    hidden: [],
   };
   const payload = b64url(enc.encode(JSON.stringify(body)));
   return `${payload}.${b64url(await hmac(secret, payload))}`;
