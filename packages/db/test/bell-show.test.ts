@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { type FeedMarket, type OddsProvider, addDays, userAccountId } from "@bp/core";
+import { type FeedMarket, type OddsProvider, addDays, cityDay, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   BellShowError,
   bellStatus,
+  buyPiece,
   claimBellStamp,
   createCrew,
   createDb,
   createInvite,
   ensureSystemAccounts,
   getBalance,
+  gmDestroyed,
   makeCall,
   moodState,
   pollOdds,
@@ -248,5 +250,32 @@ describe("which bell a result belongs to", () => {
     expect((await moodState(db, u, { now: new Date(s.d0 + D + 10 * MIN) })).active.map((a) => a.mood)).not.toContain("called_it");
     await runBell(db, { now: new Date(s.d0 + 2 * D + 5 * MIN), only: ["tower"] });
     expect((await moodState(db, u, { now: new Date(s.d0 + 2 * D + 10 * MIN) })).active.map((a) => a.mood)).toContain("called_it");
+  });
+});
+
+describe("the reel's burn", () => {
+  it("the Tower step counts the day's burn once, and the reel shows that count instead of summing again", async () => {
+    const d0 = freshDay();
+    const day = dayOf(d0);
+    const u = await makeResident(db);
+    const r = await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] });
+    expect(r.ran.tower).toMatchObject({ burned: await gmDestroyed(db, { from: new Date(d0), to: new Date(d0 + D) }) });
+    // Stands in for a ledger far too big to sum on every request: the reel
+    // must show what the bell counted.
+    await client`UPDATE bell_steps SET result = result || '{"burned": 4321}'::jsonb WHERE bell_day = ${day} AND step = 'tower'`;
+    expect((await reel(db, u, { now: new Date(d0 + D + 10 * MIN), bellDay: day }))!.burned).toBe(4321);
+  });
+
+  it("before the Tower step has counted it, the reel sums the day itself", async () => {
+    // Today by the database's clock, which stamps the entries: the only day
+    // with fresh burns in it. Nothing in the suite rings today's bell.
+    const [{ t }] = (await client`SELECT clock_timestamp() AS t`) as unknown as [{ t: string }];
+    const day = cityDay(new Date(t));
+    expect(await client`SELECT 1 FROM bell_steps WHERE bell_day = ${day} AND step = 'tower'`).toHaveLength(0);
+    const u = await makeResident(db);
+    await buyPiece(db, u, "sofa", randomUUID()); // 300 burned today
+    const r = await reel(db, u, { now: new Date(`${addDays(day, 1)}T00:10:00Z`), bellDay: day });
+    expect(r!.burned).toBeGreaterThanOrEqual(300);
+    expect(r!.burned).toBe(await gmDestroyed(db, { from: new Date(`${day}T00:00:00Z`), to: new Date(`${addDays(day, 1)}T00:00:00Z`) }));
   });
 });

@@ -7,10 +7,10 @@ import { settleGrudges } from "./grudge";
 import { lightsWinner, settleLights } from "./lights";
 import { ratioHeadline, settleRatio } from "./ratio";
 import type { Db } from "./client";
-import { economyReport } from "./economy";
+import { gmDestroyed } from "./economy";
 import { mint } from "./ledger";
 import { grantMood, maybeTilt } from "./moods";
-import { bellStamps, calls, cityMarkets, crewBellScores, crewMembers, crews, duels, markets, residents, slateCards } from "./schema";
+import { bellStamps, bellSteps, calls, cityMarkets, crewBellScores, crewMembers, crews, duels, markets, residents, slateCards } from "./schema";
 import { myGrid } from "./slate";
 import { cityCalls, settleCalls } from "./tower";
 
@@ -137,7 +137,11 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
       .values({ bellDay, crewId, chips: t.chips, longShots: t.longShots, chainDays, scoreMilli: bellScoreMilli({ ...t, chainDays }) })
       .onConflictDoNothing();
   }
-  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled: grudges.settled, grudgesWaiting: grudges.waiting, cityMarketsSettled, lightsBurned };
+  // The day's burn for the reel, counted once here, after the day has ended,
+  // and kept in this step's record. The reel reads it rather than summing the
+  // ledger on every request.
+  const burned = await gmDestroyed(db, { from, to });
+  return { receipts: receipts.length, calledIt, rekt, tilted, crewsScored: tally.size, duelsSettled, grudgesSettled: grudges.settled, grudgesWaiting: grudges.waiting, cityMarketsSettled, lightsBurned, burned };
 }
 
 // --- Bell Stamps ------------------------------------------------------------------------
@@ -200,7 +204,16 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
       myCrew = { scoreMilli: s.scoreMilli, rank: above!.n + 1 };
     }
   }
-  const burn = await economyReport(db, { from: dayStart(bellDay), to: dayStart(addDays(bellDay, 1)) });
+  // The burn the bell's Tower step counted for this day. Before that step has
+  // run (the first minutes after midnight), or for a day whose record has no
+  // count, it's summed here: the window index keeps that to the day's own
+  // entries.
+  const [tower] = await db
+    .select({ result: bellSteps.result })
+    .from(bellSteps)
+    .where(and(eq(bellSteps.bellDay, bellDay), eq(bellSteps.step, "tower")));
+  const recorded = tower?.result.burned;
+  const burned = typeof recorded === "number" ? recorded : await gmDestroyed(db, { from: dayStart(bellDay), to: dayStart(addDays(bellDay, 1)) });
   const [tomorrow] = await db
     .select({ question: markets.question, world: markets.price })
     .from(slateCards)
@@ -228,7 +241,7 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     ratio: await ratioHeadline(db, { day: bellDay }),
     // Duels settle at the bell after the day: "@a ate @b's Snap".
     duels: await duelLines(db, dayStart(addDays(bellDay, 1)), dayStart(addDays(bellDay, 2))),
-    burned: burn.totalDestroyed,
+    burned,
     grid: await myGrid(db, userId, bellDay, { now }),
     tomorrowsLongShot: tomorrow ?? null,
   };

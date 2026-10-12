@@ -273,6 +273,18 @@ export async function collectAwayShift(db: Db, userId: string, opts: { now?: Dat
 
 // --- The Drip Committee minutes (internal dashboard) -----------------------
 
+// Just the GM destroyed over a window: everything paid into the burn shards
+// and the Purse, the same total as economyReport's totalDestroyed. The reel
+// needs only this, not the flows by kind or the median balance.
+export async function gmDestroyed(db: Db, opts: { from: Date; to: Date }): Promise<number> {
+  const [r] = await db.execute<{ total: string }>(sql`
+    SELECT COALESCE(SUM(amount), 0)::text AS total
+    FROM gm_entries
+    WHERE account_id IN (${sql.join([...BURN_SHARDS, SYS_PURSE].map((id) => sql`${id}`), sql`, `)})
+      AND created_at >= ${opts.from.toISOString()}::timestamptz AND created_at < ${opts.to.toISOString()}::timestamptz`);
+  return Number(r!.total);
+}
+
 // GM created vs destroyed over a window, on net flows: only the mint and the
 // sinks count; GM moving between players doesn't. Rent's Purse share counts
 // as destroyed, since the Purse never pays GM back out.

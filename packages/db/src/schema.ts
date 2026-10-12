@@ -122,6 +122,11 @@ export const gmEntries = pgTable(
     check("gm_entries_nonzero", sql`${t.amount} <> 0`),
     index("gm_entries_tx_idx").on(t.txId),
     index("gm_entries_account_idx").on(t.accountId, t.id),
+    // Reports over a time window (the reel's burn, the Drip Committee) read
+    // the system accounts' entries for that window only. Without it they
+    // scanned every entry those accounts ever had, one leg of every mint and
+    // burn in the city's history.
+    index("gm_entries_account_time_idx").on(t.accountId, t.createdAt),
   ],
 );
 

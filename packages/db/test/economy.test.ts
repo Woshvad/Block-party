@@ -13,6 +13,7 @@ import {
   economyReport,
   ensureSystemAccounts,
   getBalance,
+  gmDestroyed,
   mint,
   reconcile,
   recordStreakDay,
@@ -360,6 +361,30 @@ describe("the plan's weekly math, end to end", () => {
     expect(r.totalDestroyed).toBe(300);
     expect(r.ratio).toBeCloseTo(0.3);
     expect(r.healthyRatio).toBe(false);
+  });
+
+  it("the burn alone (what the reel shows) is the report's destroyed total, rent's Purse share included", async () => {
+    // The database's clock stamps the entries, so the window comes from it too.
+    const clock = async () => new Date(((await client`SELECT clock_timestamp() AS t`) as unknown as [{ t: string }])[0].t);
+    const from = await clock();
+    const u = await makeResident(db); // 1000 minted
+    await buyPiece(db, u, "sofa", randomUUID()); // 300 burned
+    expect((await collectRent(db, u, { now: at(toSat, 0, 1) })).map((o) => o.status)).toEqual(["paid"]); // 225 burned, 25 to the Purse
+    const to = new Date((await clock()).getTime() + 1);
+    expect(await gmDestroyed(db, { from, to })).toBe(550);
+    expect((await economyReport(db, { from, to })).totalDestroyed).toBe(550);
+  });
+
+  it("a window report reads only that window's entries, through the (account, time) index", async () => {
+    // Forcing an index shows which one can serve the window: with only the
+    // (account, id) index, created_at is a filter over the accounts' whole history.
+    const plan = (await client.begin(async (tx) => {
+      await tx`SET LOCAL enable_seqscan = off`;
+      return tx`EXPLAIN SELECT SUM(amount) FROM gm_entries WHERE account_id IN ('sys:burn', 'sys:city_purse') AND created_at >= now() - interval '1 day' AND created_at < now()`;
+    })) as unknown as Array<{ "QUERY PLAN": string }>;
+    const text = plan.map((r) => r["QUERY PLAN"]).join("\n");
+    expect(text).toContain("gm_entries_account_time_idx");
+    expect(text).toMatch(/Index Cond: .*created_at/);
   });
 
   it("an empty window reports no ratio rather than dividing by zero", async () => {
