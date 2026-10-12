@@ -5,6 +5,7 @@ import type { Api, Duel, Me } from "../api";
 import { countdown, until, useNow } from "../clock";
 import { label } from "../palette";
 import { handedIn, mark, shiftPayNow, shiftPhase, startedShift } from "../shiftState";
+import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 import { handleOf, useWho } from "../who";
@@ -291,7 +292,7 @@ function Duels({ api, me, act, onChanged }: { api: Api; me: Me; act: Act; onChan
                 {d.status === "active" && (
                   <>
                     <button onClick={() => run(() => api.snap(d.id), "Snap! Stakes doubled")}>Snap</button>
-                    <button onClick={() => confirm("Retreat? Your ante goes to them and the rest burns.") && run(() => api.retreat(d.id), "Retreated")}>Retreat</button>
+                    <button onClick={() => ifConfirmed("Retreat? Your ante goes to them and the rest burns.", () => run(() => api.retreat(d.id), "Retreated"))}>Retreat</button>
                   </>
                 )}
               </span>
