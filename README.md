@@ -175,7 +175,7 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
 2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc`.
 3. Secrets on both Workers (`wrangler secret put`): `INTERNAL_SECRET` and `TICKET_SECRET` (the same on both), plus the API's `TELEGRAM_BOT_TOKEN`, and when ready `OPENAI_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`.
-4. `wrangler deploy` in `apps/api`, then in `apps/rooms` (each runs its own build). Check `/health` says the schema is up to date. Rooms require the API's `/internal/rooms/access` endpoint to refresh safety permissions before joins and actions; if it is unavailable, those actions are refused.
+4. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Rooms go first so they already accept the slimmer tickets a new API signs; an older rooms Worker refuses them. Check the API's `/health` says the schema is up to date. Rooms ask the API's `/internal/rooms/access` for each resident's blocks, mutes and restrictions when they join and trust the answer for 15 seconds; while it is unavailable, nobody can join, and a resident whose answer is older than that can't act. Optional on rooms: `BLOCKED_WORDS`, staff's blocked words for room chat (comma- or newline-separated).
 
 ## Notes for later bricks
 
