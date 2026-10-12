@@ -61,6 +61,9 @@ export async function signRoomTicket(t: Omit<RoomTicket, "v" | "exp">, secret: s
 }
 
 export async function verifyRoomTicket(token: unknown, secret: string, now = new Date()): Promise<RoomTicket> {
+  // The same rule as signing: a short secret can be guessed, and then anyone
+  // can write themselves a ticket. A config error, not a bad ticket.
+  if (!secret || secret.length < 32) throw new Error("room ticket secret must be 32+ characters");
   if (typeof token !== "string" || token.length > 64_000) throw new TicketError("MALFORMED");
   const parts = token.split(".");
   if (parts.length !== 2 || !parts[0] || !parts[1]) throw new TicketError("MALFORMED");

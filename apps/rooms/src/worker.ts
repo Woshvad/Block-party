@@ -133,7 +133,10 @@ export default {
       try {
         t = await verifyRoomTicket(url.searchParams.get("ticket"), env.TICKET_SECRET);
       } catch (e) {
-        return json({ error: e instanceof TicketError ? e.reason : "MALFORMED" }, 401);
+        // Anything but a bad ticket (a missing or weak TICKET_SECRET) is our
+        // fault: a 500 in the logs, not a 401 that looks like the player's.
+        if (!(e instanceof TicketError)) throw e;
+        return json({ error: e.reason }, 401);
       }
       if (!placeSpec(t.place)) return json({ error: "NO_SUCH_PLACE" }, 404);
       // The same namespace also holds one connection coordinator per user.

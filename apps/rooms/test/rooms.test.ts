@@ -29,6 +29,24 @@ describe("connecting", () => {
     expect((await dispatch(`http://rooms.test/connect?ticket=${nowhere}`, { headers: { upgrade: "websocket" } })).status).toBe(404);
   });
 
+  it("a Worker with a weak ticket secret lets nobody in, and says it's broken", async () => {
+    // A ticket anyone could make for a room whose secret is "short".
+    const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const payload = b64(new TextEncoder().encode(JSON.stringify({ v: 1, u: "x", h: "x", crew: null, place: "diner", frens: [], age: 1, exp: Math.floor(Date.now() / 1000) + 60 })));
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("short"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const forged = `${payload}.${b64(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload))))}`;
+    const weakApi = fakeApi();
+    weakApi.access.set("x", { userId: "x", hidden: [], blocked: [], chat: true, suspended: false });
+    const weak = await startRooms(weakApi, { TICKET_SECRET: "short" });
+    try {
+      const r = await weak.mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`, { headers: { upgrade: "websocket" } });
+      expect(r.webSocket).toBeNull();
+      expect(r.status).toBe(500);
+    } finally {
+      await weak.dispose();
+    }
+  });
+
   it("welcomes you with who's here, and tells them you arrived", async () => {
     const a = await connect("a1", { place: "roof" });
     expect((await a.next("welcome")).members.map((m: any) => m.userId)).toEqual(["a1"]);

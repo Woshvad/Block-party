@@ -41,6 +41,19 @@ describe("room tickets", () => {
     expect(encodeURIComponent(big).length).toBeLessThan(4096);
   });
 
+  it("never checks with a weak secret either: a guessable one would let anyone write a ticket", async () => {
+    // A ticket made the way an attacker would, for a room whose secret is "short".
+    const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const payload = b64(new TextEncoder().encode(JSON.stringify({ ...base, v: 1, u: "admin", exp: 9e9 })));
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("short"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const forged = `${payload}.${b64(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload))))}`;
+    for (const weak of ["short", "", "x".repeat(31), undefined as unknown as string]) {
+      await expect(verifyRoomTicket(forged, weak)).rejects.toThrow("room ticket secret must be 32+ characters");
+    }
+    // A broken room, not a bad ticket: it must not read as a refusal.
+    expect(await reason(verifyRoomTicket(forged, "short"))).toMatch(/^THREW/);
+  });
+
   it("carries no safety lists: nobody can read who blocked them out of their own ticket", async () => {
     const leaky = { ...base, hidden: ["blocker"], blocked: ["blocker"], chat: false } as typeof base;
     const t = await signRoomTicket(leaky, SECRET);
