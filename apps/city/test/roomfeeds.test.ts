@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { CityHall, MarketRow } from "../src/api";
 import { LAYOUTS } from "../src/interiors";
-import { POLYMARKET_CREDIT, type FeedStatus, wrap, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard } from "../src/roomfeeds";
+import { type FeedStatus, wrap, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard } from "../src/roomfeeds";
+
+// What /v1/tower/feed says, per source (oddsCredit in @bp/core).
+const POLYMARKET_CREDIT = "Odds via Polymarket · Not affiliated";
+const SAMPLE_CREDIT = "Sample odds · Not real";
 
 const now = Date.parse("2026-10-10T12:00:00Z");
 const mk = (id: string, category: string, price: number, inHours: number): MarketRow => ({ id, question: `Q ${id}?`, category, price, freezesAt: new Date(now + inHours * 3_600_000).toISOString(), infoOnly: category === "politics" });
-const live: FeedStatus = { paused: false, lastTickAt: new Date(now - 30_000).toISOString() };
+const live: FeedStatus = { paused: false, lastTickAt: new Date(now - 30_000).toISOString(), credit: POLYMARKET_CREDIT };
 // Early on the same local day as `now`, whatever the machine's time zone.
 const pausedAt = new Date(new Date(now).setHours(0, 1, 0, 0)).toISOString();
-const paused: FeedStatus = { paused: true, lastTickAt: pausedAt };
+const paused: FeedStatus = { paused: true, lastTickAt: pausedAt, credit: POLYMARKET_CREDIT };
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 describe("the Odds Wall", () => {
@@ -42,17 +46,25 @@ describe("the Odds Wall", () => {
     expect(b.rows.map((r) => r.left)).toEqual(["Q c2?", "Q s1?", "Q p1?", "Q c1?"]);
   });
 
-  it("an unknown feed (never fetched) never counts as live", () => {
+  it("an unknown feed (never fetched) never counts as live, and credits nobody", () => {
     const b = oddsBoard(ms, now, null);
     expect(b.dim).toBe(true);
-    expect(b.foot).toBe(`Odds paused · ${POLYMARKET_CREDIT}`);
-    expect(oddsBoard(ms, now, { paused: true, lastTickAt: null }).foot).toBe(`Odds paused · ${POLYMARKET_CREDIT}`);
+    expect(b.foot).toBe("Odds paused");
+    expect(oddsBoard(ms, now, { paused: true, lastTickAt: null, credit: POLYMARKET_CREDIT }).foot).toBe(`Odds paused · ${POLYMARKET_CREDIT}`);
   });
 
   it("a pause from an earlier day gives the date too", () => {
     const old = new Date(now - 3 * 86_400_000).toISOString();
     const day = new Date(old).toLocaleDateString([], { month: "short", day: "numeric" });
-    expect(oddsBoard(ms, now, { paused: true, lastTickAt: old }).foot).toBe(`Paused since ${day} ${hhmm(old)} · ${POLYMARKET_CREDIT}`);
+    expect(oddsBoard(ms, now, { paused: true, lastTickAt: old, credit: POLYMARKET_CREDIT }).foot).toBe(`Paused since ${day} ${hhmm(old)} · ${POLYMARKET_CREDIT}`);
+  });
+
+  it("sample odds never carry Polymarket's name: the credit is the API's", () => {
+    const sample: FeedStatus = { ...live, credit: SAMPLE_CREDIT };
+    expect(oddsBoard(ms, now, sample).foot).toBe(SAMPLE_CREDIT);
+    expect(matchBoard([mk("s", "sports", 50, 2)], now, sample).foot).toBe(SAMPLE_CREDIT);
+    expect(oddsBoard(ms, now, { ...sample, paused: true }).foot).toBe(`Paused since ${hhmm(sample.lastTickAt!)} · ${SAMPLE_CREDIT}`);
+    expect(oddsBoard(ms, now, { ...live, credit: null }).foot).toBeUndefined();
   });
 });
 
@@ -63,9 +75,9 @@ describe("the feed behind the walls", () => {
   });
 
   it("a failed refresh counts as paused since the last good one", () => {
-    expect(feedAfter(live, false, live)).toEqual({ paused: true, lastTickAt: live.lastTickAt });
-    expect(feedAfter(live, true, null)).toEqual({ paused: true, lastTickAt: live.lastTickAt });
-    expect(feedAfter(null, false, null)).toEqual({ paused: true, lastTickAt: null });
+    expect(feedAfter(live, false, live)).toEqual({ paused: true, lastTickAt: live.lastTickAt, credit: POLYMARKET_CREDIT });
+    expect(feedAfter(live, true, null)).toEqual({ paused: true, lastTickAt: live.lastTickAt, credit: POLYMARKET_CREDIT });
+    expect(feedAfter(null, false, null)).toEqual({ paused: true, lastTickAt: null, credit: null });
   });
 });
 

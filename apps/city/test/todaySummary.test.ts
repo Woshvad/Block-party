@@ -3,7 +3,7 @@ import type { Slate, SlateCard } from "../src/api";
 import { slateSummary } from "../src/todaySummary";
 const now = Date.parse("2026-10-10T12:00:00Z");
 const card = (status: NonNullable<SlateCard["mine"]>["status"] | null): SlateCard => ({ slot: 0, tier: "lock", marketId: "test", question: "Test", category: "test", world: 50, freezesAt: "2026-10-10T13:00:00Z", open: true, mine: status ? { side: "yes", chance: 60, status } : null });
-const slate = (cards: SlateCard[]): Slate => ({ cityDay: "2026-10-10", number: 1, modifier: "none", sealed: true, bellAt: "2026-10-11T00:00:00Z", cards });
+const slate = (cards: SlateCard[]): Slate => ({ cityDay: "2026-10-10", number: 1, modifier: "none", sealed: true, bellAt: "2026-10-11T00:00:00Z", credit: null, cards });
 describe("Today progress", () => {
   it("counts accepted and pending calls while allowing rejected calls to be retried", () => {
     expect(slateSummary(slate([card("locked"), card("pending"), card("expired"), card("price_moved"), card(null)]), now)).toEqual({ submitted: 2, available: 3, total: 5 });

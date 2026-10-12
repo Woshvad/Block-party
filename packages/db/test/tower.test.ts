@@ -780,6 +780,7 @@ describe("the live Polymarket feed, on recorded Gamma payloads", () => {
     expect(await client`SELECT 1 FROM calls WHERE market_id = ${otherRow.id}`).toHaveLength(0);
     expect(await client`SELECT 1 FROM calls WHERE market_id = ${cardRow.id} AND user_id <> ${u}`).not.toHaveLength(0); // the carried card it does call
     const slate = await todaySlate(db, u, { now: new Date(at + 3 * MIN + 1000) });
+    expect(slate!.credit).toBe("Odds via Polymarket · Not affiliated");
     expect(slate!.cards.map((x) => [x.marketId, x.open])).toEqual([
       [cardRow.id, true],
       [otherRow.id, false],

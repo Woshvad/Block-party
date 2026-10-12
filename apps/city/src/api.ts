@@ -352,7 +352,7 @@ export type SlateCard = {
   open: boolean;
   mine: { side: Side; chance: number; status: CallState } | null;
 };
-export type Slate = { cityDay: string; number: number; modifier: string; bellAt: string; sealed: boolean; cards: SlateCard[] };
+export type Slate = { cityDay: string; number: number; modifier: string; bellAt: string; sealed: boolean; credit: string | null; cards: SlateCard[] };
 export type MarketView = {
   id: string;
   question: string;
