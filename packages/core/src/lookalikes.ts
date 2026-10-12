@@ -1,12 +1,46 @@
-// Letters from other scripts that look like Latin ones. Text that is matched
-// against a word list (reserved names, scam phrases, blocked words) reads
-// through them, so "Fаucet Frеn" written with a Cyrillic а and е is still
-// Faucet Fren. A small table of the common lookalikes from Unicode's
-// confusables list (UTS #39): Cyrillic, Greek and a few Armenian letters.
-// Only shapes that pass for a Latin letter are here: lowercase Cyrillic к, м,
-// н and т look like small capitals, so they stay out, while their capitals
-// (К, М, Н, Т) are in.
+// Letters that look like Latin ones. Text that is matched against a word list
+// (reserved names, scam phrases, blocked words) reads through them, so "Fаucet
+// Frеn" written with a Cyrillic а and е is still Faucet Fren, and "ᴀᴅᴍɪɴ" in
+// small capitals (the usual "fancy text" font) is still admin. A small table
+// of the common lookalikes from Unicode's confusables list (UTS #39): Latin
+// small capitals and phonetic letters, Cyrillic, Greek, a few Armenian
+// letters, and the Cherokee and Lisu letters drawn like Latin capitals.
+// Lowercase Cyrillic к, м, н and т look like the small capitals ᴋ, ᴍ, ʜ and ᴛ,
+// so they read as those letters too.
 const LOOKALIKES: Record<string, string> = {
+  // Latin small capitals: NFKD leaves them alone, so without this they'd
+  // simply vanish from a skeleton.
+  ᴀ: "a",
+  ʙ: "b",
+  ᴄ: "c",
+  ᴅ: "d",
+  ᴇ: "e",
+  ꜰ: "f",
+  ɢ: "g",
+  ʜ: "h",
+  ɪ: "i",
+  ᴊ: "j",
+  ᴋ: "k",
+  ʟ: "l",
+  ᴍ: "m",
+  ɴ: "n",
+  ᴏ: "o",
+  ᴘ: "p",
+  ꞯ: "q",
+  ʀ: "r",
+  ꜱ: "s",
+  ᴛ: "t",
+  ᴜ: "u",
+  ᴠ: "v",
+  ᴡ: "w",
+  ʏ: "y",
+  ᴢ: "z",
+  // Phonetic letters that pass for plain ones
+  ɑ: "a",
+  ɡ: "g",
+  ı: "i",
+  ȷ: "j",
+  ɩ: "i",
   // Cyrillic capitals
   А: "a",
   В: "b",
@@ -42,6 +76,10 @@ const LOOKALIKES: Record<string, string> = {
   ү: "y",
   һ: "h",
   ӏ: "l",
+  к: "k",
+  м: "m",
+  н: "h",
+  т: "t",
   ԁ: "d",
   ԛ: "q",
   ԝ: "w",
@@ -76,7 +114,64 @@ const LOOKALIKES: Record<string, string> = {
   ո: "n",
   ս: "u",
   օ: "o",
+  // Lisu capitals
+  ꓐ: "b",
+  ꓑ: "p",
+  ꓓ: "d",
+  ꓔ: "t",
+  ꓖ: "g",
+  ꓗ: "k",
+  ꓙ: "j",
+  ꓚ: "c",
+  ꓜ: "z",
+  ꓝ: "f",
+  ꓟ: "m",
+  ꓠ: "n",
+  ꓡ: "l",
+  ꓢ: "s",
+  ꓣ: "r",
+  ꓦ: "v",
+  ꓧ: "h",
+  ꓪ: "w",
+  ꓫ: "x",
+  ꓬ: "y",
+  ꓮ: "a",
+  ꓰ: "e",
+  ꓲ: "i",
+  ꓳ: "o",
+  ꓴ: "u",
 };
+
+// Cherokee letters drawn like Latin ones ("Ꮇayor"). Their small forms look
+// like small capitals, so each counts in both cases.
+const CHEROKEE: Record<string, string> = {
+  Ꭰ: "d",
+  Ꭱ: "r",
+  Ꭲ: "t",
+  Ꭵ: "i",
+  Ꭺ: "a",
+  Ꭻ: "j",
+  Ꭼ: "e",
+  Ꮃ: "w",
+  Ꮇ: "m",
+  Ꮋ: "h",
+  Ꮐ: "g",
+  Ꮓ: "z",
+  Ꮟ: "b",
+  Ꮤ: "w",
+  Ꮥ: "s",
+  Ꮩ: "v",
+  Ꮪ: "s",
+  Ꮮ: "l",
+  Ꮯ: "c",
+  Ꮲ: "p",
+  Ꮶ: "k",
+  Ᏼ: "b",
+};
+for (const [capital, latin] of Object.entries(CHEROKEE)) {
+  LOOKALIKES[capital] = latin;
+  LOOKALIKES[capital.toLowerCase()] = latin;
+}
 
 const LOOKALIKE = new RegExp(`[${Object.keys(LOOKALIKES).join("")}]`, "gu");
 

@@ -348,8 +348,11 @@ describe("bare names: any real ending, or anything shaped like an address, is a 
   );
 });
 
+// "ᴄᴏɴɴᴇᴄᴛ ʏᴏᴜʀ ᴡᴀʟʟᴇᴛ ᴛᴏ ᴄʟᴀɪᴍ", in small capitals.
+const SMALL_CAPS_BAIT = ch(0x1d04, 0x1d0f, 0x274, 0x274, 0x1d07, 0x1d04, 0x1d1b, 0x20, 0x28f, 0x1d0f, 0x1d1c, 0x280, 0x20, 0x1d21, 0x1d00, 0x29f, 0x29f, 0x1d07, 0x1d1b, 0x20, 0x1d1b, 0x1d0f, 0x20, 0x1d04, 0x29f, 0x1d00, 0x26a, 0x1d0d);
+
 describe("lookalike letters don't hide scam bait", () => {
-  it.each([`c${CY.o}nnect your wallet to claim`, `verify y${CY.o}ur w${CY.a}llet`, "vérify your wallet"])("%s", (msg) => {
+  it.each([`c${CY.o}nnect your wallet to claim`, `verify y${CY.o}ur w${CY.a}llet`, "vérify your wallet", SMALL_CAPS_BAIT])("%s", (msg) => {
     expect(reason(msg)).toBe("SCAM");
   });
 });
