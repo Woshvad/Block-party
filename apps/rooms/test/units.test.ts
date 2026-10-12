@@ -2,7 +2,7 @@ import { parseBlockedWords as apiParseBlockedWords } from "@bp/core";
 import { describe, expect, it } from "vitest";
 import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "../src/directory";
 import { OUTBOX, Outbox, type OutboxStorage } from "../src/outbox";
-import { BUCKET, parseBlockedWords, takeToken } from "../src/worker";
+import { BUCKET, configProblems, parseBlockedWords, takeToken } from "../src/worker";
 
 // The rooms' pure parts, on an explicit clock. The Worker around them runs
 // in workerd in rooms.test.ts and hotpath.test.ts.
@@ -255,5 +255,17 @@ describe("BLOCKED_WORDS", () => {
     expect(parseBlockedWords(" rugpull, honeypot\r\nScamCoin\n\n,  ,@,$$,rugpull")).toEqual(["rugpull", "honeypot", "scamcoin"]);
     expect(parseBlockedWords(undefined)).toEqual([]);
     expect(parseBlockedWords("")).toEqual([]);
+  });
+});
+
+describe("the rooms config check", () => {
+  const good = { TICKET_SECRET: "t".repeat(32), INTERNAL_SECRET: "i".repeat(40) };
+  it("names each missing, short or placeholder secret, never its value", () => {
+    expect(configProblems(good)).toEqual([]);
+    expect(configProblems({})).toEqual(["TICKET_SECRET is not set", "INTERNAL_SECRET is not set"]);
+    expect(configProblems({ ...good, TICKET_SECRET: "short" })).toEqual(["TICKET_SECRET must be 32+ characters"]);
+    const placeholder = "replace-me-with-a-long-random-secret-value";
+    expect(configProblems({ ...good, INTERNAL_SECRET: placeholder })).toEqual(["INTERNAL_SECRET is still the .env.example placeholder"]);
+    expect(JSON.stringify(configProblems({ ...good, TICKET_SECRET: "short" }))).not.toContain("short\"");
   });
 });

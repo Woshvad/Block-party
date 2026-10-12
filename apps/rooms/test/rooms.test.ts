@@ -42,9 +42,18 @@ describe("connecting", () => {
       const r = await weak.mf.dispatchFetch(`http://rooms.test/connect?ticket=${forged}`, { headers: { upgrade: "websocket" } });
       expect(r.webSocket).toBeNull();
       expect(r.status).toBe(500);
+      expect(await r.json()).toMatchObject({ error: "MISCONFIGURED" });
+      // /health says what's wrong, by name.
+      const health = await weak.mf.dispatchFetch("http://rooms.test/health");
+      expect([health.status, await health.json()]).toEqual([500, { ok: false, config: ["TICKET_SECRET must be 32+ characters"] }]);
     } finally {
       await weak.dispose();
     }
+  });
+
+  it("a well-configured Worker says it's healthy", async () => {
+    const health = await dispatch("http://rooms.test/health");
+    expect([health.status, await health.json()]).toEqual([200, { ok: true }]);
   });
 
   it("welcomes you with who's here, and tells them you arrived", async () => {

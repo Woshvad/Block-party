@@ -61,6 +61,20 @@ function timingSafeEqual(a: string, b: string) {
 
 const internalOk = (req: Request, env: Env) => env.INTERNAL_SECRET?.length >= 32 && timingSafeEqual(req.headers.get("x-internal-secret") ?? "", env.INTERNAL_SECRET);
 
+// Why this Worker can't run safely, by setting name, never value: a missing
+// or short secret lets anyone write tickets or call the internal routes, and
+// a .env.example placeholder is public. The same rules as the API's.
+export function configProblems(env: Partial<Pick<Env, "TICKET_SECRET" | "INTERNAL_SECRET">>): string[] {
+  const problems: string[] = [];
+  for (const name of ["TICKET_SECRET", "INTERNAL_SECRET"] as const) {
+    const value = env[name];
+    if (!value) problems.push(`${name} is not set`);
+    else if (value.length < 32) problems.push(`${name} must be 32+ characters`);
+    else if (/replace-(me|with)/i.test(value)) problems.push(`${name} is still the .env.example placeholder`);
+  }
+  return problems;
+}
+
 // How a room closes a socket. The city treats 4000-4002 as final and says
 // why (apps/city/src/roomSocket.ts); after anything else it reconnects.
 export const CLOSE = {
@@ -123,7 +137,14 @@ const visitEnd = (userId: string) => ({ kind: "visit_end", userId, at: Date.now(
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/health") return json({ ok: true });
+    // Misconfigured: /health lists why, and everything else is refused, so a
+    // deploy with a bad secret is loud instead of quietly letting nobody in.
+    const problems = configProblems(env);
+    if (url.pathname === "/health") return json(problems.length ? { ok: false, config: problems } : { ok: true }, problems.length ? 500 : 200);
+    if (problems.length) {
+      console.error("rooms: refusing requests, the config is unsafe", { problems });
+      return json({ error: "MISCONFIGURED", message: "the rooms Worker isn't set up right; see /health" }, 500);
+    }
 
     if (url.pathname === "/connect") {
       if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return json({ error: "expected a websocket" }, 426);
