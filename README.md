@@ -17,8 +17,9 @@ Needs Node 22.12+ (vitest 5 needs it), pnpm 10, and Postgres 15 on localhost.
 ```bash
 pnpm install
 cp .env.example .env
-# Fresh local secrets, to paste over the placeholders in .env:
-node -e "for (const k of ['INTERNAL_SECRET', 'TICKET_SECRET', 'PON_PEPPER']) console.log(k + '=' + require('crypto').randomBytes(24).toString('base64url'))"
+# Fresh local secrets and a made-up bot token of the right shape, to paste
+# over the placeholders in .env:
+node -e "const r = (n) => require('crypto').randomBytes(n).toString('base64url'); for (const k of ['INTERNAL_SECRET', 'TICKET_SECRET', 'PON_PEPPER']) console.log(k + '=' + r(24)); console.log('TELEGRAM_BOT_TOKEN=' + (1e9 + require('crypto').randomInt(9e8)) + ':' + r(27))"
 createdb blockparty
 pnpm db:migrate
 pnpm test
@@ -29,7 +30,9 @@ The API refuses to run without a real-looking `TELEGRAM_BOT_TOKEN` (`<bot id>:<3
 
 Every package's scripts, the dev server and the test suites read this root `.env`, after a `.env` in their own package if there is one; a variable already set in the environment (as in CI) always wins.
 
-Tests drop and recreate `blockparty_test` on every run (the name must end in `_test`).
+Tests drop and recreate their databases on every run: the db suite uses `TEST_DATABASE_URL`'s (`blockparty_test`; the name must end in `_test`), and the API suite one named after it (`blockparty_api_test`).
+
+A database migrated on a branch whose migrations were later renumbered (the safety lane's `0043_moderation_review`, now `0047`) can't move forward: drizzle applies only migrations newer than the last one it recorded, so it would skip `0043_market_feed` and then fail at `0047`. Drop and recreate it (`dropdb blockparty && createdb blockparty && pnpm db:migrate`).
 
 ## Bricks
 
