@@ -22,7 +22,13 @@ export class ModerationUnavailable extends Error {
 
 export const OPENAI_MODERATION_BATCH = 32;
 
-export function openAiModeration(opts: { apiKey: string; fetch?: typeof fetch; model?: string; url?: string }): ModerationProvider {
+// How long one check may take, body included. The cron runs it inside the
+// transaction that holds its batch, so a stalled connection must not hold
+// those locks (and that minute's other jobs) for as long as the platform
+// lets a fetch hang.
+export const OPENAI_MODERATION_TIMEOUT_MS = 10_000;
+
+export function openAiModeration(opts: { apiKey: string; fetch?: typeof fetch; model?: string; url?: string; timeoutMs?: number }): ModerationProvider {
   const doFetch = opts.fetch ?? fetch;
   return {
     async classify(texts) {
@@ -34,9 +40,10 @@ export function openAiModeration(opts: { apiKey: string; fetch?: typeof fetch; m
           method: "POST",
           headers: { authorization: `Bearer ${opts.apiKey}`, "content-type": "application/json" },
           body: JSON.stringify({ model: opts.model ?? "omni-moderation-latest", input: texts }),
+          signal: AbortSignal.timeout(opts.timeoutMs ?? OPENAI_MODERATION_TIMEOUT_MS),
         });
       } catch {
-        throw new ModerationUnavailable(0, null); // network down
+        throw new ModerationUnavailable(0, null); // network down, or no answer in time
       }
       if (!res.ok) {
         const ra = Number(res.headers.get("retry-after"));
