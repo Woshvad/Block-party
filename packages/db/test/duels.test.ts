@@ -333,7 +333,10 @@ describe("in the reel", () => {
 describe("at the bell", () => {
   it("duels settle at the bell: a won Snap doubles the crew's Bell Score, and the reel and the paper print it", async () => {
     const s = await scene();
-    await createCrew(db, s.a, { name: `Snap ${randomUUID().slice(0, 6)}` });
+    const crew = await createCrew(db, s.a, { name: `Snap ${randomUUID().slice(0, 6)}` });
+    // Founded the day before: founded on the real date, the bell's Bell Scores
+    // would settle its gm chain a day at a time up to 2036, which takes many seconds.
+    await client`UPDATE crews SET created_at = ${new Date(s.d0 - D).toISOString()} WHERE id = ${crew.id}`;
     await setDuelPrefs(db, s.a, { allowNaming: true });
     await setDuelPrefs(db, s.b, { allowNaming: true });
     const d = await challenge(db, s.a, { marketId: s.id, opponentId: s.b }, { now: s.at });
