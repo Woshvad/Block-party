@@ -1,3 +1,4 @@
+import { parseBlockedWords as apiParseBlockedWords } from "@bp/core";
 import { describe, expect, it } from "vitest";
 import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "../src/directory";
 import { OUTBOX, Outbox, type OutboxStorage } from "../src/outbox";
@@ -220,8 +221,10 @@ describe("the per-socket bucket", () => {
 });
 
 describe("BLOCKED_WORDS", () => {
-  it("is comma- or newline-separated, trimmed, with blanks ignored", () => {
-    expect(parseBlockedWords(" rugpull, honeypot\r\nScamCoin\n\n,  ,")).toEqual(["rugpull", "honeypot", "ScamCoin"]);
+  it("is read exactly as the API reads it", () => {
+    expect(parseBlockedWords).toBe(apiParseBlockedWords);
+    // Symbol-only entries go: kept, "@" or "$" would read as a letter.
+    expect(parseBlockedWords(" rugpull, honeypot\r\nScamCoin\n\n,  ,@,$$,rugpull")).toEqual(["rugpull", "honeypot", "scamcoin"]);
     expect(parseBlockedWords(undefined)).toEqual([]);
     expect(parseBlockedWords("")).toEqual([]);
   });

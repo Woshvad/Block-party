@@ -9,6 +9,7 @@ import {
   TicketError,
   checkMessage,
   chooseCopy,
+  parseBlockedWords,
   verifyRoomTicket,
 } from "@bp/core";
 import { type DirState, SYNC_MS, copyInfos, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "./directory";
@@ -111,12 +112,9 @@ function readAttachment(ws: WebSocket): Attachment | null {
   return a && typeof a.u === "string" ? a : null;
 }
 
-// BLOCKED_WORDS: comma- or newline-separated, trimmed, blanks ignored.
-export const parseBlockedWords = (raw: string | undefined): string[] =>
-  (raw ?? "")
-    .split(/[,\n]/)
-    .map((w) => w.trim())
-    .filter(Boolean);
+// BLOCKED_WORDS is read by the same parser as the API's, so one list blocks
+// the same text in rooms as on boards, crew chat and DMs.
+export { parseBlockedWords };
 
 const visitEnd = (userId: string) => ({ kind: "visit_end", userId, at: Date.now() }) as unknown as Effect;
 
