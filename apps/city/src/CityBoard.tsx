@@ -1,18 +1,22 @@
 "use client";
-import { Html, MapControls } from "@react-three/drei";
+import { Html, MapControls, useProgress } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { clampTarget } from "./camera";
+import { ISO, ZOOM, clampTarget, shortCount, startZoom, zoomLevel } from "./camera";
 import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, SQUARE, blockRect, zoneOf } from "./citygen";
 import CityScape from "./CityScape";
+import { clearFailedModels } from "./Kit";
+import SceneBoundary from "./SceneBoundary";
 import CityAtmosphere from "./CityAtmosphere";
 import { PLACE_INFO } from "./places";
 import type { Api, Me } from "./api";
+import { useBackLayer } from "./back";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
+import { deviceTier } from "./quality";
 import { haptic, initTelegram } from "./telegram";
 
 // The city board, SimCity style: an isometric view over a street grid of
@@ -23,18 +27,25 @@ type Place = { key: PlaceKey; name: string; icon: string; info: string };
 type Picked = { name: string; icon: string; info: string; soon?: boolean };
 const PLACES: Place[] = (Object.keys(LANDMARKS) as PlaceKey[]).map((key) => ({ key, name: PLACE_INFO[key]!.name, icon: PLACE_INFO[key]!.icon, info: PLACE_INFO[key]!.info }));
 
-// Pins float over each landmark at a fixed size on screen.
+// Pins float over each landmark at a fixed size on screen. The headcount is
+// its own badge, so it shows at every zoom, even when the name is hidden.
 function Pins({ onTap, counts }: { counts: Record<string, number | null>; onTap: (p: Place) => void }) {
   return (
     <>
       {PLACES.map((p) => {
         const l = LANDMARKS[p.key];
+        const n = counts[p.key];
         return (
           <Html key={p.key} position={[l.x, l.pinY, l.z]} center zIndexRange={[1, 0]}>
-            {/* Missing or failed counts remain unavailable, never shown as zero. */}
-            <button className="pin" onClick={() => onTap(p)} aria-label={p.name}>
+            {/* A missing or failed count shows no badge; it's never shown as zero. */}
+            <button className="pin" onClick={() => onTap(p)} aria-label={n != null ? `${p.name}, ${n} here` : p.name}>
               <span className="ico">{p.icon}</span>
-              <span className="name">{p.name}{counts[p.key] != null && <small>{counts[p.key]} here</small>}</span>
+              <span className="name">{p.name}</span>
+              {n != null && (
+                <span className={`here ${n > 0 ? "" : "none"}`} aria-hidden="true">
+                  {shortCount(n)}
+                </span>
+              )}
             </button>
           </Html>
         );
@@ -99,8 +110,7 @@ function ZoomLevel() {
   const last = useRef("");
   useEffect(() => () => document.documentElement.removeAttribute("data-zoom"), []);
   useFrame(() => {
-    const z = camera.zoom;
-    const level = z < 13 ? "far" : z < 30 ? "mid" : "near";
+    const level = zoomLevel(camera.zoom);
     if (level === last.current) return;
     last.current = level;
     document.documentElement.setAttribute("data-zoom", level);
@@ -126,19 +136,19 @@ function TowerTop({ night }: { night: boolean }) {
   );
 }
 
-// The isometric camera: fixed angle (no orbiting, like SimCity); fits about
-// 30 tiles across a phone held upright, 65 across a laptop.
-const ISO = new THREE.Vector3(1, 0.85, 1).normalize();
+// The isometric camera: fixed angle (no orbiting, like SimCity); opens at
+// startZoom (camera.ts), about 30 tiles across a phone held upright, 65 across
+// a laptop.
+const ISO_DIR = new THREE.Vector3(ISO.x, ISO.y, ISO.z).normalize();
 type MapCommand = { action: "in" | "out" | "reset" | "diner"; n: number };
 function IsoRig({ command }: { command: MapCommand }) {
   const camera = useThree((s) => s.camera) as THREE.OrthographicCamera;
   const size = useThree((s) => s.size);
   const controls = useThree((s) => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | null;
   useEffect(() => {
-    const across = command.action === "diner" ? (size.width < size.height ? 16 : 24) : (size.width < size.height ? 30 : 65);
-    camera.zoom = size.width / across;
+    camera.zoom = command.action === "diner" ? size.width / (size.width < size.height ? 16 : 24) : startZoom(size.width, size.height);
     const target = controls?.target ?? new THREE.Vector3();
-    camera.position.copy(ISO).multiplyScalar(90).add(target);
+    camera.position.copy(ISO_DIR).multiplyScalar(90).add(target);
     camera.lookAt(target);
     camera.updateProjectionMatrix();
   }, [camera, size.width, size.height]);
@@ -147,14 +157,14 @@ function IsoRig({ command }: { command: MapCommand }) {
     if (command.action === "diner") {
       const target = new THREE.Vector3(LANDMARKS.diner.x + 2, 0, LANDMARKS.diner.z + 2);
       controls?.target.copy(target);
-      camera.position.copy(ISO).multiplyScalar(90).add(target);
-      camera.zoom = Math.min(90, size.width / (size.width < size.height ? 16 : 24));
+      camera.position.copy(ISO_DIR).multiplyScalar(90).add(target);
+      camera.zoom = Math.min(ZOOM.max, size.width / (size.width < size.height ? 16 : 24));
       camera.lookAt(target);
     } else if (command.action === "reset") {
       controls?.target.set(0, 0, 0);
-      camera.position.copy(ISO).multiplyScalar(90);
-      camera.zoom = size.width / (size.width < size.height ? 30 : 65);
-    } else camera.zoom = Math.max(8, Math.min(90, camera.zoom * (command.action === "in" ? 1.3 : 1 / 1.3)));
+      camera.position.copy(ISO_DIR).multiplyScalar(90);
+      camera.zoom = startZoom(size.width, size.height);
+    } else camera.zoom = Math.max(ZOOM.min, Math.min(ZOOM.max, camera.zoom * (command.action === "in" ? 1.3 : 1 / 1.3)));
     camera.updateProjectionMatrix();
     controls?.update();
   }, [command]);
@@ -197,10 +207,14 @@ function Strollers() {
   );
 }
 
-export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe, showcase = false }: { showcase?: boolean; api: Pick<Api, "cityHall" | "slate"> & Partial<Pick<Api, "headcounts">>; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
+// `active` false keeps the board mounted but hidden and not drawing, under
+// another screen (App.tsx), so coming back to it doesn't rebuild the city.
+export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe, showcase = false, active = true }: { showcase?: boolean; active?: boolean; api: Pick<Api, "cityHall" | "slate"> & Partial<Pick<Api, "headcounts">>; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
+  const tier = deviceTier();
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  // Headcounts are polled only while the board shows.
   useEffect(() => {
-    if (!api.headcounts) return;
+    if (!api.headcounts || !active) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
@@ -210,9 +224,19 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
     };
     void poll();
     return () => { live = false; clearTimeout(timer); };
-  }, [api]);
+  }, [api, active]);
   const hall = useLoad(() => api.cityHall(), [api]);
   const slate = useLoad(() => api.slate(), [api]);
+  // Back on the board after another screen: the Mayor, the Law and the
+  // Slate's calls may have changed meanwhile.
+  const shown = useRef(active);
+  useEffect(() => {
+    if (active && !shown.current) {
+      void hall.reload();
+      void slate.reload();
+    }
+    shown.current = active;
+  }, [active]);
   const now = useNow(1000);
   const h = hall.data;
   const s = slate.data;
@@ -225,11 +249,23 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   const mapAction = (action: MapCommand["action"]) => setCommand((c) => ({ action, n: c.n + 1 }));
   useEffect(() => { if (showcase) mapAction("diner"); else mapAction("reset"); }, [showcase]);
   const perf = useRef<HTMLDivElement>(null);
+  // Hidden under another screen: close the place list and the place card,
+  // as leaving the board always has.
+  useEffect(() => {
+    if (!active) {
+      setGuide(false);
+      setPicked(null);
+    }
+  }, [active]);
+  useBackLayer(guide, () => setGuide(false));
+  useBackLayer(picked !== null, () => setPicked(null));
+  // Models still downloading: the roads come first, then the buildings.
+  const loading = useProgress((p) => p.active);
   useEffect(() => {
     initTelegram();
   }, []);
   return (
-    <>
+    <div className="city-board" hidden={!active}>
       {/* Mock values until the API is wired in phase 1. */}
       <button className="banner" onClick={onOpenHall} disabled={!onOpenHall} aria-label="Open City Hall">
         {h?.mayor ? (
@@ -269,6 +305,11 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
         <button className="pill" onClick={() => setNight((n) => !n)}>
           {night ? "Show day" : "Show night"}
         </button>
+        {loading && (
+          <div className="pill muted" role="status">
+            Loading the city…
+          </div>
+        )}
         {SHOW_PERF && (
           <div className="perf" ref={perf}>
             measuring…
@@ -287,7 +328,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
           setGuide(false);
           if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
           else setPicked(p);
-        }}>{p.icon}<span><b>{p.name}</b><small>{p.info}</small></span><span aria-hidden="true">↗</span></button>)}
+        }}>{p.icon}<span><b>{p.name}</b><small>{p.info}{counts[p.key] != null ? ` · ${counts[p.key]} here` : ""}</small></span><span aria-hidden="true">↗</span></button>)}
       </section>}
       {picked && (
         <div className="sheet" onClick={() => setPicked(null)}>
@@ -299,68 +340,71 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
         </div>
       )}
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
-        <Canvas shadows orthographic dpr={[1, 1.5]} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
-          <CityAtmosphere night={night} />
-          <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
-          {/* The sun, casting real shadows over the whole city. */}
-          <directionalLight
-            position={[-28, 42, 24]}
-            color={night ? "#b1c7f7" : "#fff1d9"}
-            intensity={night ? 0.7 : 2.5}
-            castShadow
-            shadow-mapSize={[2048, 2048]}
-            shadow-camera-left={-62}
-            shadow-camera-right={62}
-            shadow-camera-top={62}
-            shadow-camera-bottom={-62}
-            shadow-camera-far={120}
-            shadow-bias={-0.0004}
-            shadow-normalBias={0.03}
-          />
-          <CityScape night={night} />
-          <TowerTop night={night} />
-          <Strollers />
-          <Pins counts={counts}
-            onTap={(p) => {
-              haptic("light");
-              // Residents go there; guests can only look.
-              if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
-              else setPicked(p);
-            }}
-          />
-          <SoonPins
-            onTap={(p) => {
-              haptic("light");
-              setPicked(p);
-            }}
-          />
-          <DistrictLabels />
-          <ZoomLevel />
-          <IsoRig command={command} />
-          <MapControls
-            makeDefault
-            enableRotate={false}
-            screenSpacePanning={false}
-            minZoom={8}
-            maxZoom={90}
-            onChange={(e) => {
-              // Keep the board under the player's thumb: shift camera and focus together.
-              const c = e?.target as unknown as { target: THREE.Vector3; object: THREE.Camera } | undefined;
-              if (!c) return;
-              const t = clampTarget(c.target.x, c.target.z);
-              const dx = t.x - c.target.x;
-              const dz = t.z - c.target.z;
-              if (dx || dz) {
-                c.target.x += dx;
-                c.target.z += dz;
-                c.object.position.x += dx;
-                c.object.position.z += dz;
-              }
-            }}
-          />
-          {SHOW_PERF && <PerfProbe target={perf} />}
-        </Canvas>
+        <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
+          {/* Hidden, it draws nothing ("never") but keeps everything it built. */}
+          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }}>
+            <CityAtmosphere night={night} />
+            <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
+            {/* The sun, casting real shadows over the whole city. */}
+            <directionalLight
+              position={[-28, 42, 24]}
+              color={night ? "#b1c7f7" : "#fff1d9"}
+              intensity={night ? 0.7 : 2.5}
+              castShadow={tier.shadows}
+              shadow-mapSize={[2048, 2048]}
+              shadow-camera-left={-62}
+              shadow-camera-right={62}
+              shadow-camera-top={62}
+              shadow-camera-bottom={-62}
+              shadow-camera-far={120}
+              shadow-bias={-0.0004}
+              shadow-normalBias={0.03}
+            />
+            <CityScape night={night} lamps={tier.nightLamps} />
+            <TowerTop night={night} />
+            {tier.strollers && <Strollers />}
+            <Pins counts={counts}
+              onTap={(p) => {
+                haptic("light");
+                // Residents go there; guests can only look.
+                if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
+                else setPicked(p);
+              }}
+            />
+            <SoonPins
+              onTap={(p) => {
+                haptic("light");
+                setPicked(p);
+              }}
+            />
+            <DistrictLabels />
+            <ZoomLevel />
+            <IsoRig command={command} />
+            <MapControls
+              makeDefault
+              enableRotate={false}
+              screenSpacePanning={false}
+              minZoom={ZOOM.min}
+              maxZoom={ZOOM.max}
+              onChange={(e) => {
+                // Keep the board under the player's thumb: shift camera and focus together.
+                const c = e?.target as unknown as { target: THREE.Vector3; object: THREE.Camera } | undefined;
+                if (!c) return;
+                const t = clampTarget(c.target.x, c.target.z);
+                const dx = t.x - c.target.x;
+                const dz = t.z - c.target.z;
+                if (dx || dz) {
+                  c.target.x += dx;
+                  c.target.z += dz;
+                  c.object.position.x += dx;
+                  c.object.position.z += dz;
+                }
+              }}
+            />
+            {SHOW_PERF && <PerfProbe target={perf} quality={tier.quality} />}
+          </Canvas>
+        </SceneBoundary>
       </div>
-    </>
+    </div>
   );
 }

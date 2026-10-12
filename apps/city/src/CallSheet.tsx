@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ApiError, type Api, type CallState, type MarketView, type Side } from "./api";
+import { useBackLayer } from "./back";
 import { CALL_STATE_LABEL, auraIf, clampChance, sliderRange } from "./call";
 import { until, useNow } from "./clock";
 import { haptic } from "./telegram";
@@ -22,6 +23,7 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
   const [state, setState] = useState<{ id: string; status: CallState; lockedPrice: number | null } | null>(null);
   const sending = useRef(false);
   const now = useNow(1000);
+  useBackLayer(true, onClose);
 
   const loadMarket = async (keepSide = side) => {
     try {

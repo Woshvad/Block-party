@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { ApiError, type Api, type Whereabouts, newKey } from "./api";
+import { useEffect, useState } from "react";
+import { ActionKeys } from "./actionKeys";
+import { ApiError, type Api, type Whereabouts } from "./api";
 import { countdown, useNow } from "./clock";
 import { PLACE_INFO, RIDE_OPTIONS, type RideMode, areaOf, placeName } from "./places";
 import { haptic } from "./telegram";
@@ -17,7 +18,7 @@ export default function Travel({ api, place, gm, ridesFree, onArrive, onCancel }
   const [where, setWhere] = useState<Whereabouts | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<RideMode | null>(null);
-  const key = useRef<{ mode: RideMode; key: string } | null>(null);
+  const [keys] = useState(() => new ActionKeys());
   const now = useNow(250);
 
   const look = async () => {
@@ -57,19 +58,15 @@ export default function Travel({ api, place, gm, ridesFree, onArrive, onCancel }
 
   const ride = async (mode: RideMode) => {
     if (busy || !target) return;
-    // Same tap retried after a network blip: same key, so never charged twice.
-    if (!key.current || key.current.mode !== mode) key.current = { mode, key: newKey() };
     setBusy(mode);
     setMsg(null);
     try {
-      const r = await api.ride(target, mode, key.current.key);
+      // Same tap retried after a network blip: same key, so never charged twice.
+      const r = await keys.send(mode, (key) => api.ride(target, mode, key));
       haptic("medium");
       setWhere({ area: r.ride.toArea, arrived: Date.parse(r.ride.arriveAt) <= Date.now(), arriveAt: r.ride.arriveAt, from: r.ride.fromArea });
-      key.current = null;
     } catch (e) {
-      const err = e instanceof ApiError ? e : null;
-      setMsg(err?.message ?? "couldn't get a ride");
-      if (err && err.status !== 0) key.current = null; // a real refusal: the next tap is a new ride
+      setMsg(e instanceof ApiError ? e.message : "couldn't get a ride");
       haptic("error");
     } finally {
       setBusy(null);

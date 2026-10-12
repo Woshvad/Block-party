@@ -21,7 +21,7 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
   const [day, setDay] = useState(yesterday());
   const reel = useLoad(() => api.reel(), [api]);
   const grid = useLoad(() => api.grid(today()), [api]);
-  const paper = useLoad(() => api.dailyClose(day).catch(() => null), [api, day]);
+  const paper = useLoad(() => api.dailyClose(day), [api, day]);
   const right = useLoad(() => api.rightList(), [api]);
   const away = useLoad(() => api.awayRecap(), [api]);
   const act = useAction();
@@ -36,7 +36,7 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
       <section className="card">
         <h2>Today's grid</h2>
         {!g ? (
-          <Loading error={grid.error} />
+          <Loading error={grid.error} retry={grid.reload} />
         ) : g.sealed ? (
           <p className="muted">Sealed until the bell in {until(g.bellAt as string, now)}.</p>
         ) : (
@@ -69,7 +69,7 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
               <p key={i}>⚔️ {d.snap ? `@${String(d.winner)} ate @${String(d.loser)}'s Snap` : `@${String(d.winner)} beat @${String(d.loser)}`} ({Number(d.pot)} GM pot)</p>
             ))}
             {r.ratio ? <p>📰 Ratio of the Day: "{String((r.ratio as Any).headline ?? "")}"</p> : null}
-            <p className="muted">🔥 {Number(r.burned).toLocaleString("en-US")} GM burned so far, all time.</p>
+            <p className="muted">🔥 {Number(r.burned).toLocaleString("en-US")} GM burned that day.</p>
             {r.tomorrowsLongShot ? (
               <p>
                 Tomorrow's Long Shot: <b>{(r.tomorrowsLongShot as Any).question as string}</b> (world {(r.tomorrowsLongShot as Any).world as number}%)
@@ -84,7 +84,9 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
           <h2>The Daily Close</h2>
           <input type="date" value={day} max={yesterday()} onChange={(e) => e.target.value && setDay(e.target.value)} />
         </div>
-        {paper.data === undefined ? (
+        {paper.error ? (
+          <Loading error={paper.error} retry={paper.reload} />
+        ) : paper.data === undefined ? (
           <Loading />
         ) : paper.data === null ? (
           <p className="muted">No paper for that day.</p>
@@ -103,7 +105,7 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
       <section className="card">
         <h2>The Right List · season {right.data?.season ?? ""}</h2>
         {!right.data ? (
-          <Loading error={right.error} />
+          <Loading error={right.error} retry={right.reload} />
         ) : right.data.rows.length === 0 ? (
           <p className="muted">Nobody's on it yet. Calls settle, then the list fills.</p>
         ) : (

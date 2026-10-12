@@ -3,9 +3,12 @@ import dynamic from "next/dynamic";
 import AppNavigation, { type AppTab } from "./AppNavigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
+import { backStack, useBackLayer } from "./back";
 import { type Screen, boot, screenFor } from "./boot";
+import { boardMode } from "./boardMode";
+import { type Launch, TELEGRAM_APP_URL, inviteLink, readLaunch, withoutLaunch } from "./launch";
 import type { PageId } from "./screens/More";
-import { initTelegram, launchData, telegram } from "./telegram";
+import { initTelegram, launchData, startParam, telegram } from "./telegram";
 
 const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
 const MoveIn = dynamic(() => import("./MoveIn"), { ssr: false });
@@ -33,6 +36,18 @@ async function devLaunchData(id: string): Promise<string | null> {
   const r = await fetch(`/dev/telegram?id=${encodeURIComponent(id)}`).catch(() => null);
   if (!r?.ok) return null;
   return ((await r.json()) as { initData?: string }).initData ?? null;
+}
+
+// The link the app was opened from (see launch.ts), acted on once per visit.
+// The address then drops the link's own parameters, so a reload doesn't
+// repeat them.
+let launchTaken = false;
+function takeLaunch(): Launch {
+  if (launchTaken) return { invite: null, notification: null };
+  launchTaken = true;
+  const launch = readLaunch(startParam(), location.search);
+  if (launch.invite || launch.notification) backStack()?.replaceUrl(location.pathname + withoutLaunch(location.search) + location.hash);
+  return launch;
 }
 
 export default function App() {
@@ -100,13 +115,22 @@ export default function App() {
       );
     case "moveIn":
       return <MoveIn api={api} onDone={() => void refresh()} />;
-    case "guest":
+    case "guest": {
+      // With the Mini App's link configured, the way in is one tap (carrying
+      // a crew invite if the guest came with one).
+      const invite = readLaunch(startParam(), location.search).invite;
+      const openInTelegram = TELEGRAM_APP_URL && (invite ? inviteLink(invite, location.origin) : TELEGRAM_APP_URL);
       return (
         <>
           <CityBoard api={api} me={screen.me} />
           <div className="claim">
             <b>You're looking around as a guest.</b>
             <span>Open Block Party in Telegram to move in and get your own room.</span>
+            {openInTelegram && (
+              <a className="cta" href={openInTelegram}>
+                Open in Telegram
+              </a>
+            )}
             {DEV && (
               <button
                 className="cta"
@@ -121,6 +145,7 @@ export default function App() {
           </div>
         </>
       );
+    }
     case "city":
       return <Home api={api} me={screen.me} />;
   }
@@ -138,6 +163,18 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
   const [trip, setTrip] = useState<{ place: string; ridesFree: boolean } | null>(null);
   const [room, setRoom] = useState<string | null>(null);
   const [page, setPage] = useState<PageId | null>(null);
+  const [invite, setInvite] = useState<string | null>(null);
+
+  // Opened from a link: a crew invite opens Crew with the code filled in; a
+  // push the player tapped is marked opened.
+  useEffect(() => {
+    const launch = takeLaunch();
+    if (launch.notification) void api.notificationOpened(launch.notification).catch(() => {});
+    if (launch.invite) {
+      setInvite(launch.invite);
+      setPage("crew");
+    }
+  }, [api]);
 
   // While the app is open and visible, a heartbeat each minute: play time
   // (Rested, Chart-brain, the reality check) counts even without other calls.
@@ -151,22 +188,20 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
   const go = (t: Tab) => {
     setTab(t);
     setPage(null);
-    history.replaceState(null, "", t === "city" ? location.pathname + location.search : `#${t}`);
+    backStack()?.replaceUrl(t === "city" ? location.pathname + location.search : `#${t}`);
   };
   const refreshGm = () => void api.me().then((m) => setMe(m)).catch(() => {});
+  const leaveRoom = () => {
+    setRoom(null);
+    refreshGm();
+  };
+  // Back (Telegram's BackButton, Android's back key, a browser's Back) closes
+  // the newest of these first, then anything open inside them.
+  useBackLayer(page !== null, () => setPage(null));
+  useBackLayer(trip !== null, () => setTrip(null));
+  useBackLayer(room !== null, leaveRoom);
   if (room) {
-    return (
-      <LiveRoom
-        api={api}
-        me={me.userId}
-        crewId={me.crew?.id ?? null}
-        place={room}
-        onLeave={() => {
-          setRoom(null);
-          refreshGm();
-        }}
-      />
-    );
+    return <LiveRoom api={api} me={me.userId} crewId={me.crew?.id ?? null} place={room} onLeave={leaveRoom} />;
   }
   const back = () => setPage(null);
   const pageView =
@@ -187,7 +222,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
     ) : page === "games" ? (
       <Games api={api} me={me} onBack={back} onChanged={refreshGm} />
     ) : page === "crew" ? (
-      <Crew api={api} me={me} onBack={back} onChanged={refreshGm} onGoToHouse={(crewId) => (setPage(null), setTrip({ place: `crew_house:${crewId}`, ridesFree: false }))} />
+      <Crew api={api} me={me} invite={invite} onBack={back} onChanged={refreshGm} onGoToHouse={(crewId) => (setPage(null), setTrip({ place: `crew_house:${crewId}`, ridesFree: false }))} />
     ) : page ? (
       <div className="screen center">
         <p>Coming in the next build.</p>
@@ -196,11 +231,14 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
         </button>
       </div>
     ) : null;
+  // The city board stays mounted, hidden, under the flat screens, and is let
+  // go under the home editor and in a room (see boardMode.ts).
+  const board = boardMode({ tab, page: pageView !== null, room: room !== null });
   return (
     <>
       {pageView}
       {!pageView && tab === "more" && <More me={me} open={setPage} />}
-      {!pageView && tab === "city" && <CityBoard api={api} me={me} onOpenToday={() => go("today")} onPlace={(place, ridesFree) => setTrip({ place, ridesFree })} onOpenHall={() => setPage("cityhall")} onOpenMe={() => setPage("me")} />}
+      {board !== "released" && <CityBoard active={board === "shown"} api={api} me={me} onOpenToday={() => go("today")} onPlace={(place, ridesFree) => setTrip({ place, ridesFree })} onOpenHall={() => setPage("cityhall")} onOpenMe={() => setPage("me")} />}
       {trip && (
         <Travel
           api={api}

@@ -3,7 +3,7 @@ import { EXCLUSIONS, REAL, TIMEOUTS } from "@bp/core";
 import { useState } from "react";
 import type { Api } from "../api";
 import { GATE_WORDS } from "../gate";
-import { telegram } from "../telegram";
+import { ifConfirmed, telegram } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 
@@ -134,21 +134,21 @@ export default function RealMoney({ api, onBack }: { api: Api; onBack: () => voi
         <h2>Take a break</h2>
         <div className="btnrow">
           {Object.keys(TIMEOUTS).map((k) => (
-            <button key={k} className="btn light" onClick={() => confirm(`A ${k} break from real trades?`) && act.run(() => api.realBreak("timeout", k), "Break started").then(() => gate.reload())}>
+            <button key={k} className="btn light" onClick={() => ifConfirmed(`A ${k} break from real trades?`, () => act.run(() => api.realBreak("timeout", k), "Break started").then(() => gate.reload()))}>
               {k}
             </button>
           ))}
         </div>
         <div className="row">
           <input className="ask" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, ""))} />
-          <button className="btn light" disabled={!Number(days) || Number(days) > REAL.timeoutMaxDays} onClick={() => confirm(`A ${days}-day break?`) && act.run(() => api.realBreak("timeout", Number(days)), "Break started").then(() => gate.reload())}>
+          <button className="btn light" disabled={!Number(days) || Number(days) > REAL.timeoutMaxDays} onClick={() => ifConfirmed(`A ${days}-day break?`, () => act.run(() => api.realBreak("timeout", Number(days)), "Break started").then(() => gate.reload()))}>
             Days (up to {REAL.timeoutMaxDays})
           </button>
         </div>
         <h3 className="band">Exclude yourself</h3>
         <div className="btnrow">
           {Object.keys(EXCLUSIONS).map((k) => (
-            <button key={k} className="btn danger" onClick={() => confirm(`Exclude yourself from real trades for ${k}? This can't be undone early.`) && act.run(() => api.realBreak("exclusion", k), "Excluded").then(() => gate.reload())}>
+            <button key={k} className="btn danger" onClick={() => ifConfirmed(`Exclude yourself from real trades for ${k}? This can't be undone early.`, () => act.run(() => api.realBreak("exclusion", k), "Excluded").then(() => gate.reload()))}>
               {k}
             </button>
           ))}

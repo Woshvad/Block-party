@@ -1,10 +1,12 @@
 "use client";
 import { useGLTF } from "@react-three/drei";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { bake } from "./kitGeometry";
 export { bake } from "./kitGeometry";
 import type { Placement } from "./kitcity";
+import { failedAsset, noteModelAsked, noteModelLoaded, takeFailedModels } from "./sceneHealth";
+import { type LoadedGltf, glowFor, shareModelImages } from "./kitTextures";
 
 // Kenney's City Kit models (CC0, see public/assets/kenney/*/License.txt),
 // drawn the cheap way: each model becomes ONE instanced mesh holding every
@@ -13,13 +15,15 @@ import type { Placement } from "./kitcity";
 
 // Night windows: the packs colour everything from one palette image, glass in
 // pale blues. A mask of just those pixels becomes the glow map, so at night
-// the windows light up warm and the walls stay dark. One per palette image.
-const glowCache = new Map<THREE.Texture, THREE.Texture>();
+// the windows light up warm and the walls stay dark. One per palette image
+// (kitTextures.ts shares the image between a pack's models).
 function windowGlow(map: THREE.Texture | null): THREE.Texture | null {
   const img = map?.image as (CanvasImageSource & { width: number; height: number }) | undefined;
   if (!map || !img || !img.width) return null;
-  const hit = glowCache.get(map);
-  if (hit) return hit;
+  return glowFor(map, buildGlow);
+}
+function buildGlow(map: THREE.Texture): THREE.Texture {
+  const img = map.image as CanvasImageSource & { width: number; height: number };
   const c = document.createElement("canvas");
   c.width = img.width;
   c.height = img.height;
@@ -41,12 +45,31 @@ function windowGlow(map: THREE.Texture | null): THREE.Texture | null {
   t.flipY = map.flipY;
   t.magFilter = map.magFilter;
   t.minFilter = map.minFilter;
-  glowCache.set(map, t);
   return t;
 }
 
-function KitModel({ url, items, shadows, night }: { url: string; items: Placement[]; shadows: boolean; night: boolean }) {
+// A kit model, noted so a failed download can be retried (see sceneHealth.ts),
+// with its palette shared with the rest of its pack (see kitTextures.ts).
+function useModel(url: string) {
+  noteModelAsked(url);
   const gltf = useGLTF(url);
+  noteModelLoaded(url);
+  shareModelImages(url, gltf as unknown as LoadedGltf);
+  return gltf;
+}
+
+// For the scene's Try again: the loader keeps a failed download's error for
+// good, so drop every model that never arrived (and the one the error names)
+// and the next mount downloads them again.
+export function clearFailedModels(error?: unknown) {
+  const urls = new Set(takeFailedModels());
+  const named = failedAsset(error);
+  if (named) urls.add(named);
+  for (const url of urls) useGLTF.clear(url);
+}
+
+function KitModel({ url, items, shadows, night }: { url: string; items: Placement[]; shadows: boolean; night: boolean }) {
+  const gltf = useModel(url);
   const baked0 = useMemo(() => bake(gltf.scene), [gltf]);
   // Our own copy of the material, with the window glow wired in.
   const baked = useMemo(() => {
@@ -91,7 +114,9 @@ function KitModel({ url, items, shadows, night }: { url: string; items: Placemen
   return <instancedMesh ref={ref} args={[baked.geometry, baked.material, items.length]} castShadow={shadows} receiveShadow />;
 }
 
-// Everything placed, grouped by model.
+// Everything placed, grouped by model. Each model waits for its own download
+// only, so the city fills in as models arrive (roads are asked for first)
+// instead of showing nothing until the last one lands.
 export default function Kit({ placements, shadows = true, night = false }: { placements: Placement[]; shadows?: boolean; night?: boolean }) {
   const byUrl = useMemo(() => {
     const m = new Map<string, Placement[]>();
@@ -101,7 +126,9 @@ export default function Kit({ placements, shadows = true, night = false }: { pla
   return (
     <>
       {byUrl.map(([url, items]) => (
-        <KitModel key={url} url={url} items={items} shadows={shadows} night={night} />
+        <Suspense key={url} fallback={null}>
+          <KitModel url={url} items={items} shadows={shadows} night={night} />
+        </Suspense>
       ))}
     </>
   );
@@ -109,7 +136,7 @@ export default function Kit({ placements, shadows = true, night = false }: { pla
 
 // A kit model baked once, for components that move their own instances (cars).
 export function useBaked(url: string) {
-  const gltf = useGLTF(url);
+  const gltf = useModel(url);
   const baked = useMemo(() => bake(gltf.scene), [gltf]);
   useEffect(() => () => { baked?.geometry.dispose(); }, [baked]);
   return baked;

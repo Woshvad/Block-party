@@ -1,9 +1,12 @@
 "use client";
 import { BUYABLE_IDS, CREW, CREW_POST_KINDS, DEFAULT_BANNER } from "@bp/core";
 import dynamic from "next/dynamic";
-import { useRef, useState } from "react";
-import { ApiError, type Api, type Me, type MyCrew, newKey } from "../api";
+import { useState } from "react";
+import { ActionKeys } from "../actionKeys";
+import { ApiError, type Api, type Me, type MyCrew } from "../api";
 import { paintAt } from "../banner";
+import { inviteLink } from "../launch";
+import { ifConfirmed, useClosingConfirmation } from "../telegram";
 import { itemLabel, label, plural } from "../palette";
 import { OUTFIT } from "../palette";
 import Thread from "../Thread";
@@ -19,7 +22,8 @@ const Person = dynamic(() => import("../Person"), { ssr: false });
 
 const BOT_WORDS: Record<string, string> = { syndicate_call: "Syndicate calls", bell_in_15: "The bell in 15 minutes", crew_card: "The crew's daily card" };
 
-export default function Crew({ api, me, onBack, onChanged, onGoToHouse }: { api: Api; me: Me; onBack: () => void; onChanged: () => void; onGoToHouse: (crewId: string) => void }) {
+// invite: a code from the link the app was opened with, filled in for joining.
+export default function Crew({ api, me, invite, onBack, onChanged, onGoToHouse }: { api: Api; me: Me; invite?: string | null; onBack: () => void; onChanged: () => void; onGoToHouse: (crewId: string) => void }) {
   const mine = useLoad(() => api.myCrew(), [api]);
   const act = useAction();
   const m = mine.data;
@@ -29,16 +33,16 @@ export default function Crew({ api, me, onBack, onChanged, onGoToHouse }: { api:
   };
 
   if (m === undefined) return <Page title="Find your people." onBack={onBack} className="community-page crew-page">{<Loading error={mine.error} retry={mine.reload} />}</Page>;
-  if (m === null) return <NoCrew api={api} onBack={onBack} onJoined={reload} />;
+  if (m === null) return <NoCrew api={api} invite={invite ?? ""} onBack={onBack} onJoined={reload} />;
   return <InCrew api={api} me={me} m={m} act={act} onBack={onBack} reload={reload} onGoToHouse={onGoToHouse} />;
 }
 
-function NoCrew({ api, onBack, onJoined }: { api: Api; onBack: () => void; onJoined: () => void }) {
+function NoCrew({ api, invite, onBack, onJoined }: { api: Api; invite: string; onBack: () => void; onJoined: () => void }) {
   const act = useAction();
   const tables = useLoad(() => api.openTables(), [api]);
   const [name, setName] = useState("");
   const [policy, setPolicy] = useState<"approval" | "open">("approval");
-  const [code, setCode] = useState(() => (typeof location !== "undefined" ? new URLSearchParams(location.search).get("invite") ?? "" : ""));
+  const [code, setCode] = useState(invite);
   return (
     <Page title="Find your people." onBack={onBack} className="community-page crew-page">
       {act.toast}
@@ -105,11 +109,13 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
   const league = useLoad(() => api.league().catch(() => null), [api]);
   const [invite, setInvite] = useState<{ code: string; expiresAt: string } | null>(null);
   const [amount, setAmount] = useState("50");
-  const potKey = useRef(newKey());
+  const [potKeys] = useState(() => new ActionKeys());
   const [banner, setBanner] = useState<string[] | null>(null);
   const [paint, setPaint] = useState(1);
   const [botMuted, setBotMuted] = useState<string[]>([]);
   useWho(api, (requests.data ?? []).map((r) => r.userId));
+  // A banner painted but not saved: closing the Mini App asks first.
+  useClosingConfirmation(banner !== null);
 
   return (
     <Page className="community-page crew-page" title={c.name} onBack={onBack} right={<Banner rows={c.banner} small />}>
@@ -172,8 +178,7 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                 className="btn"
                 disabled={!Number(amount) || Number(amount) > me.gm || act.pending}
                 onClick={() =>
-                  act.run(() => api.pot(Number(amount), potKey.current), `Put ${amount} GM in the pot`).then((x) => {
-                    potKey.current = newKey();
+                  act.run(() => potKeys.send(amount, (key) => api.pot(Number(amount), key)), `Put ${amount} GM in the pot`).then((x) => {
                     if (x) void reload();
                   })
                 }
@@ -194,8 +199,8 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                 {m.role === "lead" && r.userId !== me.userId && (
                   <span className="btnrow">
                     <button onClick={() => act.run(() => api.setDeputy(r.userId, r.role !== "deputy"), r.role === "deputy" ? "No longer a deputy" : "Made a deputy").then(() => reload())}>{r.role === "deputy" ? "Undeputy" : "Deputy"}</button>
-                    <button onClick={() => confirm(`Make @${r.handle} the lead?`) && act.run(() => api.transferLead(r.userId), "Lead handed over").then(() => reload())}>Lead</button>
-                    <button onClick={() => confirm(`Remove @${r.handle}?`) && act.run(() => api.removeMember(r.userId), "Removed").then(() => reload())}>Remove</button>
+                    <button onClick={() => ifConfirmed(`Make @${r.handle} the lead?`, () => act.run(() => api.transferLead(r.userId), "Lead handed over").then(() => reload()))}>Lead</button>
+                    <button onClick={() => ifConfirmed(`Remove @${r.handle}?`, () => act.run(() => api.removeMember(r.userId), "Removed").then(() => reload()))}>Remove</button>
                   </span>
                 )}
               </div>
@@ -214,7 +219,7 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
                     <button className="btn light" disabled={act.pending} onClick={() => act.run(async () => {
                       try {
                         if (!navigator.clipboard) throw new Error("Clipboard unavailable");
-                        await navigator.clipboard.writeText(`${location.origin}/?invite=${encodeURIComponent(invite.code)}`);
+                        await navigator.clipboard.writeText(inviteLink(invite.code, location.origin));
                       } catch {
                         throw new ApiError(0, "CLIPBOARD_UNAVAILABLE", "Couldn’t copy the link. Select and copy the invite code above instead.");
                       }
@@ -302,15 +307,15 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
           )}
 
           <div className="btnrow">
-            <button className="btn light" onClick={() => confirm("Leave the crew?") && act.run(() => api.leaveCrew(), "You've left").then((x) => {
+            <button className="btn light" onClick={() => ifConfirmed("Leave the crew?", () => act.run(() => api.leaveCrew(), "You've left").then((x) => {
                 if (x !== undefined) void reload();
-              })}>
+              }))}>
               Leave crew
             </button>
             {m.role === "lead" && (
-              <button className="btn danger" onClick={() => confirm("Dissolve the crew for everyone?") && act.run(() => api.dissolve(), "Crew dissolved").then((x) => {
+              <button className="btn danger" onClick={() => ifConfirmed("Dissolve the crew for everyone?", () => act.run(() => api.dissolve(), "Crew dissolved").then((x) => {
                   if (x !== undefined) void reload();
-                })}>
+                }))}>
                 Dissolve
               </button>
             )}

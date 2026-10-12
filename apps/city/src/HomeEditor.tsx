@@ -2,14 +2,19 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { useRef, useState } from "react";
-import { ApiError, type Api, type Home, type Placement, newKey } from "./api";
+import { ActionKeys } from "./actionKeys";
+import { ApiError, type Api, type Home, type Placement } from "./api";
+import { useBackLayer } from "./back";
 import { countdown, useNow } from "./clock";
 import { RoomCamera, RoomLighting } from "./RoomLighting";
+import SceneBoundary from "./SceneBoundary";
 import { HomeRoom } from "./HomeRoom";
 import { FLOOR_COLORS, WALL_COLORS, checkPlacement, firstFreeSpot, homeSize, nextRot, pieceOf } from "./furniture";
 import { itemLabel, label } from "./palette";
-import { haptic } from "./telegram";
+import { haptic, useClosingConfirmation } from "./telegram";
+import { Loading } from "./ui";
 import { useLoad } from "./useLoad";
+import { deviceTier } from "./quality";
 import { useToast } from "./useToast";
 
 // Your home: tap a piece to move, turn, recolour or store it; place things
@@ -27,12 +32,17 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   const [sheet, setSheet] = useState<Sheet>(null);
   const [msg, setMsg] = useToast<{ text: string; bad: boolean }>();
   const busy = useRef(false);
-  const buyKeys = useRef(new Map<string, string>());
+  const [buyKeys] = useState(() => new ActionKeys());
   const catalogue = useLoad(() => (sheet === "shop" ? api.catalogue() : Promise.resolve(null)), [api, sheet]);
   const now = useNow(1000);
 
   const h = home.data;
   const size = h ? homeSize(h.tier) : { w: 8, d: 8 };
+  // A piece mid-placement isn't saved: closing the Mini App asks first.
+  useClosingConfirmation(mode.kind === "placing");
+  // Back closes the open sheet, or drops the piece being moved or placed.
+  useBackLayer(mode.kind !== "view", () => setMode({ kind: "view" }));
+  useBackLayer(sheet !== null, () => setSheet(null));
 
   // One change at a time; the home reloads after each so the screen is the truth.
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
@@ -54,7 +64,7 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
     }
   };
 
-  if (!h) return <div className="screen center muted">{home.error ?? "Unlocking your door…"}</div>;
+  if (!h) return <div className="screen center muted">{home.error ? <Loading error={home.error} retry={home.reload} /> : "Unlocking your door…"}</div>;
 
   const selected = mode.kind === "selected" ? h.placed.find((p) => p.itemId === mode.itemId) : null;
   const ghostErr = mode.kind === "placing" ? checkPlacement(h.tier, mode.pieceId, mode.placement, h.placed, mode.itemId) : null;
@@ -79,32 +89,35 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   };
 
   const nap = h.placed.find((p) => pieceOf(p.pieceId)?.mood === "rested");
+  const tier = deviceTier();
   const running = action.data?.action;
 
   return (
     <>
       <div className="stage">
-        <Canvas shadows dpr={[1, 1.5]} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: true }}>
-          <RoomLighting span={Math.max(size.w, size.d)} />
-          <RoomCamera w={size.w} h={size.d} />
-          <HomeRoom
-            editing
-            w={size.w}
-            d={size.d}
-            wallFinish={h.wallFinish}
-            floorFinish={h.floorFinish}
-            placed={mode.kind === "placing" ? h.placed.filter((p) => p.itemId !== mode.itemId) : h.placed}
-            selected={selected?.itemId ?? null}
-            ghost={mode.kind === "placing" ? { pieceId: mode.pieceId, placement: mode.placement, ok: !ghostErr } : null}
-            onCell={onCell}
-            // Walls only take taps while placing a wall piece; otherwise the see-through
-            // front walls would swallow taps meant for the floor behind them.
-            onWall={mode.kind === "placing" && mode.placement.layer === "wall" ? onWall : undefined}
-            // While placing, taps go through furniture to the floor (to aim, even at a taken spot).
-            onPiece={mode.kind === "placing" ? undefined : (id) => setMode({ kind: "selected", itemId: id })}
-          />
-          <OrbitControls enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={Math.max(size.w, size.d) * 8} />
-        </Canvas>
+        <SceneBoundary what="your home" note="Storage, the shop, and the walls and floor still work.">
+          <Canvas shadows={tier.shadows} dpr={tier.dpr} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: tier.antialias }}>
+            <RoomLighting span={Math.max(size.w, size.d)} />
+            <RoomCamera w={size.w} h={size.d} />
+            <HomeRoom
+              editing
+              w={size.w}
+              d={size.d}
+              wallFinish={h.wallFinish}
+              floorFinish={h.floorFinish}
+              placed={mode.kind === "placing" ? h.placed.filter((p) => p.itemId !== mode.itemId) : h.placed}
+              selected={selected?.itemId ?? null}
+              ghost={mode.kind === "placing" ? { pieceId: mode.pieceId, placement: mode.placement, ok: !ghostErr } : null}
+              onCell={onCell}
+              // Walls only take taps while placing a wall piece; otherwise the see-through
+              // front walls would swallow taps meant for the floor behind them.
+              onWall={mode.kind === "placing" && mode.placement.layer === "wall" ? onWall : undefined}
+              // While placing, taps go through furniture to the floor (to aim, even at a taken spot).
+              onPiece={mode.kind === "placing" ? undefined : (id) => setMode({ kind: "selected", itemId: id })}
+            />
+            <OrbitControls enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={Math.max(size.w, size.d) * 8} />
+          </Canvas>
+        </SceneBoundary>
       </div>
 
       <div className="roomtop">
@@ -202,7 +215,7 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
               <>
                 <p className="q">Shop</p>
                 <p className="muted">GM spent here burns. You have {gm.toLocaleString("en-US")} GM.</p>
-                {!catalogue.data && <p className="muted">Loading…</p>}
+                {!catalogue.data && <Loading error={catalogue.error} retry={catalogue.reload} />}
                 {catalogue.data &&
                   BANDS.map((band) => {
                     const items = catalogue.data!.pieces.filter((p) => p.band === band);
@@ -219,13 +232,8 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
                               disabled={(p.price ?? 0) > gm}
                               onClick={() => {
                                 // Same tap retried: same key, never charged twice.
-                                const key = buyKeys.current.get(p.id) ?? newKey();
-                                buyKeys.current.set(p.id, key);
-                                void run(() => api.buy(p.id, key), `${itemLabel(p.id)} is in your storage`).then((ok) => {
-                                  if (ok) {
-                                    buyKeys.current.delete(p.id);
-                                    onGm();
-                                  }
+                                void run(() => buyKeys.send(p.id, (key) => api.buy(p.id, key)), `${itemLabel(p.id)} is in your storage`).then((ok) => {
+                                  if (ok) onGm();
                                 });
                               }}
                             >

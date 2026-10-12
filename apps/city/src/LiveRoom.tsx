@@ -21,7 +21,7 @@ import { type SocketStatus, openRoomSocket } from "./roomSocket";
 import { chatDraft } from "./chatDraft";
 import { haptic } from "./telegram";
 import { useToast } from "./useToast";
-import { type Board, type FeedKey, dinerBoard, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
+import { type Board, type FeedKey, type FeedStatus, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
 
 // A live room: everyone here walking where they tapped, chat bubbles over
 // heads, emotes, and the dimmed away residents. Every body part is one
@@ -29,7 +29,9 @@ import { type Board, type FeedKey, dinerBoard, hallBoard, matchBoard, oddsBoard 
 
 import { EMOTE_ICON } from "./emoteIcons";
 import RoomPanel, { type RoomAction } from "./RoomPanel";
+import SceneBoundary from "./SceneBoundary";
 import { roomSeatActions } from "./roomActions";
+import { deviceTier } from "./quality";
 export { EMOTE_ICON } from "./emoteIcons";
 
 const CAP = 64; // 60 here plus a few drawn away residents and NPCs
@@ -126,13 +128,19 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
 }
 
 // The live boards for this room's screens: fetched on entry and every minute.
+// The odds come with the feed's status, so a paused feed dims the wall.
 function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<FeedKey, Board>> {
   const [odds, setOdds] = useState<MarketRow[] | null>(null);
+  const [feed, setFeed] = useState<FeedStatus | null>(null);
   const [hall, setHall] = useState<CityHall | null>(null);
   useEffect(() => {
     const wantsOdds = place === "tower" || place === "watch_party";
     const load = () => {
-      if (wantsOdds) void api.oddsWall().then(setOdds).catch(() => {});
+      if (wantsOdds)
+        void Promise.allSettled([api.oddsWall(), api.feed()]).then(([o, f]) => {
+          if (o.status === "fulfilled") setOdds(o.value);
+          setFeed((prev) => feedAfter(prev, o.status === "fulfilled", f.status === "fulfilled" ? f.value : null));
+        });
       if (place === "city_hall") void api.cityHall().then(setHall).catch(() => {});
     };
     load();
@@ -143,11 +151,11 @@ function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<Feed
   return useMemo(() => {
     const at = minute * 60_000;
     return {
-      ...(odds ? { odds: oddsBoard(odds, at), match: matchBoard(odds, at) } : {}),
+      ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed) } : {}),
       ...(hall ? { hall: hallBoard(hall, at) } : {}),
       diner: dinerBoard(new Date(at).toISOString().slice(0, 10)),
     };
-  }, [odds, hall, minute]);
+  }, [odds, feed, hall, minute]);
 }
 
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
@@ -317,46 +325,49 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   for(const kind of ["trophy_wall","tv"] as const) if(home?.placed.some(p=>p.pieceId===kind)) actions.push({id:kind,label:kind==='tv'?'Watch TV':'Trophy wall',run:()=>setDisplay(kind)});
   if(mine&&home){const bed=home.placed.find(p=>pieceOf(p.pieceId)?.mood==='rested');if(bed)actions.push({id:'nap',label:'Take a nap',run:()=>{void api.nap(bed.itemId).then(a=>{setNapMsg(`Napping until ${new Date(a.endsAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}. You’ll wake up Rested.`);}).catch(e=>setNapMsg(e instanceof ApiError?e.message:'Couldn’t nap. Try again.'));}});}
   const span = Math.max(size.w, size.h);
+  const tier = deviceTier();
   return (
     <>
       <div className={`stage room-stage social-live-stage ${clean ? "is-clean" : ""}`}>
-        <Canvas shadows dpr={[1, 1.5]} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: true }}>
-          <RoomLighting span={span} outdoor={place === "roof"} />
-          {home ? (
-            <HomeRoom
-              w={homeSize(home.tier).w}
-              d={homeSize(home.tier).d}
-              wallFinish={home.wallFinish}
-              floorFinish={home.floorFinish}
-              placed={home.placed}
-              onPiece={(id) => { const p = home.placed.find((item) => item.itemId === id); if (p?.pieceId === "trophy_wall" || p?.pieceId === "tv") setDisplay(p.pieceId); }}
-              onCell={(x, y) => goTo(x - size.w / 2 + 0.5, y - size.h / 2 + 0.5)}
-            />
-          ) : layout ? (
-            <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} feeds={feeds} />
-          ) : (
-            <>
-              <mesh receiveShadow rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
-                <planeGeometry args={[size.w, size.h]} />
-                <meshStandardMaterial map={tiles} />
-              </mesh>
-              <mesh position={[0, 1.2, -size.h / 2 - 0.1]}>
-                <boxGeometry args={[size.w + 0.4, 2.4, 0.2]} />
-                <meshStandardMaterial color="#e8b99a" />
-              </mesh>
-              <mesh position={[-size.w / 2 - 0.1, 1.2, 0]}>
-                <boxGeometry args={[0.2, 2.4, size.h]} />
-                <meshStandardMaterial color="#efc6a8" />
-              </mesh>
-            </>
-          )}
-          <RoomCamera w={size.w} h={size.h} />
-          {!clean && <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />}
-          <Walk drawn={drawn} plan={plan} />
-          <ChibiCrowd people={drawn} cap={CAP} onPerson={(id) => id !== room.you && !id.startsWith("npc:") && setPerson(id)} />
-          {!clean && <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />}
-          <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 8} />
-        </Canvas>
+        <SceneBoundary what="this room" note="The chat, the people here and reactions still work.">
+          <Canvas shadows={tier.shadows} dpr={tier.dpr} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: tier.antialias }}>
+            <RoomLighting span={span} outdoor={place === "roof"} />
+            {home ? (
+              <HomeRoom
+                w={homeSize(home.tier).w}
+                d={homeSize(home.tier).d}
+                wallFinish={home.wallFinish}
+                floorFinish={home.floorFinish}
+                placed={home.placed}
+                onPiece={(id) => { const p = home.placed.find((item) => item.itemId === id); if (p?.pieceId === "trophy_wall" || p?.pieceId === "tv") setDisplay(p.pieceId); }}
+                onCell={(x, y) => goTo(x - size.w / 2 + 0.5, y - size.h / 2 + 0.5)}
+              />
+            ) : layout ? (
+              <Interior layout={layout} w={size.w} h={size.h} low={place === "roof"} onFloor={goTo} feeds={feeds} />
+            ) : (
+              <>
+                <mesh receiveShadow rotation-x={-Math.PI / 2} onPointerDown={onFloor}>
+                  <planeGeometry args={[size.w, size.h]} />
+                  <meshStandardMaterial map={tiles} />
+                </mesh>
+                <mesh position={[0, 1.2, -size.h / 2 - 0.1]}>
+                  <boxGeometry args={[size.w + 0.4, 2.4, 0.2]} />
+                  <meshStandardMaterial color="#e8b99a" />
+                </mesh>
+                <mesh position={[-size.w / 2 - 0.1, 1.2, 0]}>
+                  <boxGeometry args={[0.2, 2.4, size.h]} />
+                  <meshStandardMaterial color="#efc6a8" />
+                </mesh>
+              </>
+            )}
+            <RoomCamera w={size.w} h={size.h} />
+            {!clean && <Npcs n={room.headcount.npc} w={size.w} h={size.h} scale={span * 1.5} />}
+            <Walk drawn={drawn} plan={plan} />
+            <ChibiCrowd people={drawn} cap={CAP} onPerson={(id) => id !== room.you && !id.startsWith("npc:") && setPerson(id)} />
+            {!clean && <Tags drawn={drawn} room={room} now={now} me={room.you} scale={span * 1.5} />}
+            <OrbitControls enablePan={false} minPolarAngle={0.5} maxPolarAngle={1.15} minDistance={span * 0.6} maxDistance={span * 8} />
+          </Canvas>
+        </SceneBoundary>
       </div>
 
       <RoomPanel name={placeName(place)} room={room} status={status} text={text} pending={!!draft.pending} clean={clean}

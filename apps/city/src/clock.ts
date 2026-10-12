@@ -27,3 +27,10 @@ export function useNow(everyMs = 1000): number {
   }, [everyMs]);
   return now;
 }
+
+// Whether something redrawn every `every` seconds is due, by a 3D scene's
+// clock. That clock starts again from 0 when a hidden view is shown again, so
+// a clock behind the last draw counts as due rather than waiting to catch up.
+export function due(last: number | null, now: number, every: number): boolean {
+  return last === null || now < last || now - last >= every;
+}

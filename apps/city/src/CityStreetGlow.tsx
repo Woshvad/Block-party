@@ -6,7 +6,9 @@ import { LANDMARKS } from "./citygen";
 
 // Ground light pools share one instanced draw call. Only the two landmark
 // accent lights affect surfaces; none creates an additional shadow map.
-export default function CityStreetGlow({ night }: { night: boolean }) {
+// The low quality tier goes without them (`lamps` false): every lit surface
+// on screen pays for a point light.
+export default function CityStreetGlow({ night, lamps = true }: { night: boolean; lamps?: boolean }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const lights = useMemo(() => lightPlacements(), []);
   const texture = useMemo(() => {
@@ -33,7 +35,7 @@ export default function CityStreetGlow({ night }: { night: boolean }) {
       <planeGeometry args={[3, 3]} />
       <meshBasicMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
     </instancedMesh>
-    <pointLight position={[hall.x, 2, hall.z + 4]} color="#ffd9a4" intensity={night ? 34 : 0} distance={11} decay={2} />
-    <pointLight position={[diner.x, 2.2, diner.z + 1.8]} color="#ffd9a4" intensity={night ? 14 : 0} distance={6} decay={2} />
+    {lamps && <pointLight position={[hall.x, 2, hall.z + 4]} color="#ffd9a4" intensity={night ? 34 : 0} distance={11} decay={2} />}
+    {lamps && <pointLight position={[diner.x, 2.2, diner.z + 1.8]} color="#ffd9a4" intensity={night ? 14 : 0} distance={6} decay={2} />}
   </group>;
 }

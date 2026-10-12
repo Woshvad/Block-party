@@ -124,7 +124,9 @@ function useLabel(text: string, color: string, kind: Decor["kind"]) {
   return tex;
 }
 
-// A live board: title, rows (green up, red down) and a credit line, repainted when the data changes.
+// A live board: title, rows (green up, red down, grey plain) and a credit line,
+// repainted when the data changes. A dim board (stale data) fades its title
+// bar and rows, and its foot (which says why) shows in amber.
 function useBoard(board: Board, color: string, w: number) {
   const key = JSON.stringify(board);
   const tex = useMemo(() => {
@@ -135,7 +137,7 @@ function useBoard(board: Board, color: string, w: number) {
     const g = c.getContext("2d")!;
     g.fillStyle = "#0b111a";
     g.fillRect(0, 0, c.width, c.height);
-    g.fillStyle = color;
+    g.fillStyle = board.dim ? "#4a5361" : color;
     g.fillRect(0, 0, c.width, 58);
     g.fillStyle = "#0b111a";
     g.font = "900 34px ui-sans-serif, system-ui, sans-serif";
@@ -143,6 +145,7 @@ function useBoard(board: Board, color: string, w: number) {
     g.fillText(board.title, 22, 30);
     const rowH = Math.min(46, 250 / Math.max(1, board.rows.length));
     g.font = `600 ${Math.round(rowH * 0.56)}px ui-sans-serif, system-ui, sans-serif`;
+    g.globalAlpha = board.dim ? 0.45 : 1;
     board.rows.forEach((r, i) => {
       const y = 58 + rowH * (i + 0.5) + 6;
       if (i % 2) {
@@ -162,9 +165,10 @@ function useBoard(board: Board, color: string, w: number) {
         g.fillText(right, c.width - 22, y);
       }
     });
+    g.globalAlpha = 1;
     if (board.foot) {
       g.textAlign = "left";
-      g.fillStyle = "#7d8a9c";
+      g.fillStyle = board.dim ? "#f2c94c" : "#7d8a9c";
       g.font = "500 20px ui-sans-serif, system-ui, sans-serif";
       g.fillText(board.foot, 22, c.height - 20);
     }

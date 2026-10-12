@@ -12,6 +12,7 @@ import { cityDetails } from "./cityDetails";
 import { CITY_SIZE, GRID, LANDMARKS, type Lot, SOON, SQUARE, blockRect, districtOf, fillCity, roads, zoneOf } from "./citygen";
 import Kit, { useBaked } from "./Kit";
 import { KIT, cityPlacements } from "./kitcity";
+import { due } from "./clock";
 import { type Car, type Lane, type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
 import { type Part, ball, box, colored, cyl, darker, prism } from "./geo";
 
@@ -90,9 +91,9 @@ function blocks(b: Built) {
           b.city.push(box(r.x + px, 0.55, r.z + pz, 0.08, 0.8, 0.08, "#8a8f98"));
         }
         b.city.push(box(r.x, 0.8, r.z - r.w / 2 + 0.3, r.w - 0.6, 0.05, 0.03, "#f2c94c"), box(r.x, 0.5, r.z - r.w / 2 + 0.3, r.w - 0.6, 0.05, 0.03, "#2c2c2a"));
-        // The mining bar: how close the crowd is to opening it.
+        // A blank sign board over the fence. It shows no progress: no real
+        // number drives the unlock yet, and the board never invents one.
         b.city.push(box(r.x, 1.9, r.z, 5.2, 0.5, 0.25, "#2c2c2a"));
-        b.lamps.push(box(r.x - 2.5 + 0.9, 1.9, r.z + 0.13, 1.8, 0.36, 0.02, "#3ddc6e"));
         continue;
       }
       const ground = zone === "commercial" || zone === "office" ? PAVING : zone === "landmark" ? "#a9d28c" : zone === "industrial" ? "#b9b4a8" : GRASS;
@@ -484,9 +485,9 @@ function Billboards({ night }: { night: boolean }) {
   const textures = useMemo(() => canvases.map((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; }), [canvases]);
   const series = useRef(boards.map((b) => Array.from({ length: 24 }, (_, k) => 64 + (b.up ? -k : k) * 1.4)));
   useEffect(() => () => textures.forEach((t) => t.dispose()), [textures]);
-  const last = useRef(0);
+  const last = useRef<number | null>(null);
   useFrame(({ clock }) => {
-    if (clock.elapsedTime - last.current < 1.2 && last.current) return;
+    if (!due(last.current, clock.elapsedTime, 1.2)) return;
     last.current = clock.elapsedTime;
     canvases.forEach((c, i) => {
       const g0 = c.getContext("2d")!;
@@ -555,7 +556,8 @@ function Billboards({ night }: { night: boolean }) {
   );
 }
 
-export default function CityScape({ night }: { night: boolean }) {
+// `lamps` false leaves out the two night point lights (the low quality tier).
+export default function CityScape({ night, lamps = true }: { night: boolean; lamps?: boolean }) {
   const built = useMemo(() => {
     const b: Built = { city: [], windows: [], lamps: [], neon: [] };
     blocks(b);
@@ -590,14 +592,13 @@ export default function CityScape({ night }: { night: boolean }) {
         <planeGeometry args={[CITY_SIZE + 30, CITY_SIZE + 30]} />
         <meshStandardMaterial color="#81956a" roughness={1} />
       </mesh>
-      <Suspense fallback={null}>
-        <Kit placements={placements} night={night} />
-      </Suspense>
+      {/* Each model shows as soon as it arrives (see Kit.tsx): roads first. */}
+      <Kit placements={placements} night={night} />
       <mesh geometry={built.city} material={mat} castShadow receiveShadow />
       <mesh geometry={details} material={mat} castShadow receiveShadow />
       <DinerQuarter night={night} />
       <CityWater night={night} />
-      <CityStreetGlow night={night} />
+      <CityStreetGlow night={night} lamps={lamps} />
       <mesh geometry={built.windows}>
         <meshStandardMaterial color={night ? "#bd9d68" : "#688995"} emissive={night ? "#ffb84d" : "#000000"} emissiveIntensity={night ? 0.9 : 0} roughness={0.19} metalness={0.48} envMapIntensity={1.3} />
       </mesh>

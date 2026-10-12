@@ -19,4 +19,13 @@ describe("the kit city", () => {
   it("the packs' CC0 licences ship with them", () => {
     for (const p of ["roads", "commercial", "suburban"]) expect(existsSync(new URL(`../public/assets/kenney/${p}/License.txt`, import.meta.url)), p).toBe(true);
   });
+
+  it("asks for the road models before any building, so the streets draw first", () => {
+    // Kit.tsx gives each model its own Suspense and asks for them in this order.
+    const order = [...new Set(cityPlacements().map((p) => p.url))];
+    const firstOther = order.findIndex((u) => !u.includes("/roads/"));
+    const roadModels = new Set(roadPlacements().map((p) => p.url));
+    expect(order.slice(0, roadModels.size).every((u) => roadModels.has(u))).toBe(true);
+    expect(firstOther).toBeGreaterThanOrEqual(roadModels.size);
+  });
 });

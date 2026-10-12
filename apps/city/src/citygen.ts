@@ -66,9 +66,12 @@ const sq = (() => {
   return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
 })();
 export const SQUARE: Rect = { x: sq.x, z: sq.z, w: GRID.block * 2 + GRID.road, d: GRID.block * 2 + GRID.road };
+const TOWER = xz(blockRect(1, 1));
 export const LANDMARKS: Record<PlaceKey, { x: number; z: number; pinY: number }> = {
-  tower: { ...xz(blockRect(1, 1)), pinY: 19.5 },
-  roof: { ...xz(blockRect(1, 1)), pinY: 22 },
+  tower: { ...TOWER, pinY: 19.5 },
+  // The Roof's pin sits higher and off to the side of the Tower's (to the
+  // right on screen), so the two never cover each other at any zoom.
+  roof: { x: TOWER.x + 4, z: TOWER.z - 4, pinY: 23.5 },
   city_hall: { x: sq.x, z: sq.z - 5.5, pinY: 7 },
   watch_party: { ...xz(blockRect(1, 2)), pinY: 6 },
   gm_wall: { x: sq.x - 6, z: sq.z + 3.5, pinY: 4 },
