@@ -2,7 +2,9 @@ import { notify } from "@bp/db";
 import { afterAll, describe, expect, it } from "vitest";
 import { cityBase, telegramSender } from "../src/telegram-sender";
 import worker from "../src/worker";
-import { BOT, ORIGIN, SECRET, call, client, close, db, resident } from "./harness";
+import { ORIGIN, SECRET, call, client, close, db, resident } from "./harness";
+
+const WORKER_BOT = "999000:TELEGRAM_SENDER_TEST_TOKEN_0123456789";
 
 afterAll(close);
 
@@ -95,7 +97,8 @@ describe("the Open button on pushes", () => {
     }) as typeof fetch;
     const waits: Array<Promise<unknown>> = [];
     try {
-      const env = { HYPERDRIVE: { connectionString: process.env.TEST_DATABASE_URL! }, TELEGRAM_BOT_TOKEN: BOT, INTERNAL_SECRET: SECRET, ALLOWED_ORIGINS: ORIGIN, CITY_URL: "https://city.blockparty.test" };
+      // The Worker refuses a token that isn't shaped like a real one (the harness's is short).
+      const env = { HYPERDRIVE: { connectionString: process.env.TEST_DATABASE_URL! }, TELEGRAM_BOT_TOKEN: WORKER_BOT, INTERNAL_SECRET: SECRET, ALLOWED_ORIGINS: ORIGIN, CITY_URL: "https://city.blockparty.test" };
       const res = await worker.fetch(new Request("https://api.test/internal/notifications/run", { method: "POST", headers: { "x-internal-secret": SECRET } }), env, { waitUntil: (p) => waits.push(p) });
       expect(res.status).toBe(200);
     } finally {

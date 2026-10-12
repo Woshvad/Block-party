@@ -8,10 +8,12 @@ afterAll(close);
 describe("rate limits keep no client IPs", () => {
   it("per-IP buckets hold a keyed hash of the address, and still limit each address", async () => {
     const ip = `203.0.113.${Math.floor(Math.random() * 250)}`;
+    // Not the harness's sequential 10.0.x.y: other files may have used those in the last hour.
+    const other = `100.64.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
     const strict = makeApp({ limits: { guestsPerIpPerHour: 1 } });
     expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(201);
     expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(429);
-    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, via: strict })).status).toBe(201); // another address
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip: other, via: strict })).status).toBe(201); // another address
     expect((await call("GET", "/v1/receipts/not-a-receipt", { ip })).status).toBe(404);
 
     expect(await client`SELECT bucket FROM rate_limits WHERE bucket LIKE ${`%${ip}%`}`).toHaveLength(0);
