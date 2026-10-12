@@ -12,7 +12,7 @@ pnpm monorepo. Built brick by brick; each brick ships with tests against a real 
 
 ## Setup
 
-Needs Node 20+, pnpm 10, and Postgres 15 on localhost.
+Needs Node 22.12+ (vitest 5 needs it), pnpm 10, and Postgres 15 on localhost.
 
 ```bash
 pnpm install
@@ -25,7 +25,9 @@ pnpm test
 pnpm --filter @bp/api dev   # http://localhost:8787, refuses to start on an un-migrated database
 ```
 
-The API won't start (locally or on Workers) without a real-looking `TELEGRAM_BOT_TOKEN` (`<bot id>:<30+ letters, digits, - or _>`) or with any secret it uses under 32 characters or still the `.env.example` placeholder, and it says which. Locally the bot token can be your test bot's, or any made-up one of that shape: the dev sign-in signs with whatever is in `.env`.
+The API refuses to run without a real-looking `TELEGRAM_BOT_TOKEN` (`<bot id>:<30+ letters, digits, - or _>`), or with any secret it uses under 32 characters or still the `.env.example` placeholder, and says which: the local server exits, and a Worker answers every request with a 500 and lists the problems at `/health`. Locally the bot token can be your test bot's, or any made-up one of that shape: the dev sign-in signs with whatever is in `.env`.
+
+Every package's scripts, the dev server and the test suites read this root `.env`, after a `.env` in their own package if there is one; a variable already set in the environment (as in CI) always wins.
 
 Tests drop and recreate `blockparty_test` on every run (the name must end in `_test`).
 

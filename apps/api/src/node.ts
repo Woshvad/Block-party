@@ -1,13 +1,14 @@
-import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { type OddsProvider, mockProvider, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
+import { loadEnv } from "@bp/db/src/env";
 import { createApp } from "./app";
 import { configProblems } from "./config-check";
 import { logCronFailures, runMinute } from "./cron";
 import { httpRoomsClient } from "./rooms-client";
 
 // Local dev server. Production runs src/worker.ts on Cloudflare Workers.
+loadEnv();
 const need = (k: string) => {
   const v = process.env[k];
   if (!v) throw new Error(`${k} is not set`);

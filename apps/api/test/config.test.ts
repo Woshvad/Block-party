@@ -47,6 +47,13 @@ describe("the API's wrangler config matches the code", () => {
     expect(read("../src/node.ts")).toContain("ponPepper: process.env.PON_PEPPER");
   });
 
+  it("the dev server, scripts and tests read the repo root's .env too, not just their own directory's", () => {
+    for (const f of ["../src/node.ts", "./global-setup.ts", "../vitest.config.ts", "../scripts/smoke.ts", "../scripts/load.ts"]) {
+      expect(read(f), f).toContain("loadEnv()");
+      expect(read(f), f).not.toContain("dotenv/config");
+    }
+  });
+
   it("the minute cron is on, and the Worker has a scheduled handler", () => {
     expect(cfg.triggers.crons).toEqual(["* * * * *"]);
     expect(worker).toMatch(/async scheduled\(/);

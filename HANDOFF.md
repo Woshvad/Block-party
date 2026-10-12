@@ -7,7 +7,7 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 - **Repo:** https://github.com/isaac-richie/Block-party, branch `feat/backend-bricks` (the default). The repo is **public**, so never commit `.env` or the product plan.
 - **Everything is committed.** The latest two commits are the room-access backend (`roomAccess`, `POST /internal/rooms/access`, visitor homes, binder and headcount routes) and the frontend polish pass (navigation, Today, onboarding, social and crew, the trophy wall and TV, the city atmosphere, water, the diner quarter, and the `*-preview` routes).
 - **`apps/api/src/app.ts` was rebuilt once.** On 10 October it was accidentally emptied while uncommitted, then rebuilt from the dev server's compiled cache. Its compiled output matches the lost version byte for byte, and it typechecks again. Any comments the room-access developer wrote in the room-ticket route and `/internal/rooms/access` were lost, so they should re-read both.
-- **Local settings:** the shared `.env` (symlinked as `apps/api/.env`) has `ODDS_SOURCE=polymarket`, so the local API polls live Polymarket. Use `mock` to work offline.
+- **Local settings:** the shared `.env` at the repo root (every script, the dev server and the test suites read it, after any `.env` in their own package; no symlinks needed) has `ODDS_SOURCE=polymarket`, so the local API polls live Polymarket. Use `mock` to work offline.
 - **Running it:** `.claude/launch.json` starts the city on :3100, the API on :8787 (set `LOCAL_CRON=1` for the minute cron) and rooms on :8788. To sign in, a dev button on the guest screen says "claim as a Telegram tester". `?perf` on the city shows draw calls, triangles and memory.
 
 ## What exists (one paragraph each)
