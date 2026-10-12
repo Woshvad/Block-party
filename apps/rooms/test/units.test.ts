@@ -1,6 +1,6 @@
 import { parseBlockedWords as apiParseBlockedWords } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "../src/directory";
+import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, SYNC_MS, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "../src/directory";
 import { OUTBOX, Outbox, type OutboxStorage } from "../src/outbox";
 import { BUCKET, configProblems, parseBlockedWords, takeToken } from "../src/worker";
 
@@ -139,6 +139,23 @@ describe("the effects outbox", () => {
       return (await box.retryAt())! - T;
     };
     expect([await at(0), await at(0.5), await at(1)]).toEqual([OUTBOX.firstRetryMs / 2, (OUTBOX.firstRetryMs * 3) / 4, OUTBOX.firstRetryMs]);
+  });
+
+  it("a slow API can't hold a drain (and the alarm that waits on it) past the directory's memory", async () => {
+    const { storage } = memoryStorage();
+    const box = new Outbox(storage);
+    await box.add(effects(OUTBOX.batch * 10));
+    // An API that takes every batch, 9 seconds after it's sent.
+    let clock = T;
+    const posts: number[] = [];
+    await box.drain(async (b) => ((clock += 9_000), posts.push(b.length), 200), () => clock);
+    // Batches start at 0, 9, 18 and 27 s; none after 30 s. The rest wait for the next alarm.
+    expect(posts).toEqual([OUTBOX.batch, OUTBOX.batch, OUTBOX.batch, OUTBOX.batch]);
+    expect(await box.waiting()).toBe(OUTBOX.batch * 6);
+    expect(await box.retryAt()).toBeNull(); // nothing failed: no backoff
+    // The longest an alarm can spend in a drain, plus a sync interval, is
+    // still inside the directory's memory of the room's members.
+    expect(OUTBOX.drainMs + OUTBOX.postTimeoutMs + SYNC_MS).toBeLessThan(DIRECTORY_TTL_MS);
   });
 
   it("drops a batch the API calls malformed (400) instead of retrying it forever", async () => {

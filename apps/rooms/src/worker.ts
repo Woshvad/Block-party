@@ -568,7 +568,7 @@ export class RoomDO implements DurableObject {
         method: "POST",
         headers: { "content-type": "application/json", "x-internal-secret": this.env.INTERNAL_SECRET },
         body: JSON.stringify({ place: this.place, copy: this.copy, effects }),
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(OUTBOX.postTimeoutMs),
       });
       await res.body?.cancel();
       return res.status;
@@ -789,6 +789,8 @@ export class RoomDO implements DurableObject {
     this.deliver(out.deliveries);
     // Waking for the alarm already sent the member list; otherwise it's due.
     if (e.members.size > 0 && now - this.syncedAt >= SYNC_MS / 2) await this.syncDirectory(e);
+    // A drain starts no batch after OUTBOX.drainMs, so a slow API can't keep
+    // the next alarm (and its sync) waiting past the directory's memory.
     if (this.env.API_URL && (await this.outbox.due(now))) await this.outbox.drain((batch) => this.postEffects(batch), () => Date.now());
     await this.afterEvent(e, out.effects);
   }

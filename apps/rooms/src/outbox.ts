@@ -20,6 +20,13 @@ export const OUTBOX = {
   // of the 16 KB is room for the place, the copy and the JSON around them.
   maxBatchBytes: 12 * 1024,
   roundsPerDrain: 20, // batches per drain; the room's alarm sends the rest
+  // A drain starts no new batch after this long. The room's alarm waits for
+  // its drain, and syncs the directory only between drains; the directory
+  // forgets a room's members DIRECTORY_TTL_MS (180 s) after its last sync,
+  // so an API that is slow but answering mustn't hold the alarm for 20
+  // posts of up to postTimeoutMs each.
+  drainMs: 30_000,
+  postTimeoutMs: 10_000, // one effects post, before it counts as unreachable
   firstRetryMs: 5_000,
   maxRetryMs: 5 * 60_000,
 };
@@ -112,9 +119,11 @@ export class Outbox {
 
   private async send(post: (effects: unknown[]) => Promise<number>, now: () => number) {
     const m = await this.load();
+    const started = now();
     let most = OUTBOX.batch; // effects per request; a 413 halves it
-    // loop-bound: at most OUTBOX.roundsPerDrain batches, and it stops when nothing is waiting
-    for (let round = 0; round < OUTBOX.roundsPerDrain && m.head < m.tail; round++) {
+    // loop-bound: at most OUTBOX.roundsPerDrain batches, none started after
+    // OUTBOX.drainMs, and it stops when nothing is waiting
+    for (let round = 0; round < OUTBOX.roundsPerDrain && m.head < m.tail && now() - started < OUTBOX.drainMs; round++) {
       const from = m.head;
       const keys = Array.from({ length: Math.min(m.tail, from + most) - from }, (_, i) => fxKey(from + i));
       const rows = await this.storage.get(keys);
