@@ -24,8 +24,8 @@ function withUser(raw: string) {
   return u.toString();
 }
 
-// The bindings a working deploy has.
-const good = () => ({ HYPERDRIVE: { connectionString: withUser(process.env.TEST_DATABASE_URL!) }, TELEGRAM_BOT_TOKEN: BOT, INTERNAL_SECRET: SECRET, ALLOWED_ORIGINS: ORIGIN });
+// The bindings a working deploy has (a PoN pepper, but no PoN provider yet).
+const good = () => ({ HYPERDRIVE: { connectionString: withUser(process.env.TEST_DATABASE_URL!) }, TELEGRAM_BOT_TOKEN: BOT, INTERNAL_SECRET: SECRET, ALLOWED_ORIGINS: ORIGIN, PON_PEPPER: "p".repeat(40) });
 
 // A Worker with these bindings, logging into `into`.
 async function worker(bindings: Record<string, unknown>, into: string[]) {
@@ -72,6 +72,15 @@ describe("the API on the Workers runtime", () => {
     expect((await call("POST", "/v1/gm", { token })).status).toBe(200);
     expect((await call("POST", "/v1/home/buy", { token, body: { pieceId: "stool" }, headers: { "idempotency-key": crypto.randomUUID() } })).status).toBe(201);
     expect((await call("GET", "/v1/me", { token })).body.gm).toBe(1000 + 50 - 15);
+  });
+
+  it("with the pepper but no provider, Proof of Neighbour still answers 503", async () => {
+    const id = 800_000_000 + Math.floor(Math.random() * 99_999_999);
+    const token = (await call("POST", "/v1/auth/telegram", { body: { initData: await launchData(id), ageAck: true } })).body.sessionToken;
+    const phone = await call("POST", "/v1/pon/phone", { token, body: { phone: "+2348011111111" } });
+    expect([phone.status, phone.body.error.code]).toEqual([503, "PON_PHONE_DISABLED"]);
+    const proof = await call("POST", "/v1/pon/crypto", { token, body: { kind: "world_id", proof: {} } });
+    expect([proof.status, proof.body.error.code]).toEqual([503, "PON_CRYPTO_DISABLED"]);
   });
 
   it("internal routes stay hidden without the secret, and work with it", async () => {
@@ -137,10 +146,10 @@ describe("a Worker that isn't set up right", () => {
     }
   }, 60_000);
 
-  it("a weak internal secret is refused the same way", async () => {
-    const w = await worker({ ...good(), INTERNAL_SECRET: "short" }, []);
+  it("a weak internal secret or PoN pepper is refused the same way", async () => {
+    const w = await worker({ ...good(), INTERNAL_SECRET: "short", PON_PEPPER: "pepper" }, []);
     try {
-      expect((await call("GET", "/health", { via: w })).body).toEqual({ ok: false, config: ["INTERNAL_SECRET must be 32+ characters"] });
+      expect((await call("GET", "/health", { via: w })).body).toEqual({ ok: false, config: ["INTERNAL_SECRET must be 32+ characters", "PON_PEPPER must be 32+ characters"] });
       expect((await call("POST", "/internal/actions/run", { via: w, headers: { "x-internal-secret": "short" } })).status).toBe(500);
     } finally {
       await w.dispose();

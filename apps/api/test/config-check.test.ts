@@ -29,6 +29,9 @@ describe("the config check", () => {
     expect(configProblems({ TELEGRAM_BOT_TOKEN: BOT })).toEqual(["INTERNAL_SECRET is not set"]);
     expect(configProblems({ ...ok, INTERNAL_SECRET: "x".repeat(31) })).toEqual(["INTERNAL_SECRET must be 32+ characters"]);
     expect(configProblems({ ...ok, TICKET_SECRET: "short", RECEIPT_SECRET: "short" })).toEqual(["TICKET_SECRET must be 32+ characters", "RECEIPT_SECRET must be 32+ characters"]);
+    // The PoN pepper too: a short one would only fail at the first phone check.
+    expect(configProblems({ ...ok, PON_PEPPER: "pepper" })).toEqual(["PON_PEPPER must be 32+ characters"]);
+    expect(configProblems({ ...ok, PON_PEPPER: SECRET })).toEqual([]);
     const example = "replace-with-at-least-32-random-characters";
     expect(configProblems({ ...ok, INTERNAL_SECRET: example, TICKET_SECRET: example })).toEqual(["INTERNAL_SECRET is still the .env.example placeholder", "TICKET_SECRET is still the .env.example placeholder"]);
   });

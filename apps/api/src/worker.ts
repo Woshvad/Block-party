@@ -24,6 +24,8 @@ type Env = {
   // "mock" for staging; the Polymarket feed plugs in here.
   ODDS_SOURCE?: string;
   RECEIPT_SECRET?: string;
+  // Hashes phone numbers and wallets for Proof of Neighbour (32+ characters).
+  PON_PEPPER?: string;
   // "on" once the alt checks are live.
   FEATURE_DUELS?: string;
   FEATURE_TOWER_LIGHTS?: string;
@@ -90,6 +92,9 @@ async function setUp(env: Env): Promise<Setup> {
     notifier: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }),
     ...(odds ? { odds } : {}),
     ...(env.RECEIPT_SECRET ? { receiptSecret: env.RECEIPT_SECRET } : {}),
+    // The pepper alone turns nothing on: the PoN routes answer 503 until a
+    // phone or crypto-proof provider is configured too.
+    ...(env.PON_PEPPER ? { ponPepper: env.PON_PEPPER } : {}),
     features: { duels: env.FEATURE_DUELS === "on", towerLights: env.FEATURE_TOWER_LIGHTS === "on", realMoney: env.FEATURE_REAL_MONEY === "on" },
     countryHeader: "cf-ipcountry",
   });

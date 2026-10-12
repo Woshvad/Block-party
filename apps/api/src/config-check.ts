@@ -16,6 +16,7 @@ export type SecretsEnv = {
   INTERNAL_SECRET?: string;
   TICKET_SECRET?: string;
   RECEIPT_SECRET?: string;
+  PON_PEPPER?: string;
 };
 
 // Each problem names the variable and the rule, never its value.
@@ -25,7 +26,7 @@ export function configProblems(env: SecretsEnv): string[] {
   if (!token) problems.push("TELEGRAM_BOT_TOKEN is not set");
   else if (!BOT_TOKEN.test(token) || PLACEHOLDER.test(token)) problems.push("TELEGRAM_BOT_TOKEN isn't a bot token (<bot id>:<30+ letters, digits, - or _>)");
   // INTERNAL_SECRET is always used; the others only once they're set.
-  const secrets = [["INTERNAL_SECRET", env.INTERNAL_SECRET, true], ["TICKET_SECRET", env.TICKET_SECRET, false], ["RECEIPT_SECRET", env.RECEIPT_SECRET, false]] as const;
+  const secrets = [["INTERNAL_SECRET", env.INTERNAL_SECRET, true], ["TICKET_SECRET", env.TICKET_SECRET, false], ["RECEIPT_SECRET", env.RECEIPT_SECRET, false], ["PON_PEPPER", env.PON_PEPPER, false]] as const;
   for (const [name, value, required] of secrets) {
     if (!value) {
       if (required) problems.push(`${name} is not set`);

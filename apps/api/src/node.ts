@@ -43,6 +43,8 @@ const app = createApp({
   ...(process.env.ROOMS_URL && process.env.TICKET_SECRET
     ? { rooms: httpRoomsClient({ url: process.env.ROOMS_URL, secret: need("INTERNAL_SECRET") }), roomsUrl: process.env.ROOMS_URL, ticketSecret: process.env.TICKET_SECRET }
     : {}),
+  // As on Workers: the pepper alone turns nothing on (no PoN provider yet, so 503).
+  ...(process.env.PON_PEPPER ? { ponPepper: process.env.PON_PEPPER } : {}),
 });
 // LOCAL_CRON=1: run the Worker's minute cron here too, so a local city has a
 // bell, live odds and a Slate. Notifications aren't sent (no real bot locally).

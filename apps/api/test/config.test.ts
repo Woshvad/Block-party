@@ -41,6 +41,12 @@ describe("the API's wrangler config matches the code", () => {
     for (const k of Object.keys(cfg.vars)) expect(envType).toMatch(new RegExp(`\\b${k}\\??:`));
   });
 
+  it("both entrypoints hand PON_PEPPER to the app", () => {
+    expect(envType).toMatch(/\bPON_PEPPER\?:/);
+    expect(worker).toContain("ponPepper: env.PON_PEPPER");
+    expect(read("../src/node.ts")).toContain("ponPepper: process.env.PON_PEPPER");
+  });
+
   it("the minute cron is on, and the Worker has a scheduled handler", () => {
     expect(cfg.triggers.crons).toEqual(["* * * * *"]);
     expect(worker).toMatch(/async scheduled\(/);
