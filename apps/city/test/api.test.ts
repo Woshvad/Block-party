@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, createApi, memoryTokenStore } from "../src/api";
+import { outcomeUnknown } from "../src/actionKeys";
 
 type Seen = { url: string; init: RequestInit };
 
@@ -91,6 +92,35 @@ describe("api client", () => {
     expect(await empty.me().catch((e) => e.code)).toBe("BAD_REPLY");
     const junk = createApi({ base: "http://x", store: memoryTokenStore(), fetch: server(() => json(500, { error: { code: 7, message: null } })).f });
     expect(await junk.me().catch((e) => [e.code, e.message])).toEqual(["HTTP_500", "something went wrong"]);
+  });
+
+  it("a JSON null is an answer, not an unreadable reply (no Mod Shift running)", async () => {
+    // GET /v1/shifts/current answers 200 with the body `null` when nothing is running.
+    const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: server(() => new Response("null", { status: 200 })).f });
+    expect(await api.currentShift()).toBeNull();
+    expect(await api.ratioPair()).toBeNull();
+  });
+
+  it("a 2xx whose body never arrives is status 0: the work may be done, so the key is kept", async () => {
+    // The headers come, then the body read fails (the deadline fired mid-body).
+    const cut = server(() => {
+      const body = new ReadableStream({
+        start(c) {
+          c.error(new DOMException("The operation timed out.", "TimeoutError"));
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: cut.f });
+    const e = await api.pot(500, "key-1").catch((x) => x);
+    expect([e.constructor.name, e.status]).toEqual(["ApiError", 0]);
+    expect(outcomeUnknown(e)).toBe(true);
+    // A refusal whose body is cut keeps its own status: nothing happened.
+    const refused = server(() => new Response(new ReadableStream({ start: (c) => c.error(new Error("reset")) }), { status: 409 }));
+    const e2 = await createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: refused.f })
+      .me()
+      .catch((x) => x);
+    expect([e2.status, e2.code]).toEqual([409, "HTTP_409"]);
   });
 
   it("says it's the Mini App on every request when told to, and not otherwise", async () => {

@@ -86,11 +86,27 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
       if (signal?.aborted) throw new ApiError(0, "TIMEOUT", "the city is taking too long to answer");
       throw new ApiError(0, "OFFLINE", "can't reach the city right now");
     }
+    let text = "";
+    try {
+      text = await res.text();
+    } catch {
+      // The headers came but the body didn't (the deadline fired mid-body, or
+      // the connection dropped). A 2xx says the city did the work, yet the
+      // caller can't read what came of it, so it's status 0 like a lost reply:
+      // a caller with an idempotency key keeps it, and the retry replays.
+      if (res.ok) {
+        if (signal?.aborted) throw new ApiError(0, "TIMEOUT", "the city is taking too long to answer");
+        throw new ApiError(0, "OFFLINE", "can't reach the city right now");
+      }
+    }
+    // `readable` tells a JSON `null` (a real answer: "nothing running") from
+    // a body that isn't JSON at all.
     let data: unknown = null;
-    const text = await res.text().catch(() => "");
+    let readable = false;
     if (text) {
       try {
         data = JSON.parse(text);
+        readable = true;
       } catch {
         data = null;
       }
@@ -106,7 +122,7 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     }
     // 204: done, and nothing to say.
     if (res.status === 204) return null as T;
-    if (data === null) throw new ApiError(res.status, "BAD_REPLY", "the city sent something unreadable");
+    if (!readable) throw new ApiError(res.status, "BAD_REPLY", "the city sent something unreadable");
     return data as T;
   }
 
