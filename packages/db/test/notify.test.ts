@@ -372,6 +372,19 @@ describe("ignored pushes", () => {
     expect(to(u).some((x) => x.includes(FAREWELL))).toBe(false);
   });
 
+  it("someone else playing after my push doesn't count as my opening it", async () => {
+    const [u, v] = [await makeResident(db), await makeResident(db)];
+    const t = fresh();
+    const { sender, to } = recorder();
+    for (let d = 0; d < 8; d++) {
+      const at = t + d * D;
+      await notify(db, u, "daily", {}, { now: new Date(at) });
+      await run(sender, new Date(at));
+      await touchActivity(db, v, { now: new Date(at + H) }); // the city plays on; u doesn't
+    }
+    expect(to(u)).toHaveLength(7); // the 8th waits for the weekly one
+  });
+
   it("playing only before a push, or long after it, doesn't count as opening it", async () => {
     const u = await makeResident(db);
     const t = fresh();

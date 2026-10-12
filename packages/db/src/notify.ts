@@ -137,7 +137,10 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
 
       // "back": they were playing at some point in the few hours after it was
       // sent (a new session or a heartbeat), which counts as opening it even if
-      // they came in some other way than the push's button.
+      // they came in some other way than the push's button. (Spelled out: in a
+      // one-table select drizzle writes columns unqualified, and inside the
+      // subquery "user_id" would then be the session's own, so anyone's play
+      // counted.)
       const sentRecent = await tx
         .select({
           template: notifications.template,
@@ -145,7 +148,7 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
           openedAt: notifications.openedAt,
           localDay: notifications.localDay,
           text: notifications.text,
-          back: sql<boolean>`EXISTS (SELECT 1 FROM play_sessions s WHERE s.user_id = ${notifications.userId} AND s.last_seen_at >= ${notifications.sentAt} AND s.started_at <= ${notifications.sentAt} + make_interval(hours => ${NOTIFY.backWithinHours}))`,
+          back: sql<boolean>`EXISTS (SELECT 1 FROM play_sessions s WHERE s.user_id = notifications.user_id AND s.last_seen_at >= notifications.sent_at AND s.started_at <= notifications.sent_at + make_interval(hours => ${NOTIFY.backWithinHours}))`,
         })
         .from(notifications)
         .where(and(eq(notifications.userId, n.userId), eq(notifications.status, "sent")))
