@@ -71,7 +71,12 @@ export const sessions = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("sessions_user_idx").on(t.userId)],
+  (t) => [
+    index("sessions_user_idx").on(t.userId),
+    // The two ways a session ends, for the sweep (sweepSessions).
+    index("sessions_expires_idx").on(t.expiresAt),
+    index("sessions_revoked_idx").on(t.revokedAt).where(sql`${t.revokedAt} IS NOT NULL`),
+  ],
 );
 
 // --- GM ledger ------------------------------------------------------------
