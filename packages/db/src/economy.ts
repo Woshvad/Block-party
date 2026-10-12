@@ -131,13 +131,6 @@ export async function collectRent(db: Db, userId: string, opts: { now?: Date } =
   });
 }
 
-export async function collectAllRent(db: Db, opts: { now?: Date } = {}) {
-  const all = await db.select({ userId: residents.userId }).from(residents);
-  let paid = 0;
-  for (const { userId } of all) paid += (await collectRent(db, userId, opts)).filter((o) => o.status === "paid").length;
-  return { residents: all.length, paid };
-}
-
 // Where you sleep this week.
 export async function tenancy(db: Db, userId: string, opts: { now?: Date } = {}) {
   const today = cityDay(opts.now ?? new Date());
