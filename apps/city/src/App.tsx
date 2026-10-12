@@ -6,7 +6,7 @@ import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api"
 import { backStack, useBackLayer } from "./back";
 import { type Screen, boot, screenFor } from "./boot";
 import { boardMode } from "./boardMode";
-import { type Launch, TELEGRAM_APP_URL, inviteLink, readLaunch, withoutLaunch } from "./launch";
+import { type Launch, TELEGRAM_APP_URL, freshStart, inviteLink, readLaunch, sessionMemory, withoutLaunch } from "./launch";
 import type { PageId } from "./screens/More";
 import { initTelegram, launchData, startParam, telegram } from "./telegram";
 
@@ -38,14 +38,15 @@ async function devLaunchData(id: string): Promise<string | null> {
   return ((await r.json()) as { initData?: string }).initData ?? null;
 }
 
-// The link the app was opened from (see launch.ts), acted on once per visit.
-// The address then drops the link's own parameters, so a reload doesn't
-// repeat them.
+// The link the app was opened from (see launch.ts), acted on once. The
+// address then drops the link's own parameters, and a Telegram start
+// parameter (which Telegram hands back on every reload) is remembered for
+// the session, so a reload doesn't repeat either.
 let launchTaken = false;
 function takeLaunch(): Launch {
   if (launchTaken) return { invite: null, notification: null };
   launchTaken = true;
-  const launch = readLaunch(startParam(), location.search);
+  const launch = readLaunch(freshStart(startParam(), sessionMemory("bp.launch.taken")), location.search);
   if (launch.invite || launch.notification) backStack()?.replaceUrl(location.pathname + withoutLaunch(location.search) + location.hash);
   return launch;
 }
