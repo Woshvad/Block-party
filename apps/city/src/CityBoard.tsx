@@ -17,7 +17,7 @@ import { boardShown } from "./boardMode";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
-import { deviceTier } from "./quality";
+import { deviceTier, watchContext } from "./quality";
 import { haptic, initTelegram } from "./telegram";
 
 // The city board, SimCity style: an isometric view over a street grid of
@@ -344,7 +344,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
       <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
         <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
           {/* Hidden, it draws nothing ("never") but keeps everything it built. */}
-          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }}>
+          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }} onCreated={watchContext}>
             <CityAtmosphere night={night} />
             <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
             {/* The sun, casting real shadows over the whole city. */}

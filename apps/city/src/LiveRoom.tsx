@@ -31,7 +31,7 @@ import { EMOTE_ICON } from "./emoteIcons";
 import RoomPanel, { type RoomAction } from "./RoomPanel";
 import SceneBoundary from "./SceneBoundary";
 import { roomSeatActions } from "./roomActions";
-import { deviceTier } from "./quality";
+import { deviceTier, watchContext } from "./quality";
 export { EMOTE_ICON } from "./emoteIcons";
 
 const CAP = 64; // 60 here plus a few drawn away residents and NPCs
@@ -330,7 +330,7 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
     <>
       <div className={`stage room-stage social-live-stage ${clean ? "is-clean" : ""}`}>
         <SceneBoundary what="this room" note="The chat, the people here and reactions still work.">
-          <Canvas shadows={tier.shadows} dpr={tier.dpr} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: tier.antialias }}>
+          <Canvas shadows={tier.shadows} dpr={tier.dpr} camera={{ position: [span * 0.55, span * 0.8, span * 0.95], fov: 40 }} gl={{ antialias: tier.antialias }} onCreated={watchContext}>
             <RoomLighting span={span} outdoor={place === "roof"} />
             {home ? (
               <HomeRoom
