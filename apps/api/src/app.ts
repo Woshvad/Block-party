@@ -487,9 +487,11 @@ export function createApp(cfg: AppConfig) {
     const b = await body(c);
     if (typeof b.initData !== "string" || b.initData.length > 4096) throw new ApiError(400, "INVALID_INPUT", "initData required", "initData");
     const telegramId = await telegramIdOf(b.initData);
-    if (telegramId === null) await limit(c, `ip:${ip(c)}:auth`, limits.authPerIpPerMinute, 60);
+    // The same keyed hash as every other per-IP bucket: never the address itself.
+    const addr = await ipKey(c);
+    if (telegramId === null) await limit(c, `ip:${addr}:auth`, limits.authPerIpPerMinute, 60);
     else {
-      await limit(c, `ip:${ip(c)}:auth-telegram`, limits.telegramAuthPerIpPerMinute, 60);
+      await limit(c, `ip:${addr}:auth-telegram`, limits.telegramAuthPerIpPerMinute, 60);
       await limit(c, `telegram:${telegramId}:auth`, limits.telegramAuthPerUserPerMinute, 60);
     }
     const r = await signInWithTelegram(db, {

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { ipBucketKey } from "../src/app";
 import { runMinute } from "../src/cron";
-import { SECRET, call, client, close, db, makeApp, resident } from "./harness";
+import { SECRET, call, client, close, db, makeApp, resident, telegramInit } from "./harness";
 
 afterAll(close);
 
@@ -19,6 +19,21 @@ describe("rate limits keep no client IPs", () => {
     expect(key).toMatch(/^[0-9a-f]{32}$/);
     const buckets = (await client`SELECT DISTINCT bucket FROM rate_limits WHERE bucket LIKE ${`%${key}%`}`).map((r) => r.bucket as string).sort();
     expect(buckets).toEqual([`ip:${key}:auth`, `ip:${key}:guest`, `receipt-ip:${key}`]);
+  });
+
+  it("Telegram sign-in keys its buckets the same way, and forged launch data shares the IP's auth budget", async () => {
+    const ip = `198.51.100.${Math.floor(Math.random() * 250)}`;
+    const strict = makeApp({ limits: { authPerIpPerMinute: 1 } });
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip, via: strict })).status).toBe(200);
+    // One guest sign-in uses up this address's auth budget; forged launch data
+    // then counts against the same bucket, not a second one of its own.
+    expect((await call("POST", "/v1/auth/guest", { body: { ageAck: true }, ip, via: strict })).status).toBe(201);
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: "user=%7B%7D&hash=00", ageAck: true }, ip, via: strict })).status).toBe(429);
+
+    expect(await client`SELECT bucket FROM rate_limits WHERE bucket LIKE ${`%${ip}%`}`).toHaveLength(0);
+    const key = await ipBucketKey(SECRET, ip);
+    const buckets = (await client`SELECT DISTINCT bucket FROM rate_limits WHERE bucket LIKE ${`%${key}%`}`).map((r) => r.bucket as string).sort();
+    expect(buckets).toEqual([`ip:${key}:auth`, `ip:${key}:auth-telegram`, `ip:${key}:guest`]);
   });
 
   it("the hash is keyed with the server's secret", async () => {
