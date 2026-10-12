@@ -33,17 +33,18 @@ export function itemPlace(item: Pick<ModerationItem, "kind" | "ref">): string {
   if (item.kind === "room") return `Room line (${item.ref.split("#")[0]})`;
   if (item.kind === "crew_name") return "Crew name";
   if (item.kind === "pitch") return "Mayor pitch";
-  if (item.kind === "resident_name") return "Resident's handle and name";
+  if (item.kind === "resident_name") return "Resident's name";
+  if (item.kind === "resident_handle") return "Resident's handle";
   return item.kind;
 }
 
-// Where a queued item stands: flagged text is down (a resident's handle and
-// name can't be taken down, so they stay shown); text the check couldn't
-// read is still up.
+// Where a queued item stands: flagged text is down (a flagged name shows as
+// the @handle; a handle can't be taken down, so it stays shown); text the
+// check couldn't read is still up.
 export function itemState(item: Pick<ModerationItem, "kind" | "status" | "categories">): string {
   if (item.status === "error") return "the AI check couldn't read it; still up";
   const why = `flagged: ${item.categories.join(", ").replace(/_/g, " ") || "no category"}`;
-  return item.kind === "resident_name" ? `${why}; still shown` : `${why}; taken down`;
+  return item.kind === "resident_handle" ? `${why}; still shown` : `${why}; taken down`;
 }
 
 // The buttons a queued item gets. Flagged text is already down: staff put it
@@ -51,7 +52,7 @@ export function itemState(item: Pick<ModerationItem, "kind" | "status" | "catego
 // it or take it down. A room line can't come back once taken down, and a
 // handle can't be changed, so those get only what can actually happen.
 export function reviewChoices(item: Pick<ModerationItem, "kind" | "status">): Array<{ verdict: "restore" | "remove"; label: string }> {
-  if (item.kind === "resident_name") return [{ verdict: "restore", label: "It's fine" }, { verdict: "remove", label: "Handled (restrict them in Controls)" }];
+  if (item.kind === "resident_handle") return [{ verdict: "restore", label: "It's fine" }, { verdict: "remove", label: "Handled (restrict them in Controls)" }];
   if (item.status === "error") return [{ verdict: "restore", label: "It's fine" }, { verdict: "remove", label: "Take it down" }];
   if (item.kind === "room") return [{ verdict: "remove", label: "Keep it down" }];
   return [{ verdict: "restore", label: "Put it back" }, { verdict: "remove", label: "Keep it down" }];

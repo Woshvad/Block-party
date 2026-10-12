@@ -408,6 +408,13 @@ describe("safety over HTTP", () => {
     const u = await resident();
     const [q] = await client`SELECT count(*)::int AS n FROM moderation_items WHERE author_id = ${u.userId} AND kind = 'resident_name'`;
     expect(q!.n).toBe(1);
+    // The name alone (so a flagged one can come down to the handle), and the handle on its own.
+    const queued = await client`SELECT kind, text FROM moderation_items WHERE author_id = ${u.userId} AND kind LIKE 'resident_%' ORDER BY kind`;
+    const [me] = await client`SELECT name, handle FROM residents WHERE user_id = ${u.userId}`;
+    expect(queued.map((r) => [r.kind, r.text])).toEqual([
+      ["resident_handle", me!.handle],
+      ["resident_name", me!.name],
+    ]);
     expect((await call("POST", "/internal/moderation/run", { headers: { "x-internal-secret": SECRET } })).status).toBe(503);
     const withAi = makeApp({ moderation: { classify: async (ts) => ts.map(() => ({ flagged: false, categories: [] })) } });
     const ran = await call("POST", "/internal/moderation/run", { headers: { "x-internal-secret": SECRET }, via: withAi });

@@ -33,6 +33,7 @@ import {
   runModerationBatch,
   unblockUser,
   unmuteUser,
+  updateName,
 } from "../src";
 import { makeResident } from "./helpers";
 
@@ -368,6 +369,43 @@ describe("flagged text stays down until staff review it", () => {
     expect(await pitchOf(week, runner)).toBe(PITCH_UNDER_REVIEW); // still the second pitch's hold, not the first pitch back
     await reviewModerationItem(db, mod, second.id, "restore");
     expect(await pitchOf(week, runner)).toBe(`Secondpitch ${tag}`);
+  });
+
+  it("a flagged display name shows as the @handle until staff look; a rename since is never overwritten", async () => {
+    const [mod, u, renamer] = [await staffer(), await makeResident(db), await makeResident(db)];
+    const tag = randomUUID().slice(0, 6);
+    const residentRow = async (id: string) => (await client`SELECT name, handle FROM residents WHERE user_id = ${id}`)[0]!;
+    await updateName(db, u, `Slurname ${tag}`);
+    const item = await enqueueModeration(db, { kind: "resident_name", ref: u, authorId: u, text: `Slurname ${tag}` });
+    await check([`Slurname ${tag}`]);
+    const { handle } = await residentRow(u);
+    expect((await residentRow(u)).name).toBe(handle);
+    // Staff keep it down: still the handle. Put back: the name returns.
+    expect(await reviewModerationItem(db, mod, item.id, "remove")).toMatchObject({ review: "removed" });
+    expect((await residentRow(u)).name).toBe(handle);
+    await updateName(db, u, `Slurname ${tag}`);
+    const again = await enqueueModeration(db, { kind: "resident_name", ref: u, authorId: u, text: `Slurname ${tag}` });
+    await check([`Slurname ${tag}`]);
+    await reviewModerationItem(db, mod, again.id, "restore");
+    expect((await residentRow(u)).name).toBe(`Slurname ${tag}`);
+    // A restore only replaces the @handle placeholder, never a name written since.
+    const third = await enqueueModeration(db, { kind: "resident_name", ref: u, authorId: u, text: `Slurname ${tag}` });
+    await check([`Slurname ${tag}`]);
+    await client`UPDATE residents SET name = ${`Fresh ${tag}`} WHERE user_id = ${u}`;
+    await reviewModerationItem(db, mod, third.id, "restore");
+    expect((await residentRow(u)).name).toBe(`Fresh ${tag}`);
+
+    // Renamed before the check got there: the new name stays. Renamed after
+    // the takedown: a restore of the old name leaves the new one alone.
+    await updateName(db, renamer, `Oldname ${tag}`);
+    const old = await enqueueModeration(db, { kind: "resident_name", ref: renamer, authorId: renamer, text: `Oldname ${tag}` });
+    await updateName(db, renamer, `Newname ${tag}`);
+    await enqueueModeration(db, { kind: "resident_name", ref: renamer, authorId: renamer, text: `Newname ${tag}` });
+    await check([`Oldname ${tag}`]);
+    expect((await residentRow(renamer)).name).toBe(`Newname ${tag}`);
+    await updateName(db, renamer, (await residentRow(renamer)).handle);
+    await reviewModerationItem(db, mod, old.id, "restore");
+    expect((await residentRow(renamer)).name).toBe((await residentRow(renamer)).handle);
   });
 
   it("text the AI check never managed to read waits for staff, who can take it down", async () => {

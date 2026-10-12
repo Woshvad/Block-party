@@ -22,6 +22,7 @@ import {
   mutes,
   ratioEntries,
   reports,
+  residents,
   restrictions,
   rivalries,
   staff,
@@ -415,10 +416,11 @@ type Takeable = { id?: string; kind: string; ref: string; text: string };
 
 // Takes flagged text down where it lives: board, crew and DM messages and
 // Ratio headlines are hidden; a pitch or crew name is swapped for the
-// placeholder above, but only while it still says what was flagged (a newer
-// pitch or a rename is checked on its own). Room lines live in the rooms
-// Worker, so the API takes those down. Resident names stay up: the handle is
-// fixed by a database guard, and staff deal with the resident instead.
+// placeholder above, and a resident's display name for their @handle, but
+// only while it still says what was flagged (a newer pitch or a rename is
+// checked on its own). Room lines live in the rooms Worker, so the API takes
+// those down. A handle can't change (a database guard), so a flagged handle
+// stays up and staff deal with the resident instead.
 export async function takeDownFlagged(db: Db, item: Takeable) {
   const { kind, ref, text } = item;
   if (typeof ref !== "string" || typeof text !== "string") return;
@@ -437,12 +439,14 @@ export async function takeDownFlagged(db: Db, item: Takeable) {
   } else if (kind === "crew_name") {
     // The name key stays, so nobody else can take the name while it's under review.
     if (UUID.test(ref)) await db.update(crews).set({ name: CREW_NAME_UNDER_REVIEW }).where(and(eq(crews.id, ref.toLowerCase()), eq(crews.name, text)));
+  } else if (kind === "resident_name") {
+    if (UUID.test(ref)) await db.update(residents).set({ name: sql`${residents.handle}` }).where(and(eq(residents.userId, ref.toLowerCase()), eq(residents.name, text)));
   }
 }
 
-// Staff found it was fine: the text goes back up. A pitch or crew name comes
-// back only if it still shows the placeholder and nothing newer has been
-// written there since.
+// Staff found it was fine: the text goes back up. A pitch, crew name or
+// resident's name comes back only if it still shows the placeholder and
+// nothing newer has been written there since.
 async function putBack(tx: Db, item: Takeable & { id: string }) {
   const { kind, ref, text } = item;
   // Compared in the database: a JavaScript Date drops the microseconds.
@@ -478,6 +482,13 @@ async function putBack(tx: Db, item: Takeable & { id: string }) {
         .update(crews)
         .set({ name: text })
         .where(and(eq(crews.id, ref.toLowerCase()), eq(crews.name, CREW_NAME_UNDER_REVIEW), eq(crews.nameKey, crewNameKey(text))));
+    }
+  } else if (kind === "resident_name") {
+    if (UUID.test(ref) && !(await newer())) {
+      await tx
+        .update(residents)
+        .set({ name: text })
+        .where(and(eq(residents.userId, ref.toLowerCase()), sql`${residents.name} = ${residents.handle}`));
     }
   }
 }

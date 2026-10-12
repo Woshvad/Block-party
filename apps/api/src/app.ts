@@ -553,7 +553,10 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/handles/:handle/available", auth, async (c) => c.json({ available: await isHandleAvailable(db, c.req.param("handle") ?? "") }));
   app.post("/v1/resident", auth, async (c) => {
     const r = await createResident(db, c.get("userId"), await body(c));
-    await enqueueModeration(db, { kind: "resident_name", ref: r.userId, authorId: r.userId, text: `${r.handle} ${r.name}` });
+    // Checked apart: a flagged name comes down to the handle, while a handle
+    // can't change, so staff deal with the resident.
+    await enqueueModeration(db, { kind: "resident_name", ref: r.userId, authorId: r.userId, text: r.name });
+    await enqueueModeration(db, { kind: "resident_handle", ref: r.userId, authorId: r.userId, text: r.handle });
     return c.json(r, 201);
   });
   app.patch("/v1/resident", auth, async (c) => {
