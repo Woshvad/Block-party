@@ -32,6 +32,13 @@ async function hmac(key: Uint8Array<ArrayBuffer>, data: string): Promise<Uint8Ar
 
 const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
+// The bot token is what makes the signing key secret. With no token the key is
+// HMAC("WebAppData", ""), a constant anyone can compute, so a missing token is
+// a broken server (a plain error, a 500), never a failed sign-in.
+function needBotToken(botToken: string) {
+  if (typeof botToken !== "string" || botToken.trim() === "") throw new Error("telegram bot token is missing");
+}
+
 function timingSafeEqualHex(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -40,6 +47,7 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 }
 
 export async function signTelegramInitData(fields: Record<string, string>, botToken: string): Promise<string> {
+  needBotToken(botToken);
   const secret = await hmac(enc.encode("WebAppData"), botToken);
   const check = Object.keys(fields)
     .sort()
@@ -54,6 +62,7 @@ export async function verifyTelegramInitData(
   botToken: string,
   opts: { maxAgeSeconds?: number; now?: number } = {},
 ): Promise<TelegramAuth> {
+  needBotToken(botToken);
   const maxAge = opts.maxAgeSeconds ?? 24 * 3600;
   const now = opts.now ?? Math.floor(Date.now() / 1000);
 

@@ -66,6 +66,14 @@ describe("auth", () => {
     expect(r.body.error).toMatchObject({ code: "TELEGRAM_AUTH_FAILED", message: "Telegram sign-in failed" });
   });
 
+  it("a session says which Telegram account it is, so the Mini App needn't sign in again", async () => {
+    const id = 71_000_000 + Math.floor(Math.random() * 1_000_000);
+    const tg = await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(id), ageAck: true } });
+    expect((await call("GET", "/v1/me", { token: tg.body.sessionToken })).body.telegramId).toBe(String(id));
+    const guest = await call("POST", "/v1/auth/guest", { body: { ageAck: true } });
+    expect((await call("GET", "/v1/me", { token: guest.body.sessionToken })).body.telegramId).toBeNull();
+  });
+
   it("Privy is off until configured", async () => {
     expect((await call("POST", "/v1/auth/privy", { body: { accessToken: "x" } })).status).toBe(503);
   });
@@ -203,6 +211,30 @@ describe("rate limits", () => {
     for (let i = 0; i < 3; i++) codes.push((await call("POST", "/v1/gm", { token: u.token, via: strict })).status);
     expect(codes).toEqual([200, 200, 429]);
     expect((await call("GET", "/v1/me", { token: u.token, via: strict })).status).toBe(200);
+  });
+
+  it("Telegram sign-ins that check out are limited per account, not per shared IP", async () => {
+    const strict = makeApp({ limits: { authPerIpPerMinute: 2, telegramAuthPerUserPerMinute: 2, telegramAuthPerIpPerMinute: 100 } });
+    const ip = `203.0.113.${Math.floor(Math.random() * 250)}`;
+    // Five players behind one carrier IP at the bell: all in.
+    const five = [];
+    for (let i = 0; i < 5; i++) five.push((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip, via: strict })).status);
+    expect(five).toEqual([200, 200, 200, 200, 200]);
+    // One account signing in over and over: its own limit.
+    const init = await telegramInit();
+    const again = [];
+    for (let i = 0; i < 3; i++) again.push((await call("POST", "/v1/auth/telegram", { body: { initData: init, ageAck: true }, ip, via: strict })).status);
+    expect(again).toEqual([200, 200, 429]);
+    // Launch data that doesn't check out still counts against the IP.
+    const forged = (await telegramInit()).replace(/hash=[0-9a-f]+/, `hash=${"0".repeat(64)}`);
+    const bad = [];
+    for (let i = 0; i < 3; i++) bad.push((await call("POST", "/v1/auth/telegram", { body: { initData: forged, ageAck: true }, ip, via: strict })).status);
+    expect(bad).toEqual([401, 401, 429]);
+    // ...and the IP's ceiling for good ones still holds.
+    const tight = makeApp({ limits: { telegramAuthPerIpPerMinute: 1 } });
+    const ip2 = `198.18.0.${Math.floor(Math.random() * 250)}`;
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip: ip2, via: tight })).status).toBe(200);
+    expect((await call("POST", "/v1/auth/telegram", { body: { initData: await telegramInit(), ageAck: true }, ip: ip2, via: tight })).status).toBe(429);
   });
 
   it("20 concurrent guest sign-ups from one IP with a cap of 5: exactly 5 succeed", async () => {
@@ -396,7 +428,7 @@ describe("live rooms over HTTP", () => {
     expect(r.status).toBe(200);
     expect(r.body.url).toMatch(/^https:\/\/rooms\.test\/connect\?ticket=/);
     const t = await verifyRoomTicket(r.body.ticket, TICKET_SECRET);
-    expect(t).toMatchObject({ u: u.userId, h: u.handle, place: "diner", chat: true });
+    expect(t).toMatchObject({ u: u.userId, h: u.handle, place: "diner" });
     const g = await call("POST", "/v1/auth/guest", { body: { ageAck: true } });
     expect((await ticketFor(g.body.sessionToken, "diner")).status).toBe(404);
     for (const bad of ["narnia:x", "../etc", "", "HOME:x"]) expect([400, 404]).toContain((await ticketFor(u.token, bad)).status);
@@ -405,6 +437,8 @@ describe("live rooms over HTTP", () => {
   it("homes: yours always; others' only with the door open and no block", async () => {
     const [a, b] = [await resident(), await resident()];
     expect((await ticketFor(a.token, `home:${a.userId}`)).status).toBe(200);
+    // One home, one room: anything after the owner would open another private room.
+    for (const extra of [`home:${a.userId}:2`, `home:${a.userId}:`, `home:${a.userId}:x:y`]) expect((await ticketFor(a.token, extra)).status).toBe(404);
     expect((await ticketFor(b.token, `home:${a.userId}`)).body.error.code).toBe("DOOR_CLOSED");
     await call("PATCH", "/v1/home", { token: a.token, body: { doorOpen: true } });
     expect((await ticketFor(b.token, `home:${a.userId}`)).status).toBe(200);
@@ -416,10 +450,11 @@ describe("live rooms over HTTP", () => {
     const [lead, outsider] = [await resident(), await resident()];
     const crew = await call("POST", "/v1/crews", { token: lead.token, body: { name: `Room ${crypto.randomUUID().slice(0, 6)}` } });
     expect((await ticketFor(lead.token, `crew_house:${crew.body.id}`)).status).toBe(200);
+    expect((await ticketFor(lead.token, `crew_house:${crew.body.id}:annex`)).status).toBe(404);
     expect((await ticketFor(outsider.token, `crew_house:${crew.body.id}`)).status).toBe(403);
   });
 
-  it("the ticket carries blocks both ways, mutes, frens and the chat restriction", async () => {
+  it("the ticket never lists who blocked or muted you: the room asks for that itself", async () => {
     const { verifyRoomTicket } = await import("@bp/core");
     const { TICKET_SECRET, client } = await import("./harness");
     const [me, blockedByMe, blockedMe, muted, mod] = [await resident(), await resident(), await resident(), await resident(), await resident()];
@@ -429,9 +464,11 @@ describe("live rooms over HTTP", () => {
     await client`INSERT INTO staff (user_id, role) VALUES (${mod.userId}, 'moderator')`;
     await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: me.userId, kind: "chat_mute", hours: 2, reason: "Flooding the Diner with copy-pasta all morning." } });
     await arrive(me.userId, "roof");
-    const t = await verifyRoomTicket((await ticketFor(me.token, "roof")).body.ticket, TICKET_SECRET);
-    expect(new Set(t.hidden)).toEqual(new Set([blockedByMe.userId, blockedMe.userId, muted.userId]));
-    expect(t.chat).toBe(false);
+    const r = await ticketFor(me.token, "roof");
+    const t = await verifyRoomTicket(r.body.ticket, TICKET_SECRET);
+    expect(Object.keys(t).sort()).toEqual(["age", "crew", "exp", "frens", "h", "place", "u", "v"]);
+    for (const other of [blockedByMe, blockedMe, muted]) expect(JSON.stringify(t)).not.toContain(other.userId);
+    expect(r.body.url.length).toBeLessThan(4096);
   });
 
   it("room effects become moods and moderation items; only with the secret", async () => {
@@ -450,6 +487,31 @@ describe("live rooms over HTTP", () => {
     const [q] = await client`SELECT ref FROM moderation_items WHERE kind = 'room' AND author_id = ${u.userId}`;
     expect(q!.ref).toBe("diner#0#l1");
     expect((await call("POST", "/internal/rooms/effects", { body: { place: "../x", copy: 0, effects: [] }, headers: { "x-internal-secret": SECRET } })).status).toBe(400);
+  });
+
+  it("a batch the room sends again (its answer got lost) queues each line once", async () => {
+    const { client } = await import("./harness");
+    const u = await resident();
+    const lineId = `again-${crypto.randomUUID().slice(0, 8)}`;
+    const effects = [
+      { id: "41", kind: "visit_start", userId: u.userId, at: Date.now() - 60_000 },
+      { id: "42", kind: "moderate", line: { id: lineId, userId: u.userId, handle: u.handle, text: "said once, sent twice", at: Date.now() } },
+    ];
+    const post = (copy: number) => call("POST", "/internal/rooms/effects", { body: { place: "roof", copy, effects }, headers: { "x-internal-secret": SECRET } });
+    expect((await post(5)).body).toEqual({ applied: 2 });
+    expect((await post(5)).body).toEqual({ applied: 2 });
+    expect(await client`SELECT id FROM moderation_items WHERE ref = ${`roof#5#${lineId}`}`).toHaveLength(1);
+    expect(await client`SELECT id FROM room_visits WHERE user_id = ${u.userId} AND room = 'roof#5' AND left_at IS NULL`).toHaveLength(1);
+    // The same effect id from another room copy is another effect.
+    await post(6);
+    expect(await client`SELECT id FROM moderation_items WHERE ref = ${`roof#6#${lineId}`}`).toHaveLength(1);
+    // A room copy whose storage started over (a local rooms server restart
+    // does that) counts its effects from 0 again: a new line under an effect
+    // id that copy used before is still a new line.
+    const fresh = `again-${crypto.randomUUID().slice(0, 8)}`;
+    const restarted = [{ id: "42", kind: "moderate", line: { id: fresh, userId: u.userId, handle: u.handle, text: "a new line under an old effect id", at: Date.now() } }];
+    await call("POST", "/internal/rooms/effects", { body: { place: "roof", copy: 5, effects: restarted }, headers: { "x-internal-secret": SECRET } });
+    expect(await client`SELECT id FROM moderation_items WHERE ref = ${`roof#5#${fresh}`}`).toHaveLength(1);
   });
 
   it("live room access separates mutes from blocks and refreshes restrictions", async () => {

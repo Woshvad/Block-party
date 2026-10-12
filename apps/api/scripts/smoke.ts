@@ -1,8 +1,10 @@
 // Smoke test of the real server on a real, migrated database: a new resident
 // walks the day-one path over HTTP. Catches wiring the in-process tests can't
 // (missing system rows, env, migrations). Usage: SMOKE_URL=http://localhost:8787 pnpm smoke
-import "dotenv/config";
 import { pickForMe, seededRandomInt, signTelegramInitData } from "@bp/core";
+import { loadEnv } from "@bp/db/src/env";
+
+loadEnv();
 
 const base = process.env.SMOKE_URL ?? "http://localhost:8787";
 const bot = process.env.TELEGRAM_BOT_TOKEN;

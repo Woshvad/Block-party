@@ -1,6 +1,8 @@
-import "dotenv/config";
 import postgres from "postgres";
+import { loadEnv } from "../src/env";
 import { runMigrations } from "../src/migrate";
+
+loadEnv();
 
 // Fresh test database per run: the ledger is append-only, so we never clean
 // rows, we start over.

@@ -1,10 +1,12 @@
 // Ledger throughput under concurrency: N residents burning at once, with the
 // burn going to its shard vs everything forced onto one row (the old way).
 // Run against the test database: pnpm --filter @bp/db bench
-import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { burnAccountFor } from "@bp/core";
 import { createDb, ensureSystemAccounts, mint, openUserAccount, post } from "../src";
+import { loadEnv } from "../src/env";
+
+loadEnv();
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url || !new URL(url).pathname.endsWith("_test")) throw new Error("set TEST_DATABASE_URL to a _test database");

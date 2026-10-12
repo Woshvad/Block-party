@@ -41,6 +41,37 @@ describe("the API's wrangler config matches the code", () => {
     for (const k of Object.keys(cfg.vars)) expect(envType).toMatch(new RegExp(`\\b${k}\\??:`));
   });
 
+  it("both entrypoints hand PON_PEPPER to the app", () => {
+    expect(envType).toMatch(/\bPON_PEPPER\?:/);
+    expect(worker).toContain("ponPepper: env.PON_PEPPER");
+    expect(read("../src/node.ts")).toContain("ponPepper: process.env.PON_PEPPER");
+  });
+
+  it("the dev server, scripts and tests read the repo root's .env too, not just their own directory's", () => {
+    for (const f of ["../src/node.ts", "./global-setup.ts", "../vitest.config.ts", "../scripts/smoke.ts", "../scripts/load.ts"]) {
+      expect(read(f), f).toContain("loadEnv()");
+      expect(read(f), f).not.toContain("dotenv/config");
+    }
+  });
+
+  it("the deployed API has an odds feed", () => {
+    expect(["polymarket", "mock"]).toContain(cfg.vars.ODDS_SOURCE);
+  });
+
+  it("every setting the Worker reads is documented: README Deploying and .env.example", () => {
+    const readme = read("../../../README.md").replace(/\r\n/g, "\n");
+    const from = readme.indexOf("## Deploying");
+    const deploying = readme.slice(from, readme.indexOf("\n## ", from + 1));
+    const example = read("../../../.env.example");
+    // Not HYPERDRIVE: a binding, checked above.
+    const keys = [...envType.matchAll(/^\s*([A-Z][A-Z0-9_]*)\??:/gm)].map((m) => m[1]!).filter((k) => k !== "HYPERDRIVE");
+    expect(keys).toContain("RECEIPT_SECRET");
+    for (const k of keys) {
+      expect(deploying, k).toContain(`\`${k}\``);
+      expect(example, k).toMatch(new RegExp(`^${k}=`, "m"));
+    }
+  });
+
   it("the minute cron is on, and the Worker has a scheduled handler", () => {
     expect(cfg.triggers.crons).toEqual(["* * * * *"]);
     expect(worker).toMatch(/async scheduled\(/);

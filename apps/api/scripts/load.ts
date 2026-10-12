@@ -3,8 +3,10 @@
 // percentiles and errors per route. Run against a dev server started with
 // ODDS_SOURCE=mock and CLIENT_IP_HEADER=x-load-ip (never production).
 //   LOAD_URL=http://localhost:8799 BOTS=200 CONCURRENCY=50 pnpm load
-import "dotenv/config";
 import { pickForMe, seededRandomInt, signTelegramInitData } from "@bp/core";
+import { loadEnv } from "@bp/db/src/env";
+
+loadEnv();
 
 const base = process.env.LOAD_URL ?? "http://localhost:8787";
 const bot = process.env.TELEGRAM_BOT_TOKEN;

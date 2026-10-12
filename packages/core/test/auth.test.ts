@@ -113,6 +113,18 @@ describe("telegram initData", () => {
     expect(await reason(verify(nodeSign(base({ user: JSON.stringify({ id: "42" }) }), BOT)))).toBe("NO_USER");
     expect(await reason(verify(nodeSign(base({ user: "{not json" }), BOT)))).toBe("MALFORMED");
   });
+
+  it("won't sign or check anything without a bot token: the key would be public", async () => {
+    // What a server with no token would accept: signed with the empty token,
+    // which anyone can do.
+    const forged = nodeSign(base(), "");
+    for (const bot of ["", "  ", undefined as unknown as string]) {
+      await expect(verifyTelegramInitData(forged, bot, { now: NOW })).rejects.toThrow("telegram bot token is missing");
+      await expect(signTelegramInitData(base(), bot)).rejects.toThrow("telegram bot token is missing");
+    }
+    // A broken server, not a failed sign-in: it must not read as a 401.
+    await expect(verify(forged, "")).rejects.not.toBeInstanceOf(TelegramAuthError);
+  });
 });
 
 describe("privy tokens", () => {

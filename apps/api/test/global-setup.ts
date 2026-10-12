@@ -1,5 +1,7 @@
-import "dotenv/config";
+import { loadEnv } from "@bp/db/src/env";
 import { apiTestDatabaseUrl } from "./db-url";
+
+loadEnv();
 
 // The API suite gets its own database so it never races the db package's suite.
 export default async function setup() {

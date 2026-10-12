@@ -1,17 +1,26 @@
-import "dotenv/config";
 import { serve } from "@hono/node-server";
 import { type OddsProvider, mockProvider, openAiModeration, parseBlockedWords, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
+import { loadEnv } from "@bp/db/src/env";
 import { createApp } from "./app";
-import { runMinute } from "./cron";
+import { configProblems } from "./config-check";
+import { logCronFailures, runMinute } from "./cron";
 import { httpRoomsClient } from "./rooms-client";
 
 // Local dev server. Production runs src/worker.ts on Cloudflare Workers.
+loadEnv();
 const need = (k: string) => {
   const v = process.env[k];
   if (!v) throw new Error(`${k} is not set`);
   return v;
 };
+// The same check as the Worker's: no bot token or a weak secret, no server.
+const problems = configProblems(process.env);
+if (problems.length > 0) {
+  for (const p of problems) console.error(`config: ${p}`);
+  console.error("fix .env (README Setup has a line that makes local secrets) and start again");
+  process.exit(1);
+}
 const { db } = createDb(need("DATABASE_URL"), { max: Number(process.env.DB_POOL ?? 10) });
 const schema = await schemaStatus(db);
 if (!schema.upToDate) {
@@ -40,6 +49,8 @@ const app = createApp({
   ...(MODERATION ? { moderation: MODERATION } : {}),
   // Staff's blocked words, comma- or newline-separated.
   blockedWords: parseBlockedWords(process.env.BLOCKED_WORDS),
+  // As on Workers: the pepper alone turns nothing on (no PoN provider yet, so 503).
+  ...(process.env.PON_PEPPER ? { ponPepper: process.env.PON_PEPPER } : {}),
 });
 // LOCAL_CRON=1: run the Worker's minute cron here too, so a local city has a
 // bell, live odds and a Slate. Notifications aren't sent (no real bot locally).
@@ -53,7 +64,7 @@ if (process.env.LOCAL_CRON === "1") {
     running = true;
     try {
       const deps = { ...(odds ? { odds } : {}), ...(MODERATION ? { moderation: MODERATION } : {}), ...(rooms ? { rooms } : {}) };
-      for (const r of await runMinute(db, new Date(), deps)) if (r.status === "rejected") console.error("cron job failed:", r.reason);
+      logCronFailures(await runMinute(db, new Date(), deps));
     } finally {
       running = false;
     }

@@ -38,8 +38,19 @@ describe("the rooms wrangler config matches the code", () => {
 
   it("vars are ones the Worker reads; the runtime test uses the same date", () => {
     for (const k of Object.keys(cfg.vars)) expect(worker).toMatch(new RegExp(`\\b${k}\\??:`));
-    expect(read("./rooms.test.ts")).toContain(`compatibilityDate: "${cfg.compatibility_date}"`);
+    expect(read("./harness.ts")).toContain(`compatibilityDate: "${cfg.compatibility_date}"`);
     expect(cfg.main).toBe("dist/worker.js");
+  });
+
+  it("every setting the Worker reads is documented in README Deploying", () => {
+    const readme = read("../../../README.md").replace(/\r\n/g, "\n");
+    const from = readme.indexOf("## Deploying");
+    const deploying = readme.slice(from, readme.indexOf("\n## ", from + 1));
+    const envType = worker.slice(worker.indexOf("export type Env = {"), worker.indexOf("\n};", worker.indexOf("export type Env = {")));
+    // The string settings, not the Durable Object bindings.
+    const keys = [...envType.matchAll(/^\s*([A-Z][A-Z0-9_]*)\??: string/gm)].map((m) => m[1]!);
+    expect(keys).toContain("TICKET_SECRET");
+    for (const k of keys) expect(deploying, k).toContain(`\`${k}\``);
   });
 
   it("no secret sits in the config", () => {

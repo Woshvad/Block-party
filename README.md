@@ -12,16 +12,22 @@ pnpm monorepo. Built brick by brick; each brick ships with tests against a real 
 
 ## Setup
 
-Needs Node 20+, pnpm 10, and Postgres 15 on localhost.
+Needs Node 22.12+ (vitest 5 needs it), pnpm 10, and Postgres 15 on localhost.
 
 ```bash
 pnpm install
 cp .env.example .env
+# Fresh local secrets, to paste over the placeholders in .env:
+node -e "for (const k of ['INTERNAL_SECRET', 'TICKET_SECRET', 'PON_PEPPER']) console.log(k + '=' + require('crypto').randomBytes(24).toString('base64url'))"
 createdb blockparty
 pnpm db:migrate
 pnpm test
 pnpm --filter @bp/api dev   # http://localhost:8787, refuses to start on an un-migrated database
 ```
+
+The API refuses to run without a real-looking `TELEGRAM_BOT_TOKEN` (`<bot id>:<30+ letters, digits, - or _>`), or with any secret it uses under 32 characters or still the `.env.example` placeholder, and says which: the local server exits, and a Worker answers every request with a 500 and lists the problems at `/health`. Locally the bot token can be your test bot's, or any made-up one of that shape: the dev sign-in signs with whatever is in `.env`.
+
+Every package's scripts, the dev server and the test suites read this root `.env`, after a `.env` in their own package if there is one; a variable already set in the environment (as in CI) always wins.
 
 Tests drop and recreate `blockparty_test` on every run (the name must end in `_test`).
 
@@ -130,14 +136,14 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 
 - **Phase 0, the phone test** (in progress). `/room-test` is one cutaway room with 60 residents walking and 10 dimmed away residents, every body part one instanced draw call for the whole crowd: 30 draw calls, 17k triangles, 24 MB JS heap (the budget is 100 to 150 draw calls and 300 MB). `/` is the city board: icon pins with live headcounts, district names painted on the ground, "Coming soon" lots, a live banner (online count, Mayor, Law of the Week), day and night, and map-style dragging kept on the board: 29 draw calls, 4.5k triangles. Flipping day and night 20 times leaves GPU geometry, texture and shader counts unchanged. The camera fits tall phones (wider lens, pulled back) and wide screens.
   - **Still to do:** frame rate on real mid-range phones inside Telegram (needs the bot token and a domain); desktop browser panes throttle animation, so fps there means nothing. Banner, pins and odds are mock values until phase 1 wires the API.
-- **Phase 1a, sign-in and move-in** (done). One-tap 18+ notice, then: inside Telegram, sign-in with the signed launch data every visit (it claims a guest on that device, or switches to the Telegram account's owner); in a browser, a guest who can look around and is asked to open Telegram to move in. Move-in: look (live 3D preview, part arrows, palette swatches), name and handle (free-handle check as you type, newest answer wins), 3 traits, goal and room style, then the city deals a backstory and starter item. The form uses `@bp/core`'s own validators, and a property test checks it agrees with the server on 2,000 random bad inputs.
+- **Phase 1a, sign-in and move-in** (done). One-tap 18+ notice, then: inside Telegram, sign-in with the signed launch data every visit (it claims a guest on that device, or switches to the Telegram account's owner), unless the stored session already belongs to that Telegram account (`GET /v1/me` says which, and the API limits Telegram sign-ins per account, not per shared IP); in a browser, a guest who can look around and is asked to open Telegram to move in. Move-in: look (live 3D preview, part arrows, palette swatches), name and handle (free-handle check as you type, newest answer wins), 3 traits, goal and room style, then the city deals a backstory and starter item. The form uses `@bp/core`'s own validators, and a property test checks it agrees with the server on 2,000 random bad inputs.
   - **Tested by hand against the real API:** a taken handle (any case) blocks Next; a handle taken by someone else between the check and Move in sends you back to Name with "taken"; three rapid taps on Move in send one request (two went out before a ref guard was added); a stored session survives a reload; a dead one asks for the notice again (browser) or is dropped and Telegram sign-in retried once (Telegram, as the API asks).
   - **Local dev:** run the `api` and `city` servers (`.claude/launch.json`); add `http://localhost:3100` to `ALLOWED_ORIGINS`. `/?tg=<id>` or the guest screen's dev button signs in as a Telegram tester with the local bot token. The dev route is a 404 in production builds and from anything but localhost.
 - **Phase 1b, a live city, Today and the Tower** (done). The board's banner shows the real Mayor and Law (or "No Mayor yet · Polls close in…"), the bell countdown and the Slate's progress; the made-up headcounts are gone until the rooms have a presence endpoint. Today: say gm (credited once however many taps), streak and Hodl days, the Slate with its Bell Modifier, and each card's state. The Tower: open markets and tickets. One call sheet for both: pick a side, slide "Chance of YES" on your side of the price (the range is checked against `@bp/core` for every price and side), see the Aura either way, lock, then follow the call until the next tick locks it or drops it.
   - **Tested against the real API with live ticks:** a call went from waiting to "Locked at 63%" 35 s later; the price moved from 59% to 62% while the sheet was open and the API's "price moved" brought the new price and a "Still in?"; a ticket was spent (3 to 2); re-opening a called market shows the call, never a second Lock.
   - **Bugs found:** the data hook ignored every answer after React's dev double-mount (a mounted flag set false on the test unmount and never reset); two overlapping boots could each sign in with Telegram, which rotates the session, and store a revoked token (boots now run one at a time); the call sheet sat under the tab bar (now portalled).
   - **Local cron:** `LOCAL_CRON=1` runs the Worker's minute cron in the Node server (bell, odds, Slate, NPC calls; no notifications sent). Both now share `apps/api/src/cron.ts`, so they can't drift.
-- **Phase 2a, the live rooms** (done). Tap a place on the board: if you're there, straight in; otherwise Walk, Rollup or Priority (fares from `@bp/core`, free under the Gas Holiday, one idempotency key per tap so a retry is never charged twice), a trip bar until you arrive, then the room. The room: everyone here drawn with one instanced draw call per body part, walking where they tapped, chat bubbles and emotes over heads, NPCs, the headcount, a chat bar, an emote picker and a chat log. The connection takes a fresh ticket per attempt, pings every 25 s and reconnects with backoff up to 8 tries; another tab taking over (4000) or a refusal (4001) stops it instead of fighting. Room events go through a pure reducer that ignores junk, and a test checks the client's room sizes against the rooms Worker's own table.
+- **Phase 2a, the live rooms** (done). Tap a place on the board: if you're there, straight in; otherwise Walk, Rollup or Priority (fares from `@bp/core`, free under the Gas Holiday, one idempotency key per tap so a retry is never charged twice), a trip bar until you arrive, then the room. The room: everyone here drawn with one instanced draw call per body part, walking where they tapped, chat bubbles and emotes over heads, NPCs, the headcount, a chat bar, an emote picker and a chat log. The connection takes a fresh ticket per attempt, pings every 25 s and reconnects with jittered backoff, slowly once 8 quick tries are spent and at once when the device is back online or the app is visible again; another tab taking over (4000), a refusal (4001) or a restricted account (4002) stops it instead of fighting. Room events go through a pure reducer that ignores junk, and a test checks the client's room sizes against the rooms Worker's own table.
   - **Tested with two residents in the real rooms Worker:** chat, emotes and moves reach the other person; a seed phrase is blocked before anyone sees it, with the safety line; 7 rapid lines deliver 5 and say "slow down, ser"; opening the room in a second tab stops the first with "You opened this room somewhere else"; a Rollup trip to the Diner arrives in about 20 s and walks you in.
   - **Local dev:** `pnpm --filter @bp/rooms dev` runs the rooms Worker in workerd through Miniflare on :8788; set `ROOMS_URL` and `TICKET_SECRET` in `.env` and the Node API wires itself to it as on Workers. The perf meter shows only on `/room-test` or with `?perf`.
 - **Phase 2b, your home** (done). A 3D editor: tap a piece to move, turn, recolour or store it; place from storage with a ghost that's green or red by `@bp/core`'s own `validatePlacement`; buy from the shop (one idempotency key per tap); wall and floor finishes; open or close your door; go inside to your live home, drawn with your furniture, and nap on a bed (20 minutes, one long action at a time). Colour 0 is each piece's natural colour; 1 to 15 the palette.
@@ -172,10 +178,29 @@ Tests drop and recreate `blockparty_test` on every run (the name must end in `_t
 
 ## Deploying
 
+**Owner items first.** None of these exist yet, and the config only holds marked placeholders for them (`OWNER ITEM` in both `wrangler.jsonc` files): the Cloudflare account, the Postgres database and its Hyperdrive id, the domains, the bot token from @BotFather, Polymarket's written OK for free calls, and somewhere to host the city.
+
 1. Postgres (Neon, Supabase or RDS), then `DATABASE_URL=... pnpm db:migrate`.
-2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc`.
-3. Secrets on both Workers (`wrangler secret put`): `INTERNAL_SECRET` and `TICKET_SECRET` (the same on both), plus the API's `TELEGRAM_BOT_TOKEN`, and when ready `OPENAI_API_KEY`, `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY`. Set the API's `CITY_URL` var to the city's https address, so pushes carry an Open button that marks them opened (playing within 6 hours of a push counts as opening it too).
-4. `wrangler deploy` in `apps/api`, then in `apps/rooms` (each runs its own build). Check `/health` says the schema is up to date. Rooms require the API's `/internal/rooms/access` endpoint to refresh safety permissions before joins and actions; if it is unavailable, those actions are refused.
+2. `wrangler hyperdrive create` against it; put the id in `apps/api/wrangler.jsonc` in place of `REPLACE_WITH_HYPERDRIVE_ID`.
+3. Domains. The config assumes the city at `https://blockparty.city` (the API's `ALLOWED_ORIGINS`), the API at `https://api.blockparty.city` (the rooms' `API_URL`) and the rooms at `https://rooms.blockparty.city` (the API's `ROOMS_URL`). Give each Worker its custom domain (the commented `routes` line in its `wrangler.jsonc`) or change those vars: on `workers.dev` alone the two Workers can't reach each other at these addresses.
+4. Secrets, with `wrangler secret put NAME` in each Worker's directory. A fresh shared secret: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
+
+   | Secret | Worker | What it does |
+   | --- | --- | --- |
+   | `TELEGRAM_BOT_TOKEN` | API | Telegram sign-in and pushes. Required, and shaped like a real token (`<bot id>:<30+ letters, digits, - or _>`). |
+   | `INTERNAL_SECRET` | API and rooms, the same | The Workers' internal routes. Required, 32+ characters. |
+   | `TICKET_SECRET` | API and rooms, the same | Signs room tickets. Required on rooms; without it the API's rooms are off (503). 32+ characters. |
+   | `RECEIPT_SECRET` | API | Signs public receipt links; without it calls have no receipt link. 32+ characters. |
+   | `PON_PEPPER` | API | Hashes phone numbers and wallets for Proof of Neighbour. 32+ characters. The PoN routes still answer 503 until a phone or crypto-proof provider is configured too, and none is built yet. |
+   | `OPENAI_API_KEY` | API | The AI moderation check (OpenAI's free moderation endpoint). |
+   | `PRIVY_APP_ID`, `PRIVY_VERIFICATION_KEY` | API | Privy sign-in (the app id and the verification key's PEM from the Privy dashboard). Without both, or with a key that won't load (it's logged), only `/v1/auth/privy` is off (503). |
+   | `BLOCKED_WORDS` | API and rooms | Optional. Staff's blocked words for chat, comma- or newline-separated. |
+   | `CITY_URL` | API | Optional. The city's address, for the Open button on pushes (`<CITY_URL>/?n=<notification id>`); plain-text pushes without it. Playing within 6 hours of a push also counts as opening it. |
+
+   The API refuses to serve without the bot token or with a secret it uses under 32 characters or still a `.env.example` placeholder: every request gets a 500, `/health` lists the problems by name, and the cron doesn't run.
+5. Vars live in `wrangler.jsonc`, not secrets. The API: `ODDS_SOURCE` (`polymarket`, the live read-only feed; `mock` for a sample feed on staging; unset, no markets and no Slate), `ALLOWED_ORIGINS`, `ROOMS_URL`, and the switches `FEATURE_DUELS`, `FEATURE_TOWER_LIGHTS` and `FEATURE_REAL_MONEY` (off unless `"on"`). The rooms: `API_URL`; `ACCESS_TTL_MS` is for tests only.
+6. `wrangler deploy` in `apps/rooms`, then in `apps/api` (each runs its own build). Rooms go first so they already accept the slimmer tickets a new API signs; an older rooms Worker refuses them. Check the API's `/health` says the schema is up to date. Rooms ask the API's `/internal/rooms/access` for each resident's blocks, mutes and restrictions when they join and trust the answer for 15 seconds; while it is unavailable, nobody can join, and a resident whose answer is older than that can't act. Optional on rooms: `BLOCKED_WORDS`, staff's blocked words for room chat (comma- or newline-separated).
+7. The city: `NEXT_PUBLIC_API_URL=https://<api domain> pnpm --filter @bp/city build`, then serve it over https from the address in `ALLOWED_ORIGINS` and point the bot's Mini App at it. The API's address is baked in at build time, and a production build stops if `NEXT_PUBLIC_API_URL` is unset or isn't https.
 
 ## Notes for later bricks
 

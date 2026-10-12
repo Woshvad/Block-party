@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, type AuthResult, type Me } from "../src/api";
-import { boot } from "../src/boot";
+import { boot, launchUserId } from "../src/boot";
 
 const auth = (status: "guest" | "claimed"): AuthResult => ({ userId: "u", sessionToken: "t", expiresAt: "", status, isNew: true, leftGuest: false });
 const me = (status: "guest" | "claimed", resident = false): Me => ({
@@ -117,5 +117,49 @@ describe("boot in Telegram", () => {
     const f = fake({ telegram: new ApiError(401, "INVALID_TELEGRAM", "telegram sign-in failed") });
     expect((await boot(f.api, { initData: "x", ageAccepted: true })).kind).toBe("error");
     expect(f.calls).not.toContain("guest");
+  });
+});
+
+// Launch data the way Telegram sends it (the signature is the API's business).
+const launch = (id: number) => new URLSearchParams({ auth_date: "1790000000", user: JSON.stringify({ id, first_name: "Ser" }), hash: "0".repeat(64) }).toString();
+
+describe("boot in Telegram with a stored session", () => {
+  it("keeps a session that's already this Telegram account's: no sign-in, so no limit spent and no rotation", async () => {
+    const f = fake({ session: true, me: { ...me("claimed", true), telegramId: "42" } });
+    expect((await boot(f.api, { initData: launch(42), ageAccepted: false })).kind).toBe("city");
+    expect(f.calls).toEqual(["me"]);
+  });
+
+  it("signs in when the stored session is another account's or a guest's, to switch or claim", async () => {
+    for (const stored of [{ ...me("claimed", true), telegramId: "7" }, me("guest")]) {
+      const f = fake({ session: true, me: stored });
+      await boot(f.api, { initData: launch(42), ageAccepted: true });
+      expect(f.calls).toEqual(["me", "ack:true", "telegram", "me"]);
+    }
+  });
+
+  it("a dead stored session signs in fresh", async () => {
+    const f = fake({ session: true });
+    let n = 0;
+    f.api.me = () => {
+      f.calls.push("me");
+      return n++ === 0 ? Promise.reject(new ApiError(401, "UNAUTHENTICATED", "sign in first")) : Promise.resolve({ ...me("claimed", true), telegramId: "42" });
+    };
+    expect((await boot(f.api, { initData: launch(42), ageAccepted: true })).kind).toBe("city");
+    expect(f.calls).toEqual(["me", "ack:true", "telegram", "me"]);
+  });
+
+  it("a check that fails for another reason is an error screen, never a guest", async () => {
+    const f = fake({ session: true, me: new ApiError(0, "OFFLINE", "can't reach the city right now") });
+    expect(await boot(f.api, { initData: launch(42), ageAccepted: true })).toEqual({ kind: "error", message: "can't reach the city right now" });
+    expect(f.calls).not.toContain("guest");
+  });
+
+  it("reads the launch account from the user field, and nothing else", () => {
+    expect(launchUserId(launch(42))).toBe("42");
+    const user = (u: string) => `user=${encodeURIComponent(u)}`;
+    for (const bad of ["", "x", "user=", user("{}"), user('{"id":"42"}'), user('{"id":-1}'), user('{"id":1.5}'), user("{not json"), user("null"), `id=42&${user("{}")}`]) {
+      expect(launchUserId(bad)).toBeNull();
+    }
   });
 });

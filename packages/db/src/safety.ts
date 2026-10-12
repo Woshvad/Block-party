@@ -332,6 +332,18 @@ export async function enqueueModeration(db: Db, item: { kind: string; ref: strin
   return row!;
 }
 
+// The same, under an id the caller derives from what it's queueing, so a
+// retry adds nothing (the rooms resend a batch whose answer they missed).
+// Returns the new item, or null if that id was already queued.
+export async function enqueueModerationOnce(db: Db, id: string, item: { kind: string; ref: string; authorId: string | null; text: string }) {
+  const [row] = await db
+    .insert(moderationItems)
+    .values({ ...item, id, text: item.text.slice(0, 4000) })
+    .onConflictDoNothing({ target: moderationItems.id })
+    .returning();
+  return row ?? null;
+}
+
 export const MAX_MODERATION_ATTEMPTS = 5;
 
 // Claims a batch with SKIP LOCKED (so parallel workers never check the same

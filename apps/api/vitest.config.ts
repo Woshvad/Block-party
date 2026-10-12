@@ -1,6 +1,8 @@
-import "dotenv/config";
+import { loadEnv } from "@bp/db/src/env";
 import { defineConfig } from "vitest/config";
 import { apiTestDatabaseUrl } from "./test/db-url";
+
+loadEnv();
 
 export default defineConfig({
   test: {

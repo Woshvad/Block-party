@@ -1,7 +1,13 @@
 // The API Worker. Deploy: pnpm --filter @bp/api build && wrangler deploy
-// Secrets (wrangler secret put ...): TELEGRAM_BOT_TOKEN, INTERNAL_SECRET (32+
-// chars, shared with the rooms Worker), TICKET_SECRET (shared with rooms), RECEIPT_SECRET,
-// OPENAI_API_KEY, PRIVY_APP_ID, PRIVY_VERIFICATION_KEY.
+// Secrets (wrangler secret put ...), each described in README "Deploying":
+//   required: TELEGRAM_BOT_TOKEN, INTERNAL_SECRET (32+ chars, shared with the
+//     rooms Worker); the API refuses to serve without them (see /health).
+//   when ready: TICKET_SECRET (shared with rooms), RECEIPT_SECRET, PON_PEPPER,
+//     OPENAI_API_KEY, PRIVY_APP_ID, PRIVY_VERIFICATION_KEY, BLOCKED_WORDS, CITY_URL.
+// OWNER ITEMS (placeholders, nothing here is real yet): the Cloudflare account
+// (wrangler login, or an account_id here), the Hyperdrive id below, and the
+// domains. ALLOWED_ORIGINS and ROOMS_URL assume blockparty.city, and the rooms
+// Worker's API_URL assumes https://api.blockparty.city.
 {
   "name": "block-party-api",
   "main": "dist/worker.js",
@@ -10,8 +16,10 @@
   "compatibility_date": "2026-07-01",
   "compatibility_flags": ["nodejs_compat"],
   // Postgres through Hyperdrive: create it with `wrangler hyperdrive create`
-  // and put its id here.
+  // and put its id here (OWNER ITEM).
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "REPLACE_WITH_HYPERDRIVE_ID" }],
+  // OWNER ITEM: the API's custom domain, once the domain is on the account,
+  // e.g. "routes": [{ "pattern": "<api domain>", "custom_domain": true }].
   // Every minute: the bell (each step runs once), finished long actions, due
   // pushes, and the AI moderation check once OPENAI_API_KEY is set.
   "triggers": { "crons": ["* * * * *"] },
@@ -21,7 +29,11 @@
   // the push opened (without it they are plain text).
   "vars": {
     "ALLOWED_ORIGINS": "https://blockparty.city,https://t.me",
-    "ROOMS_URL": "https://rooms.blockparty.city"
+    "ROOMS_URL": "https://rooms.blockparty.city",
+    // The live Polymarket feed (read-only). Unset means no markets and no
+    // Slate; "mock" is a sample feed for staging. Polymarket's written OK for
+    // free calls is an owner item before launch.
+    "ODDS_SOURCE": "polymarket"
   },
   "observability": { "enabled": true }
 }

@@ -41,7 +41,7 @@ export function makeApp(over: Partial<AppConfig> = {}) {
     allowedOrigins: [ORIGIN],
     clientIpHeader: "cf-connecting-ip",
     // Generous limits by default so flow tests don't trip them.
-    limits: { authPerIpPerMinute: 10_000, guestsPerIpPerHour: 10_000, writesPerUserPerMinute: 10_000, readsPerUserPerMinute: 10_000 },
+    limits: { authPerIpPerMinute: 10_000, telegramAuthPerUserPerMinute: 10_000, telegramAuthPerIpPerMinute: 10_000, guestsPerIpPerHour: 10_000, writesPerUserPerMinute: 10_000, readsPerUserPerMinute: 10_000 },
     log: (msg, extra) => logs.push({ msg, extra }),
     rooms: fakeRooms,
     phoneVerifier: { lineType: async (p: string) => (p.startsWith("+1555") ? "voip" : "mobile"), start: async () => ({ ref: "r" }), check: async (_r: string, _p: string, code: string) => code === "123456" },

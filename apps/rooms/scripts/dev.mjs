@@ -21,7 +21,7 @@ const mf = new Miniflare({
   scriptPath: fileURLToPath(new URL("../dist/worker.js", import.meta.url)),
   compatibilityDate: "2026-07-01",
   durableObjects: { ROOMS: "RoomDO", DIRECTORY: "DirectoryDO" },
-  bindings: { TICKET_SECRET: env.TICKET_SECRET, INTERNAL_SECRET: env.INTERNAL_SECRET, API_URL: env.API_URL ?? "http://localhost:8787" },
+  bindings: { TICKET_SECRET: env.TICKET_SECRET, INTERNAL_SECRET: env.INTERNAL_SECRET, API_URL: env.API_URL ?? "http://localhost:8787", ...(env.BLOCKED_WORDS ? { BLOCKED_WORDS: env.BLOCKED_WORDS } : {}) },
   host: "127.0.0.1",
   port,
 });
