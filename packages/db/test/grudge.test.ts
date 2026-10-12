@@ -167,6 +167,30 @@ describe("the Grudge Match", () => {
     expect([await bal(p1.newcomer), await bal(p1.inviter), await bal(p2.newcomer)]).toEqual([a0, b0, c0]);
   });
 
+  it("a card neither player called never holds the match, however long its result takes", async () => {
+    const d0 = freshDay();
+    const { inviter, newcomer } = await crewlessPair();
+    const g = await offerGrudge(db, newcomer, { now: new Date(d0 - 12 * H) });
+    await respondGrudge(db, inviter, g.id, true, { now: new Date(d0 - 11 * H) });
+    const s = await slateFor(d0);
+    const [card] = await client`SELECT question, price FROM markets WHERE id = ${s.ids[1]!}`;
+    const [stuck] = await client`SELECT question FROM markets WHERE id = ${s.ids[3]!}`;
+    const p = card!.price as number;
+    const at = new Date(d0 + 9 * H);
+    await makeCall(db, newcomer, { marketId: s.ids[1], side: "yes", chance: p + 10, seenPrice: p }, { now: at });
+    await makeCall(db, inviter, { marketId: s.ids[1], side: "no", chance: p - 10, seenPrice: p }, { now: at });
+    await pollOdds(db, s.provider, { now: new Date(at.getTime() + MIN) });
+    // Their card goes NO; another card, which neither called, never gets a result.
+    const never = s.ms.find((m) => m.question === stuck!.question)!;
+    for (const m of s.ms) m.resolved = m === never ? null : false;
+    await pollOdds(db, s.provider, { now: new Date(d0 + 21 * H) });
+    expect((await client`SELECT status FROM markets WHERE id = ${s.ids[3]!}`)[0]!.status).toBe("frozen");
+    const r = await runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower"] });
+    expect(r.ran.tower).toMatchObject({ grudgesWaiting: 0 });
+    expect((await client`SELECT status, winner_id FROM grudge_matches WHERE id = ${g.id}`)[0]).toEqual({ status: "settled", winner_id: inviter });
+    expect(await getBalance(db, grudgeAccountId(g.id))).toBe(0);
+  });
+
   it("waits for the whole Slate: a card still without a result holds the match to a later bell", async () => {
     const d0 = freshDay();
     const { inviter, newcomer } = await crewlessPair();
