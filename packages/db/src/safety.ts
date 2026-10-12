@@ -350,7 +350,10 @@ export const MAX_MODERATION_ATTEMPTS = 5;
 // Claims a batch with SKIP LOCKED (so parallel workers never check the same
 // item), asks the provider, and records the answer. If the provider fails,
 // nothing is marked clean: the items stay pending, and after 5 failed
-// attempts they go to staff as "error".
+// attempts they go to staff as "error". Flagged text the database holds
+// comes down in the same transaction as the verdict, so a verdict can never
+// commit without its takedown, and staff reviewing the item wait for both.
+// onFlagged runs after commit, for text that lives elsewhere (room lines).
 export async function runModerationBatch(
   db: Db,
   provider: ModerationProvider,
@@ -390,14 +393,25 @@ export async function runModerationBatch(
         .where(eq(moderationItems.id, b.id));
       if (r.flagged) {
         flagged++;
-        flaggedItems.push({ id: b.id, kind: b.kind, ref: b.ref, authorId: b.authorId, text: b.text, categories: r.categories });
+        const f = { id: b.id, kind: b.kind, ref: b.ref, authorId: b.authorId, text: b.text, categories: r.categories };
+        await takeDownFlagged(tx, f);
+        flaggedItems.push(f);
       }
     }
     return { checked: batch.length, flagged, failed: 0 };
   });
-  // Hooks run after commit (take the text down where it lives). Staff see
-  // every flagged and failed item in moderationQueue.
-  for (const f of flaggedItems) await opts.onFlagged?.(f);
+  // Every hook gets its turn, even if one fails; the first failure is thrown
+  // afterwards so the caller logs it. Staff see every flagged and failed
+  // item in moderationQueue.
+  let failure: unknown = null;
+  for (const f of flaggedItems) {
+    try {
+      await opts.onFlagged?.(f);
+    } catch (e) {
+      failure ??= e;
+    }
+  }
+  if (failure) throw failure;
   return outcome;
 }
 

@@ -11,7 +11,6 @@ import {
   moderationQueue,
   postToBoard,
   reviewModerationItem,
-  takeDownFlagged,
   allowNewDmThread,
   appealRestriction,
   blockUser,
@@ -290,10 +289,11 @@ describe("flagged text stays down until staff review it", () => {
   const flagAll = (words: string[]): ModerationProvider => ({
     classify: async (ts) => ts.map((t) => ({ flagged: words.some((w) => t.includes(w)), categories: ["harassment"] })),
   });
-  // Runs the AI check over this test's items only, with the takedown hook the API uses.
-  async function check(words: string[]) {
+  // Runs the AI check over this test's items only. The batch itself takes
+  // the database's text down; no hook needed.
+  async function check(words: string[], onFlagged?: (f: { ref: string }) => Promise<void>) {
     await client`UPDATE moderation_items SET status = 'clean' WHERE status = 'pending' AND NOT (text LIKE ANY (${words.map((w) => `%${w}%`)}))`;
-    await runModerationBatch(db, flagAll(words), { onFlagged: (f) => takeDownFlagged(db, f) });
+    await runModerationBatch(db, flagAll(words), onFlagged ? { onFlagged } : {});
   }
   let weekN = 0;
   // A candidacy written straight in, in a week of its own long ago.
@@ -406,6 +406,23 @@ describe("flagged text stays down until staff review it", () => {
     await updateName(db, renamer, (await residentRow(renamer)).handle);
     await reviewModerationItem(db, mod, old.id, "restore");
     expect((await residentRow(renamer)).name).toBe((await residentRow(renamer)).handle);
+  });
+
+  it("text comes down with the verdict, and a failing after-commit hook never leaves the rest up", async () => {
+    const poster = await makeResident(db);
+    const tag = randomUUID().slice(0, 6);
+    const posts = [];
+    for (let i = 0; i < 3; i++) posts.push(await postToBoard(db, poster, "city_hall", `hookpost${i} ${tag}`, { now: new Date(Date.UTC(2031, 6, 1, 0, i)) }));
+    const hooked: string[] = [];
+    const run = check([`hookpost0 ${tag}`, `hookpost1 ${tag}`, `hookpost2 ${tag}`], async (f) => {
+      hooked.push(f.ref);
+      if (hooked.length === 1) throw new Error("rooms down");
+    });
+    await expect(run).rejects.toThrow("rooms down"); // the failure still reaches the caller's log
+    expect(hooked).toHaveLength(3); // every hook ran
+    const hidden = await client`SELECT hidden FROM messages WHERE id IN ${client(posts.map((p) => p.id))}`;
+    expect(hidden.map((r) => r.hidden)).toEqual([true, true, true]);
+    expect(await client`SELECT status FROM moderation_items WHERE ref IN ${client(posts.map((p) => p.id))} AND status <> 'flagged'`).toHaveLength(0);
   });
 
   it("staff never review their own flagged text: it goes to someone else", async () => {

@@ -815,7 +815,7 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/staff/moderation/:id/review", auth, async (c) => {
     const item = await reviewModerationItem(db, c.get("userId"), uuid(c, "id"), (await body(c)).verdict, opts());
     // A removed room line comes down in the room as well.
-    if (item.review === "removed" && item.kind === "room") await takeDown(db, cfg.rooms)(item);
+    if (item.review === "removed" && item.kind === "room") await takeDown(cfg.rooms)(item);
     return c.json(item);
   });
 
@@ -1186,7 +1186,7 @@ export function createApp(cfg: AppConfig) {
     if (!cfg.moderation) throw new ApiError(503, "MODERATION_DISABLED", "no moderation provider configured");
     // One batch, by hand; the minute cron runs the queue on its own. Flagged
     // content comes down where it lives, the same way in both.
-    return c.json(await runModerationBatch(db, cfg.moderation, { ...opts(), onFlagged: takeDown(db, cfg.rooms) }));
+    return c.json(await runModerationBatch(db, cfg.moderation, { ...opts(), onFlagged: takeDown(cfg.rooms) }));
   });
 
   // Who's wandering a place in their away life, for the rooms to draw dimmed.

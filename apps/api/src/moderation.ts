@@ -1,14 +1,14 @@
 import { type ModerationProvider, OPENAI_MODERATION_BATCH } from "@bp/core";
-import { type Db, type FlaggedItem, runModerationBatch, takeDownFlagged } from "@bp/db";
+import { type Db, type FlaggedItem, runModerationBatch } from "@bp/db";
 import type { RoomsClient } from "./rooms-client";
 
-// What the AI check's verdict does, shared by the minute cron and
-// POST /internal/moderation/run so the two can't drift apart: flagged text
-// comes down where it lives. The database holds board, crew and DM posts,
-// Ratio headlines, pitches and crew names; room lines live in the rooms Worker.
-export function takeDown(db: Db, rooms?: RoomsClient) {
+// What the AI check's verdict does outside the database, shared by the
+// minute cron, POST /internal/moderation/run and staff's review so they
+// can't drift apart. The database's own text (board, crew and DM posts,
+// Ratio headlines, pitches, crew and resident names) comes down with the
+// verdict, in runModerationBatch; room lines live in the rooms Worker.
+export function takeDown(rooms?: RoomsClient) {
   return async (f: Pick<FlaggedItem, "kind" | "ref" | "text">) => {
-    await takeDownFlagged(db, f);
     if (f.kind === "room" && rooms) {
       const [place, copy, lineId] = f.ref.split("#");
       // A room copy that has since emptied has no line left to take down.
@@ -31,7 +31,7 @@ export async function runModerationJob(
   const clock = opts.clock ?? Date.now;
   const budgetMs = opts.budgetMs ?? MODERATION_JOB.budgetMs;
   const maxBatches = opts.maxBatches ?? MODERATION_JOB.maxBatches;
-  const onFlagged = takeDown(db, opts.rooms);
+  const onFlagged = takeDown(opts.rooms);
   const started = clock();
   const total = { batches: 0, checked: 0, flagged: 0, failed: 0 };
   // loop-bound: at most maxBatches batches, and none starts once the budget is spent.
