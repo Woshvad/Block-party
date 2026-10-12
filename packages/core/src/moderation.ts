@@ -325,40 +325,55 @@ export function parseBlockedWords(raw?: string): string[] {
 // Latin letters, digits and the leetspeak stand-ins squash() reads.
 const LATIN_ENTRY = /^[a-z0-9@$\s'.-]+$/;
 
+const HAS_LETTER = /\p{L}/u;
+// A letter from some other script than Latin.
+const NON_LATIN_LETTER = /(?!\p{Script=Latin})\p{L}/u;
+
 // A blocked word counts as a whole word, read the way scam phrases are:
 // through leetspeak, lookalike letters and punctuation, so "b4dw0rd",
 // "bаdword" (Cyrillic а), "b.a.d.w.o.r.d" and "b a d w o r d" all match
-// "badword", while "notbadwordish" doesn't. An entry written in another
-// script is matched word for word as written.
+// "badword", while "notbadwordish" doesn't. Leetspeak only reads digits as
+// letters beside letters: "455", "45.5%" or "4 5 5" is a number, never "ass".
+// An entry with no letters ("1488") is matched as written. So is an entry
+// written in another script, except that a word mixing in lookalike letters
+// reads through them: "cукa" (Latin c and a) is "сука" dressed up, while
+// "cyka", all Latin, is another word.
 function hasBlockedWord(input: string, blocked: readonly string[]): boolean {
-  const tokens = cleanText(input).split(/\s+/).map(squash).filter(Boolean);
-  // Letters spaced out one at a time read as one word.
+  const pieces = cleanText(input)
+    .split(/\s+/)
+    .map((t) => ({ s: squash(t), letters: HAS_LETTER.test(t) }))
+    .filter((p) => p.s);
+  const tokens = pieces.filter((p) => p.letters).map((p) => p.s);
+  // Letters spaced out one at a time read as one word, if there's a letter among them.
   const spelled: string[] = [];
   let run = "";
-  for (const t of [...tokens, ""]) {
-    if (t.length === 1) run += t;
-    else {
-      if (run.length > 1) spelled.push(run);
+  let runHasLetter = false;
+  for (const p of [...pieces, { s: "", letters: false }]) {
+    if (p.s.length === 1) {
+      run += p.s;
+      runHasLetter ||= p.letters;
+    } else {
+      if (run.length > 1 && runHasLetter) spelled.push(run);
       run = "";
+      runHasLetter = false;
     }
   }
   const words: string[] = cleanText(input).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   const tokenSet = new Set([...tokens, ...spelled]);
-  const wordSet = new Set(words);
   // A multi-word entry matches the same words in a row.
-  const inARow = (list: string[], parts: string[], join: string) => {
-    const want = parts.join(join);
-    for (let i = 0; i + parts.length <= list.length; i++) if (list.slice(i, i + parts.length).join(join) === want) return true;
+  const inARow = <T>(list: T[], parts: string[], same: (item: T, part: string) => boolean) => {
+    for (let i = 0; i + parts.length <= list.length; i++) if (parts.every((p, j) => same(list[i + j]!, p))) return true;
     return false;
   };
+  const sameWord = (word: string, part: string) => word === part || (NON_LATIN_LETTER.test(word) && foldLookalikes(word) === foldLookalikes(part));
   return blocked.some((entry) => {
     const plain = entry.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-    if (LATIN_ENTRY.test(plain) && squash(plain)) {
+    if (LATIN_ENTRY.test(plain) && HAS_LETTER.test(plain) && squash(plain)) {
       const parts = plain.split(/\s+/).map(squash).filter(Boolean);
-      return parts.length === 1 ? tokenSet.has(parts[0]!) : inARow(tokens, parts, "") || tokenSet.has(parts.join(""));
+      return parts.length === 1 ? tokenSet.has(parts[0]!) : inARow(tokens, parts, (t, p) => t === p) || tokenSet.has(parts.join(""));
     }
     const parts = entry.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-    return parts.length === 1 ? wordSet.has(parts[0]!) : parts.length > 1 && inARow(words, parts, " ");
+    return parts.length > 0 && inARow(words, parts, sameWord);
   });
 }
 

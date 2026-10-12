@@ -380,4 +380,27 @@ describe("staff's blocked words", () => {
     expect(reason("ты сука", ctx)).toBe("BLOCKED_WORD");
     expect(reason("cyka blyat is a meme", ctx)).toBe("OK");
   });
+
+  it("an entry in another script reads through Latin lookalikes mixed into a word", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("сука, сука блять") };
+    // Latin c and a among the Cyrillic letters: the same word to the eye.
+    expect(reason("ты cукa", ctx)).toBe("BLOCKED_WORD");
+    expect(reason("сукa блять", { ...OLD, blockedWords: parseBlockedWords("сука блять") })).toBe("BLOCKED_WORD");
+    expect(reason("cyka blyat is a meme", ctx)).toBe("OK"); // all Latin: another word
+  });
+
+  it("numbers are never read as words", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("ass, tits, badword") };
+    for (const msg of ["I'm up 455 GM today", "Trump at 45.5% now", "price 4,55 €", "odds 71.75", "4 5 5", "won 1,455 GM at 7:15"]) {
+      expect(reason(msg, ctx), msg).toBe("OK");
+    }
+    // Digits beside letters are still leetspeak.
+    for (const msg of ["what a 4ss", "t1ts", "b 4 d w 0 r d", "a s s"]) expect(reason(msg, ctx), msg).toBe("BLOCKED_WORD");
+  });
+
+  it("an entry with no letters matches only as written", () => {
+    const ctx = { ...OLD, blockedWords: parseBlockedWords("1488") };
+    expect(reason("1488", ctx)).toBe("BLOCKED_WORD");
+    expect(reason("i a", ctx)).toBe("OK"); // what "1488" would squash to
+  });
 });
