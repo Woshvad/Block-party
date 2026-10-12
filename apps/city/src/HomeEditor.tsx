@@ -2,7 +2,7 @@
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import { useRef, useState } from "react";
-import { ActionKeys } from "./actionKeys";
+import { actionKeysFor } from "./actionKeys";
 import { ApiError, type Api, type Home, type Placement } from "./api";
 import { useBackLayer } from "./back";
 import { countdown, useNow } from "./clock";
@@ -32,7 +32,7 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   const [sheet, setSheet] = useState<Sheet>(null);
   const [msg, setMsg] = useToast<{ text: string; bad: boolean }>();
   const busy = useRef(false);
-  const [buyKeys] = useState(() => new ActionKeys());
+  const buyKeys = actionKeysFor("home-shop");
   const catalogue = useLoad(() => (sheet === "shop" ? api.catalogue() : Promise.resolve(null)), [api, sheet]);
   const now = useNow(1000);
 

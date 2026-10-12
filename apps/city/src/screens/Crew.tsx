@@ -2,7 +2,7 @@
 import { BUYABLE_IDS, CREW, CREW_POST_KINDS, DEFAULT_BANNER } from "@bp/core";
 import dynamic from "next/dynamic";
 import { useState } from "react";
-import { ActionKeys } from "../actionKeys";
+import { actionKeysFor } from "../actionKeys";
 import { ApiError, type Api, type Me, type MyCrew } from "../api";
 import { paintAt } from "../banner";
 import { inviteLink } from "../launch";
@@ -109,7 +109,7 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
   const league = useLoad(() => api.league().catch(() => null), [api]);
   const [invite, setInvite] = useState<{ code: string; expiresAt: string } | null>(null);
   const [amount, setAmount] = useState("50");
-  const [potKeys] = useState(() => new ActionKeys());
+  const potKeys = actionKeysFor("crew-pot");
   const [banner, setBanner] = useState<string[] | null>(null);
   const [paint, setPaint] = useState(1);
   const [botMuted, setBotMuted] = useState<string[]>([]);

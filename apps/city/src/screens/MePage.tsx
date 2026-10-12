@@ -1,7 +1,7 @@
 "use client";
 import { ALERT_KINDS, GM, GOALS, RENT, TRAITS } from "@bp/core";
 import { useEffect, useState } from "react";
-import { ActionKeys } from "../actionKeys";
+import { actionKeysFor } from "../actionKeys";
 import { type Api, type Me } from "../api";
 import { toggleTrait } from "../draft";
 import { label, plural } from "../palette";
@@ -34,7 +34,7 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
   const [name, setName] = useState(r.name);
   const [traits, setTraits] = useState<string[]>(r.traits);
   const [appeal, setAppeal] = useState<Record<string, string>>({});
-  const [keys] = useState(() => new ActionKeys());
+  const keys = actionKeysFor("me");
   const [graphics, setGraphics] = useState<Quality | null>(() => savedQuality());
   useEffect(() => {
     setTraits(r.traits);
