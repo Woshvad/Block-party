@@ -192,7 +192,9 @@ function unDisguise(text: string): string {
     .replace(/\s*[[(]\s*(?:\.|dot)\s*[\])]\s*/gi, ".")
     // "evil dot com" is a disguised link; "the dot com bubble" is history.
     .replace(/(\S+)\s+dot\s+(?=[a-z]{2,}\b)/gi, (m, word: string) => (FILLER.has(word.toLowerCase()) ? m : `${word}.`))
-    .replace(/[。．｡]/g, ".");
+    // "gm-drop。xyz" is a disguised dot. After Chinese or Japanese, 。 is just
+    // the full stop, and no space follows it: "了解。So we wait".
+    .replace(/(?<![\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])[。．｡]/gu, ".");
 }
 
 // Anything with a scheme or www. is a link. So is a bare name like
@@ -201,9 +203,11 @@ function unDisguise(text: string): string {
 // is a real, registrable name). At most 10 labels before the ending: real
 // names never need more, and an unbounded run lets a message of one-letter
 // labels ("ж.ж.ж...") make the match backtrack for a quarter of a second.
+// A name can't start or end with - or _, so those bound it like spaces do:
+// "__t.me/x__", "-gm-drop.xyz" and "x_gm-drop.com" all hold a link.
 const LABEL = "[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?";
 const LINK = new RegExp(
-  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|(?<![\\p{L}\\p{N}_-])(?:${LABEL}\\.){1,10}(?:\\p{L}{2,24}|xn--[a-z0-9-]{1,59})(?![\\p{L}\\p{N}_-])(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
+  `\\b(?:(?:https?|ftp):\\/\\/|www\\.)[^\\s<>"']+|(?<![\\p{L}\\p{N}])(?:${LABEL}\\.){1,10}(?:\\p{L}{2,24}|xn--[a-z0-9-]{1,59})(?![\\p{L}\\p{N}])(?::\\d{2,5})?(?:\\/[^\\s<>"']*)?`,
   "giu",
 );
 
@@ -231,15 +235,26 @@ const CHAT_WORDS = new Set(
   ),
 );
 
+// Endings that are also little English words: straight after a common word,
+// with no space, they carry on the sentence ("that.is wild", "ok.so").
+const WORD_ENDINGS = new Set("am as at be by do in is it me my no so to us".split(" "));
+// Common words a sentence breaks after ("nice call.Bet again").
+const COMMON_WORDS = new Set([...EVERYDAY, ...CHAT_WORDS, ...FILLER, ..."i it is was are be been he she we they them him us me not too here how why who".split(" ")]);
+
 // .eth and .sol names are handles, not links.
 const NOT_A_LINK = /^[a-z0-9-]+\.(?:eth|sol)$/i;
 
 // Whether a LINK match is really an address. A known ending makes it one
 // ("telegra.ph", "gm-drop.sbs"). So does an unknown ending when the rest
-// looks like an address: a path or port, a subdomain, or a digit or hyphen in
-// a name ("gm-drop.whatever", "claim.gm.whatever"). Plain "word.word" with an
-// unknown ending is a sentence that lost its space: "e.g.", "lol.ok",
-// "end.Next", "done.thanks".
+// looks like an address: a path or port, a subdomain, or a hyphen in a name
+// ("gm-drop.whatever", "claim.gm.whatever"). What reads as a sentence that
+// lost its space is not one:
+//  - plain "word.word" with an unknown ending: "lol.ok", "end.Next",
+//    "done.thanks", "web3.js";
+//  - letters with dots, one at a time: "e.g.Polymarket", "the U.S.Election",
+//    "a.k.a.Steve";
+//  - a chat word before any ending ("lol.no"), or a common word before a
+//    little word ("that.is") or before a capitalised one ("call.Bet").
 function countsAsLink(m: string): boolean {
   if (/^(?:(?:https?|ftp):\/\/|www\.)/i.test(m)) return true;
   const host = m.replace(/[:/].*$/s, "");
@@ -247,9 +262,16 @@ function countsAsLink(m: string): boolean {
   if (NOT_A_LINK.test(host)) return false;
   const labels = host.toLowerCase().split(".");
   const tld = labels.pop()!;
-  if (KNOWN_TLDS.has(tld) || tld.startsWith("xn--")) return !(labels.length === 1 && rest === "" && CHAT_WORDS.has(labels[0]!));
+  const known = KNOWN_TLDS.has(tld) || tld.startsWith("xn--");
+  if (rest === "" && labels.length === 1) {
+    const word = labels[0]!;
+    const capitalised = /^[A-Z][a-z]+$/.test(host.slice(host.lastIndexOf(".") + 1));
+    if (CHAT_WORDS.has(word) || (COMMON_WORDS.has(word) && (WORD_ENDINGS.has(tld) || capitalised))) return false;
+  }
+  if (known) return true;
   if (!/^[a-z]+$/.test(tld)) return false;
-  return rest !== "" || labels.length > 1 || labels.some((l) => /[\d-]/.test(l));
+  if (rest === "" && labels.every((l) => l.length === 1)) return false;
+  return rest !== "" || labels.length > 1 || labels.some((l) => l.includes("-"));
 }
 
 export function hostOf(link: string): string | null {

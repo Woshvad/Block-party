@@ -3,7 +3,7 @@ import { entropyToMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { checkMessage, containsWalletAddress, findLinks, looksLikePrivateKey, looksLikeSeedPhrase, parseBlockedWords } from "../src";
+import { checkMessage, containsWalletAddress, findLinks, hostOf, looksLikePrivateKey, looksLikeSeedPhrase, parseBlockedWords } from "../src";
 
 // Seeded phrases, so these tests can never flake on a rare unlucky draw.
 function phrases(n: number, seed: number) {
@@ -289,12 +289,55 @@ describe("bare names: any real ending, or anything shaped like an address, is a 
     expect(v.ok && v.text, link).toBe("go to [link removed] now");
   });
 
+  it.each([
+    ["go __t.me/scam__ now", "t.me/scam"],
+    ["go _telegra.ph now", "telegra.ph"],
+    ["claim at -gm-drop.xyz now", "gm-drop.xyz"],
+    ["go gm-drop.com_ now", "gm-drop.com"],
+    ["claim at x_gm-drop.com", "gm-drop.com"],
+    ["go gm-drop。xyz", "gm-drop.xyz"],
+  ])("- and _ around a name don't hide it: %s", (msg, host) => {
+    expect(findLinks(msg).map(hostOf), msg).toEqual([host.split("/")[0]]);
+    const v = checkMessage(msg, NEW);
+    expect(v.ok && v.strippedLinks, msg).toBe(1);
+    expect(v.ok && v.text, msg).not.toContain(host);
+    expect(reason(msg, FIRST_DM), msg).toBe("FIRST_DM_LINK");
+  });
+
+  it("a common word before a real ending is still a link when written as one", () => {
+    for (const link of ["claim.money", "x.com", "t.me", "free.bet/claim"]) expect(findLinks(`go ${link}`), link).toHaveLength(1);
+  });
+
   it("a long chain of subdomains is still caught", () => {
     const v = checkMessage("go to a.b.c.d.e.f.g.h.i.j.k.l.gm-drop.xyz now", NEW);
     expect(v.ok && v.text).not.toContain("gm-drop");
   });
 
-  it.each(["e.g. the roof", "i.e. tonight", "lol.ok see you", "lol.no way", "ok.so who's in", "end.Next time", "done.thanks ser", "Mr.Smith says gm", "v1.2.3 is out", "pi is 3.14", "U.S.A"])(
+  it.each([
+    "e.g. the roof",
+    "i.e. tonight",
+    "lol.ok see you",
+    "lol.no way",
+    "ok.so who's in",
+    "end.Next time",
+    "done.thanks ser",
+    "Mr.Smith says gm",
+    "v1.2.3 is out",
+    "pi is 3.14",
+    "U.S.A",
+    // Chinese and Japanese end a sentence with 。 and no space.
+    "了解。So we wait",
+    "すごい。Me too",
+    "好的。Bet on it",
+    // Abbreviations, and common words run together.
+    "the U.S.Election odds",
+    "e.g.Polymarket",
+    "i.e.the bell",
+    "a.k.a.Steve",
+    "that.is wild",
+    "nice call.Bet again",
+    "web3.js rocks",
+  ])(
     "a sentence that lost a space is not one: %s",
     (msg) => {
       expect(findLinks(msg), msg).toEqual([]);
