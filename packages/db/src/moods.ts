@@ -86,13 +86,14 @@ async function closeExpired(tx: Db, userId: string, now: Date) {
 // second grant with the same key does nothing, so a bell step that runs again
 // after a crash never hands out a second free Copium, and never re-tilts
 // someone who has since cleared it.
-export async function grantMood(db: Db, userId: string, mood: Mood, opts: { now?: Date; source?: Record<string, unknown>; once?: string } = {}) {
+// Resolves to false when `once` was already used (nothing granted).
+export async function grantMood(db: Db, userId: string, mood: Mood, opts: { now?: Date; source?: Record<string, unknown>; once?: string } = {}): Promise<boolean> {
   const now = opts.now ?? new Date();
   return db.transaction(async (tx) => {
     await lockResident(tx, userId);
     if (opts.once !== undefined) {
       const first = await tx.insert(moodGrants).values({ userId, key: opts.once, grantedAt: now }).onConflictDoNothing().returning({ key: moodGrants.key });
-      if (first.length === 0) return;
+      if (first.length === 0) return false;
     }
     await closeExpired(tx, userId, now);
     const endsAt = defaultEnd(mood, now);
@@ -111,14 +112,15 @@ export async function grantMood(db: Db, userId: string, mood: Mood, opts: { now?
         .values({ userId, free: 1 })
         .onConflictDoUpdate({ target: copiumCredits.userId, set: { free: sql`${copiumCredits.free} + 1` } });
     }
+    return true;
   });
 }
 
-// The tilt triggers from calls and duels land here.
+// The tilt triggers from calls and duels land here. True only when this
+// call tilted them: a `once` key already used (a re-run bell) is false.
 export async function maybeTilt(db: Db, userId: string, signals: TiltSignals, opts: { now?: Date; once?: string } = {}) {
   if (!tiltTriggered(signals)) return false;
-  await grantMood(db, userId, "tilted", { ...opts, source: { ...signals } });
-  return true;
+  return grantMood(db, userId, "tilted", { ...opts, source: { ...signals } });
 }
 
 // The crew split up: Cozy lasts one more hour.

@@ -229,6 +229,9 @@ describe("Tilted", () => {
     const u = await makeResident(db);
     expect(await maybeTilt(db, u, { rektSquares: 3 }, { now: at(0) })).toBe(false);
     expect(await maybeTilt(db, u, { gmLostToday: 300, gmAtStartOfDay: 1000 }, { now: at(0) })).toBe(true);
+    // Keyed once (as the bell's grid tilt is): a re-run tilts nobody new, and says so.
+    expect(await maybeTilt(db, u, { rektSquares: 4 }, { now: at(0), once: `test:${u}` })).toBe(true);
+    expect(await maybeTilt(db, u, { rektSquares: 4 }, { now: at(0), once: `test:${u}` })).toBe(false);
     const s = await state(u, 1);
     expect(s.tilt).toEqual({
       tilted: true,
