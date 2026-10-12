@@ -23,6 +23,12 @@ export function clampChance(side: Side, world: number, chance: number): number |
 
 export const validCall = (side: Side, world: number, chance: number) => chanceOnSide(side, world, chance);
 
+// Whether the market takes calls: open, not frozen yet, and carried by the
+// latest poll (a market the feed dropped has a stale price; the API refuses it).
+export function callsOpen(m: { status: string; inFeed?: boolean; freezesAt: string }, now: number): boolean {
+  return m.status === "open" && m.inFeed !== false && Date.parse(m.freezesAt) > now;
+}
+
 // What this call would score either way, in whole Aura (the API keeps hundredths).
 export function auraIf(world: number, chance: number): { yes: number; no: number } {
   return { yes: auraCenti(true, world, chance) / 100, no: auraCenti(false, world, chance) / 100 };

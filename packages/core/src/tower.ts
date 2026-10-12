@@ -85,7 +85,14 @@ export type FeedMarket = {
 };
 
 // A market the database holds that isn't final yet, as we last stored it.
-export type KnownMarket = Omit<FeedMarket, "resolved" | "voided" | "closed">;
+export type KnownMarket = Omit<FeedMarket, "resolved" | "voided" | "closed"> & {
+  // Something rides on it (a call, a duel, a Slate card): its result is
+  // looked up before any other market's.
+  held?: boolean;
+  // It must stay callable while it trades, listed or not: a card on today's
+  // Slate, or a call waiting to lock.
+  live?: boolean;
+};
 
 export interface OddsProvider {
   readonly source: string;

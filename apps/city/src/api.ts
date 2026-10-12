@@ -358,6 +358,7 @@ export type MarketView = {
   question: string;
   category: string;
   status: string;
+  inFeed: boolean;
   infoOnly: boolean;
   freezesAt: string;
   world: number;

@@ -51,7 +51,7 @@ export async function todaySlate(db: Db, userId: string, opts: { now?: Date; day
   const [s] = await db.select().from(slates).where(eq(slates.cityDay, day));
   if (!s) return null;
   const cards = await db
-    .select({ slot: slateCards.slot, tier: slateCards.tier, marketId: markets.id, question: markets.question, category: markets.category, price: markets.price, freezesAt: markets.freezesAt, status: markets.status, outcome: markets.outcome })
+    .select({ slot: slateCards.slot, tier: slateCards.tier, marketId: markets.id, question: markets.question, category: markets.category, price: markets.price, freezesAt: markets.freezesAt, status: markets.status, inFeed: markets.inFeed, outcome: markets.outcome })
     .from(slateCards)
     .innerJoin(markets, eq(markets.id, slateCards.marketId))
     .where(eq(slateCards.cityDay, day))
@@ -80,7 +80,8 @@ export async function todaySlate(db: Db, userId: string, opts: { now?: Date; day
         // The world's price is public; whether it settled waits for the bell.
         world: c.price,
         freezesAt: c.freezesAt,
-        open: c.status === "open" && now < c.freezesAt,
+        // Callable: open, not frozen yet, and carried by the latest poll.
+        open: c.status === "open" && c.inFeed && now < c.freezesAt,
         mine: m ? { side: m.side, chance: m.chance, status: m.status } : null,
       };
     }),

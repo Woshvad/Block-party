@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { type GammaEvent, type GammaMarket, closedOutcome, noSkips, polymarketProvider, toFeedMarkets } from "../src/polymarket";
+import { type GammaEvent, type GammaMarket, closedOutcome, knownToLookUp, noSkips, polymarketProvider, toFeedMarkets } from "../src/polymarket";
 import type { KnownMarket } from "../src/tower";
 
 const now = new Date("2026-10-10T12:00:00Z");
@@ -197,7 +197,7 @@ describe("Polymarket provider on recorded payloads", () => {
     expect(urls.every((u) => new URL(u).pathname === "/events")).toBe(true);
   });
 
-  it("looks up 100 ids a request, at most 500 a poll (the first ones given), and says when it stops short", async () => {
+  it("looks up 100 ids a request, at most 500 a poll, and says when it stops short", async () => {
     const urls: string[] = [];
     const lines: string[] = [];
     const p = polymarketProvider({ fetch: gamma({ urls }), log: (l) => lines.push(l) });
@@ -208,8 +208,54 @@ describe("Polymarket provider on recorded payloads", () => {
     urls.length = 0;
     await p.fetch(recordedAt, Array.from({ length: 640 }, (_, i) => known(String(i + 1))));
     expect(sizes()).toEqual([100, 100, 100, 100, 100]);
-    expect(urls.some((u) => new URL(u).searchParams.getAll("id").includes("501"))).toBe(false);
-    expect(lines).toEqual(["polymarket: 640 known markets, looking up the first 500 this poll"]);
+    expect(lines).toEqual(["polymarket: 640 known markets, looking up 500 this poll"]);
+  });
+
+  it("past 500, what something rides on is always looked up, and the rest take turns", () => {
+    // 600 markets that never resolve, frozen first, then 100 newer ones
+    // nobody called and 5 with calls on them, all freezing later.
+    const stuck = Array.from({ length: 600 }, (_, i) => known(`s${i}`));
+    const fresh = Array.from({ length: 100 }, (_, i) => known(`f${i}`));
+    const called = Array.from({ length: 5 }, (_, i) => known(`c${i}`, { held: true }));
+    const all = [...stuck, ...fresh, ...called];
+    const asked = new Set<string>();
+    for (let minute = 0; minute < 3; minute++) {
+      const poll = knownToLookUp(all, new Date(recordedAt.getTime() + minute * 60_000));
+      expect(poll).toHaveLength(500);
+      expect(poll.slice(0, 5).map((k) => k.externalId)).toEqual(called.map((k) => k.externalId)); // every poll, first
+      for (const k of poll) asked.add(k.externalId);
+    }
+    // Within a few minutes every market has had its turn: the newer ones aren't starved.
+    expect(asked.size).toBe(all.length);
+    expect(knownToLookUp(all.slice(0, 300), recordedAt)).toHaveLength(300); // under the cap: everyone, every poll
+  });
+
+  it("keeps a market that must stay callable live after the listing drops it, at its trading price", async () => {
+    const urls: string[] = [];
+    // A Slate card's rung, no longer among the ladder's 3 nearest 50/50 in the listing.
+    const offList = { id: "777001", question: "Bitcoin above 115k on October 12?", outcomes: '["Yes", "No"]', outcomePrices: '["0.31", "0.69"]', endDate: "2026-10-12T16:00:00Z", closed: false, acceptingOrders: true };
+    const trading = new Map([["777001", offList], ["5330080", { ...offList, id: "5330080", outcomePrices: '["0.50", "0.50"]' }]]);
+    const fetch = (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/markets" && u.searchParams.get("closed") === "false") return ok(u.searchParams.getAll("id").flatMap((id) => (trading.has(id) ? [trading.get(id)!] : [])));
+      return gamma({ urls })(url);
+    };
+    const p = polymarketProvider({ fetch: (u) => (urls.push(u), fetch(u)), log: () => {} });
+    const card = known("777001", { category: "crypto", ladder: "bitcoin-above-on-october-12-2026", held: true, live: true });
+    const fs = await p.fetch(recordedAt, [card, known("5330080", { live: true }), known("5046295")]);
+    const byId = new Map(fs.map((f) => [f.externalId, f]));
+    // Carried, open, at its live price, and freezing an hour before it settles like any rung.
+    expect(byId.get("pm:777001")).toMatchObject({ price: 31, category: "crypto", ladder: "bitcoin-above-on-october-12-2026", resolved: null, voided: false });
+    expect(byId.get("pm:777001")!.closed).toBeUndefined();
+    expect(byId.get("pm:777001")!.freezesAt.toISOString()).toBe("2026-10-12T15:00:00.000Z");
+    // The listing's own copy wins over the lookup (same market, listed price).
+    expect(fs.filter((f) => f.externalId === "pm:5330080")).toEqual([expect.objectContaining({ price: 46 })]);
+    const liveLookups = urls.map((u) => new URL(u)).filter((u) => u.pathname === "/markets" && u.searchParams.get("closed") === "false");
+    expect(liveLookups.map((u) => u.searchParams.getAll("id"))).toEqual([["777001", "5330080"]]); // only what must stay live
+    // Nothing live: no trading lookup at all.
+    urls.length = 0;
+    await p.fetch(recordedAt, [known("5046295")]);
+    expect(urls.some((u) => new URL(u).pathname === "/markets" && new URL(u).searchParams.get("closed") === "false")).toBe(false);
   });
 
   it("a failed lookup doesn't fail the poll: the listing still counts, and it's logged", async () => {

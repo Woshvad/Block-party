@@ -121,9 +121,27 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
   if (typeof provider?.source !== "string") throw new TypeError("pollOdds needs an odds provider");
   // Our markets from this feed that aren't final yet, soonest to freeze
   // first: a feed that only lists what's trading looks these up to say what
-  // became of the ones it no longer lists.
+  // became of the ones it no longer lists. `held`: a call (and so any duel)
+  // or a Slate card rides on it, so its result comes first. `live`: it must
+  // keep its price while it trades, listed or not (a card on today's Slate,
+  // a call waiting to lock).
+  // (Spelled out: in a one-table select drizzle writes columns unqualified,
+  // and inside these subqueries "id" would then mean calls.id.)
+  const today = cityDay(now);
   const known = await db
-    .select({ externalId: markets.externalId, question: markets.question, category: markets.category, ladder: markets.ladder, freezesAt: markets.freezesAt, settlesBy: markets.settlesBy, price: markets.price })
+    .select({
+      externalId: markets.externalId,
+      question: markets.question,
+      category: markets.category,
+      ladder: markets.ladder,
+      freezesAt: markets.freezesAt,
+      settlesBy: markets.settlesBy,
+      price: markets.price,
+      held: sql<boolean>`(EXISTS (SELECT 1 FROM calls c WHERE c.market_id = markets.id AND c.status IN ('pending', 'locked'))
+        OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id))`,
+      live: sql<boolean>`(markets.status = 'open' AND (EXISTS (SELECT 1 FROM calls c WHERE c.market_id = markets.id AND c.status = 'pending')
+        OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id AND s.city_day = ${today})))`,
+    })
     .from(markets)
     .where(and(eq(markets.source, provider.source), inArray(markets.status, ["open", "frozen"])))
     .orderBy(markets.freezesAt);
@@ -608,6 +626,8 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
     question: m.question,
     category: m.category,
     status: m.status,
+    // false: the latest poll didn't carry it, so its price is stale and calls are closed.
+    inFeed: m.inFeed,
     infoOnly: m.infoOnly,
     freezesAt: m.freezesAt,
     settlesBy: m.settlesBy,

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ApiError, type Api, type CallState, type MarketView, type Side } from "./api";
 import { useBackLayer } from "./back";
-import { CALL_STATE_LABEL, auraIf, clampChance, sliderRange } from "./call";
+import { CALL_STATE_LABEL, auraIf, callsOpen, clampChance, sliderRange } from "./call";
 import { until, useNow } from "./clock";
 import { haptic } from "./telegram";
 
@@ -102,7 +102,7 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
   };
 
   const range = m ? sliderRange(side, m.world) : null;
-  const closed = m ? m.status !== "open" || Date.parse(m.freezesAt) <= now : false;
+  const closed = m ? !callsOpen(m, now) : false;
   const a = m && chance !== null ? auraIf(m.world, chance) : null;
   const fmt = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
 

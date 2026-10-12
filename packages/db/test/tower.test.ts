@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type FeedMarket, type GammaEvent, type GammaMarket, type OddsProvider, auraCenti, mintAccountFor, polymarketProvider, userAccountId } from "@bp/core";
+import { type FeedMarket, type GammaEvent, type GammaMarket, type KnownMarket, type OddsProvider, auraCenti, cityDay, mintAccountFor, polymarketProvider, userAccountId } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   TowerError,
@@ -24,6 +24,8 @@ import {
   rightList,
   receiptBinder,
   settleCalls,
+  npcCalls,
+  todaySlate,
 } from "../src";
 import { makeResident, releaseTogether } from "./helpers";
 
@@ -725,5 +727,87 @@ describe("the live Polymarket feed, on recorded Gamma payloads", () => {
     expect(await pollOdds(db, provider, { now: new Date(at + 4 * MIN) })).toMatchObject({ ok: true, settled: 1 });
     expect(await row("pm:5304665")).toMatchObject({ status: "resolved", outcome: false });
     expect((await callRow(cc.id)).aura_centi).toBe(auraCenti(false, 34, 50));
+  });
+
+  it("a Slate card the listing drops stays callable at its live price; one Gamma stops trading goes dark, for the cast too", async () => {
+    // A day of its own, far from the other tests' Slates.
+    const at = Date.UTC(2040, 0, 1 + Math.floor(Math.random() * 3000), 9);
+    const tag = String(Math.floor(Math.random() * 1e9));
+    const gm = (id: string, yes: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      question: `Will ${id} happen?`,
+      outcomes: '["Yes", "No"]',
+      outcomePrices: `["${yes}", "${(1 - Number(yes)).toFixed(2)}"]`,
+      endDate: new Date(at + 20 * H).toISOString(),
+      closed: false,
+      acceptingOrders: true,
+      ...extra,
+    });
+    const [card, other, filler] = [`${tag}1`, `${tag}2`, `${tag}3`];
+    // What the listing shows, and what /markets?closed=false&id=... answers.
+    let listed = [gm(card, "0.46"), gm(other, "0.5"), gm(filler, "0.5")];
+    const trading = new Map([[card, gm(card, "0.40")], [other, gm(other, "0.5")]]);
+    const gamma = (url: string) => {
+      const u = new URL(url);
+      if (u.pathname === "/events") return ok(u.searchParams.get("tag_slug") === "crypto" ? listed.map((m) => ({ slug: `e${m.id}`, markets: [m] })) : []);
+      if (u.searchParams.get("closed") === "false") return ok(u.searchParams.getAll("id").flatMap((id) => (trading.has(id) ? [trading.get(id)!] : [])));
+      return ok([]);
+    };
+    const provider = polymarketProvider({ fetch: gamma, log: () => {} });
+    await pollOdds(db, provider, { now: new Date(at) });
+    const row = async (ext: string) => (await client`SELECT id, price, status, in_feed FROM markets WHERE source = 'polymarket' AND external_id = ${`pm:${ext}`}`)[0]!;
+    const [cardRow, otherRow] = [await row(card), await row(other)];
+    const day = cityDay(new Date(at));
+    await client`INSERT INTO slates (city_day, modifier, published_at) VALUES (${day}, 'none', ${new Date(at).toISOString()})`;
+    await client`INSERT INTO slate_cards (city_day, slot, tier, market_id) VALUES (${day}, 1, 'coin_flip', ${cardRow.id}), (${day}, 2, 'coin_flip', ${otherRow.id})`;
+
+    // The ladder moves on: the listing drops both. The card is looked up by
+    // id and carried at its trading price; so is the other card.
+    listed = [gm(filler, "0.5")];
+    await pollOdds(db, provider, { now: new Date(at + MIN) });
+    expect(await row(card)).toMatchObject({ price: 40, status: "open", in_feed: true });
+    const u = await makeResident(db);
+    const c = await makeCall(db, u, { marketId: cardRow.id, side: "yes", chance: 60, seenPrice: 40 }, { now: new Date(at + MIN + 1000) });
+    await pollOdds(db, provider, { now: new Date(at + 2 * MIN) });
+    expect(await callRow(c.id)).toMatchObject({ status: "locked", locked_price: 40 });
+
+    // Gamma stops taking orders on the other card: off the feed, and nobody
+    // (the cast included) calls it at the stale price.
+    trading.set(other, gm(other, "0.5", { acceptingOrders: false }));
+    await pollOdds(db, provider, { now: new Date(at + 3 * MIN) });
+    expect(await row(other)).toMatchObject({ status: "open", in_feed: false });
+    await npcCalls(db, { now: new Date(at + 3 * MIN + 1000) });
+    expect(await client`SELECT 1 FROM calls WHERE market_id = ${otherRow.id}`).toHaveLength(0);
+    expect(await client`SELECT 1 FROM calls WHERE market_id = ${cardRow.id} AND user_id <> ${u}`).not.toHaveLength(0); // the carried card it does call
+    const slate = await todaySlate(db, u, { now: new Date(at + 3 * MIN + 1000) });
+    expect(slate!.cards.map((x) => [x.marketId, x.open])).toEqual([
+      [cardRow.id, true],
+      [otherRow.id, false],
+    ]);
+    expect(await marketView(db, u, otherRow.id, { now: new Date(at + 3 * MIN + 1000) })).toMatchObject({ status: "open", inFeed: false });
+  });
+
+  it("tells the feed which markets something rides on, and which must stay live", async () => {
+    const f = feed();
+    let known: readonly KnownMarket[] = [];
+    const provider: OddsProvider = { source: `riding-${randomUUID().slice(0, 8)}`, fetch: async (now, k = []) => ((known = k), f.provider.fetch(now)) };
+    const t = Date.UTC(2045, 0, 1 + Math.floor(Math.random() * 3000), 9); // a day with no other Slate
+    const [quiet, pending, locked, slated] = [f.add(t), f.add(t), f.add(t), f.add(t)];
+    await pollOdds(db, provider, { now: new Date(t) });
+    const u = await makeResident(db);
+    await makeCall(db, u, { marketId: await idOf(locked.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + 1000) });
+    await pollOdds(db, provider, { now: new Date(t + MIN) }); // locks it
+    await makeCall(db, u, { marketId: await idOf(pending.externalId), side: "yes", chance: 60, seenPrice: 50 }, { now: new Date(t + MIN + 1000) });
+    const day = cityDay(new Date(t));
+    await client`INSERT INTO slates (city_day, modifier, published_at) VALUES (${day}, 'none', ${new Date(t).toISOString()})`;
+    await client`INSERT INTO slate_cards (city_day, slot, tier, market_id) VALUES (${day}, 1, 'coin_flip', ${await idOf(slated.externalId)})`;
+    // The poll asks about all four, with what rides on each.
+    for (const m of [quiet, pending, locked, slated]) f.ms.delete(m.externalId);
+    await pollOdds(db, provider, { now: new Date(t + 2 * MIN) });
+    const flags = Object.fromEntries(known.map((k) => [k.externalId, [k.held, k.live]]));
+    expect(flags[quiet.externalId]).toEqual([false, false]);
+    expect(flags[pending.externalId]).toEqual([true, true]);
+    expect(flags[locked.externalId]).toEqual([true, false]);
+    expect(flags[slated.externalId]).toEqual([true, true]);
   });
 });
