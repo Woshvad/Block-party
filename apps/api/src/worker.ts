@@ -1,7 +1,7 @@
 import { createPrivyVerifier, mockProvider, openAiModeration, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb } from "@bp/db";
 import { createApp } from "./app";
-import { runMinute } from "./cron";
+import { logCronFailures, runMinute } from "./cron";
 import { httpRoomsClient } from "./rooms-client";
 import { telegramSender } from "./telegram-sender";
 
@@ -62,10 +62,17 @@ export default {
   // step once) and whatever pushes have fallen due.
   // Every 15 minutes, the daily pings for whoever's usual hour it is (15, so
   // half-hour and 45-minute time zones get their hour too).
+  // A failed job is logged by name and fails the run, so it shows in the logs
+  // and in the Cron Trigger history.
   async scheduled(event: { scheduledTime?: number }, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) {
     const { db, close } = createDb(env.HYPERDRIVE.connectionString, { max: 5, fetch_types: false });
     const at = new Date(event.scheduledTime ?? Date.now());
     const odds = oddsFor(env);
-    ctx.waitUntil(runMinute(db, at, { sender: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), ...(odds ? { odds } : {}) }).finally(() => close()));
+    try {
+      const failed = logCronFailures(await runMinute(db, at, { sender: telegramSender({ db, botToken: env.TELEGRAM_BOT_TOKEN }), ...(odds ? { odds } : {}) }));
+      if (failed > 0) throw new Error(`${failed} cron job(s) failed`);
+    } finally {
+      ctx.waitUntil(close());
+    }
   },
 };

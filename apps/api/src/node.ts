@@ -3,7 +3,7 @@ import { serve } from "@hono/node-server";
 import { type OddsProvider, mockProvider, polymarketProvider, sampleMarkets } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { createApp } from "./app";
-import { runMinute } from "./cron";
+import { logCronFailures, runMinute } from "./cron";
 import { httpRoomsClient } from "./rooms-client";
 
 // Local dev server. Production runs src/worker.ts on Cloudflare Workers.
@@ -45,7 +45,7 @@ if (process.env.LOCAL_CRON === "1") {
     if (running) return; // a slow minute never overlaps the next
     running = true;
     try {
-      for (const r of await runMinute(db, new Date(), odds ? { odds } : {})) if (r.status === "rejected") console.error("cron job failed:", r.reason);
+      logCronFailures(await runMinute(db, new Date(), odds ? { odds } : {}));
     } finally {
       running = false;
     }

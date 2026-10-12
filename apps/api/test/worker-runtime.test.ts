@@ -11,6 +11,8 @@ const BOT = "777:WORKER_RUNTIME";
 const SECRET = "w".repeat(40);
 const ORIGIN = "https://city.blockparty.test";
 let mf: Miniflare;
+// Everything the Worker logs (console.*), as workerd reports it.
+const logs: string[] = [];
 
 // Hyperdrive always hands the Worker a full connection string. A local URL may
 // leave the user out (Node's driver then uses the OS user; workerd can't).
@@ -32,6 +34,7 @@ beforeAll(async () => {
       INTERNAL_SECRET: SECRET,
       ALLOWED_ORIGINS: ORIGIN,
     },
+    handleStructuredLogs: ({ message }: { message: string }) => void logs.push(message),
   });
   await mf.ready;
 }, 60_000);
@@ -75,5 +78,34 @@ describe("the API on the Workers runtime", () => {
     // On a quarter hour it also runs the daily ping scheduler.
     const q = await worker.scheduled({ cron: "* * * * *", scheduledTime: new Date("2026-10-09T18:15:00Z") });
     expect(q.outcome).toBe("ok");
+    // No job failed quietly either.
+    expect(logs.filter((l) => l.includes("cron job failed"))).toEqual([]);
   });
+
+  it("a cron whose jobs fail logs each one by name and fails the run", async () => {
+    // The same Worker on a database that isn't there: every job throws.
+    const gone = new URL(withUser(process.env.TEST_DATABASE_URL!));
+    gone.pathname = "/bp_no_such_database_test";
+    const seen: string[] = [];
+    const broken = new Miniflare({
+      modules: true,
+      scriptPath: fileURLToPath(new URL("../dist/worker.js", import.meta.url)),
+      compatibilityDate: "2026-07-01",
+      compatibilityFlags: ["nodejs_compat"],
+      bindings: { HYPERDRIVE: { connectionString: gone.toString() }, TELEGRAM_BOT_TOKEN: BOT, INTERNAL_SECRET: SECRET, ALLOWED_ORIGINS: ORIGIN },
+      handleStructuredLogs: ({ message }: { message: string }) => void seen.push(message),
+    });
+    try {
+      const r = await (await broken.getWorker()).scheduled({ cron: "* * * * *", scheduledTime: new Date("2026-10-09T18:15:00Z") });
+      expect(r.outcome).not.toBe("ok");
+      // (Last Call has nothing to do before its hour, so it never reaches the database.)
+      for (const job of ["bell", "finishedActions", "ratioPrompt", "realTrades", "notifications", "dailyPings"]) {
+        expect(seen.some((l) => l.includes(`cron job failed: ${job}`))).toBe(true);
+      }
+      // With the reason.
+      expect(seen.find((l) => l.includes("cron job failed: bell"))).toContain("bp_no_such_database_test");
+    } finally {
+      await broken.dispose();
+    }
+  }, 60_000);
 });
