@@ -1260,6 +1260,8 @@ export const markets = pgTable(
     unique("markets_source_external").on(t.source, t.externalId),
     // Every poll reads its source's markets that aren't final yet.
     index("markets_unsettled").on(t.source, t.freezesAt).where(sql`${t.status} IN ('open', 'frozen')`),
+    // And the Watch Party's moments look for results that just came in.
+    index("markets_resolved_at").on(t.resolvedAt).where(sql`${t.status} = 'resolved'`),
     check("markets_price", sql`${t.price} BETWEEN 1 AND 99`),
     check("markets_resolved", sql`(${t.status} = 'resolved') = (${t.outcome} IS NOT NULL)`),
     check("markets_order", sql`${t.settlesBy} >= ${t.freezesAt}`),
@@ -1289,6 +1291,35 @@ export const feedPolls = pgTable("feed_polls", {
   error: text("error"),
   at: timestamp("at", { withTimezone: true }).notNull(),
 });
+
+// Watch Party big moments, one row per moment announced: a sports market's
+// result (bucket 0, so once ever) or a swing (bucket: the hour, so once an
+// hour). Only the poll whose insert lands announces it.
+export const towerMoments = pgTable(
+  "tower_moments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    marketId: uuid("market_id")
+      .notNull()
+      .references(() => markets.id),
+    kind: text("kind").notNull(), // swing | settled
+    bucket: integer("bucket").notNull(),
+    fromPrice: integer("from_price"),
+    toPrice: integer("to_price"),
+    outcome: boolean("outcome"),
+    at: timestamp("at", { withTimezone: true }).notNull(), // the poll's moment
+  },
+  (t) => [
+    unique("tower_moments_once").on(t.marketId, t.kind, t.bucket),
+    // At most 3 a poll: counted by the poll's moment.
+    index("tower_moments_at").on(t.at),
+    check(
+      "tower_moments_kind",
+      sql`(${t.kind} = 'swing' AND ${t.fromPrice} IS NOT NULL AND ${t.toPrice} IS NOT NULL AND ${t.outcome} IS NULL) OR (${t.kind} = 'settled' AND ${t.outcome} IS NOT NULL AND ${t.toPrice} IS NULL AND ${t.bucket} = 0)`,
+    ),
+    check("tower_moments_prices", sql`${t.fromPrice} BETWEEN 1 AND 99 AND ${t.toPrice} BETWEEN 1 AND 99`),
+  ],
+);
 
 export const callStatus = pgEnum("call_status", ["pending", "locked", "price_moved", "expired"]);
 export const callSide = pgEnum("call_side", ["yes", "no"]);
