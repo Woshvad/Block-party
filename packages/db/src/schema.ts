@@ -1858,3 +1858,37 @@ export const realityChecks = pgTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.sessionStartedAt, t.hour] })],
 );
+
+// --- The Daily Clue Hunt ----------------------------------------------------
+
+// The day's hiding place and clue, picked at random the first time anyone
+// asks for that day (never worked out from the date: the repo is public).
+// The database refuses any later change.
+export const huntDays = pgTable(
+  "hunt_days",
+  {
+    day: date("day", { mode: "string" }).primaryKey(),
+    place: text("place").notNull(),
+    clueIndex: integer("clue_index").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("hunt_days_clue_index", sql`${t.clueIndex} >= 0`)],
+);
+
+// One search per resident per city day: where they stood, and whether it was
+// there. Never changed after.
+export const huntSearches = pgTable(
+  "hunt_searches",
+  {
+    day: date("day", { mode: "string" })
+      .notNull()
+      .references(() => huntDays.day),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    place: text("place").notNull(),
+    found: boolean("found").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.userId] }), index("hunt_searches_finds").on(t.userId).where(sql`${t.found}`)],
+);
