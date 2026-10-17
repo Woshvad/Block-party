@@ -132,6 +132,10 @@ A database migrated on a branch whose migrations were later renumbered (the safe
    - **Local results** (one Node process, local Postgres, a laptop): 200 bots, 50 at a time: 576 req/s, p99 under 310 ms, no errors. 2,000 bots, 200 at a time: 380 to 670 req/s across runs, p50 200 to 850 ms by route, no errors, with occasional multi-second tails I couldn't pin down on this machine.
    - **What limits it:** most sampled waits were Postgres waiting on the single Node process (Workers scale that out). The real database hot spot was the ledger's system shards, about 13% of waiting time at 16 shards. Moving to 64 shards (migration 0042) cut that to 4.9%; isolated burns ran the same at 16 or 64 (about 1,500/s, versus about 600/s on one row).
    - **Still to do before an open launch:** a distributed load test on Workers with Hyperdrive at tens of thousands of bots, and a look at the multi-second tails there.
+41. **Make-goods** (done). After an outage, staff give every resident some GM, through the ledger.
+   - **Sending:** staff only, from the staff console. A reason every resident reads (5 to 80 characters, through the chat filter and the AI check; a flagged one shows "The city's sorry for the trouble." while the GM still goes out) and 1 to 200 GM. Never two within 7 days of each other, checked under a lock, so two staff sending at once make one. Who sent it and when are kept, and the database refuses any change to that record.
+   - **Collecting:** each resident who had moved in before it went out taps Collect on Today, once, within 14 days; nothing runs over every resident. The GM is minted under `make_good` with one ledger key per make-good and resident, so a retry or two devices at once pay once (race-tested). Guests, accounts that haven't moved in and newcomers since get nothing; a suspension refuses it as it refuses the drip; staff get no extra.
+   - **The supply:** supply stats, the Drip Committee report and the broke floor count it as created GM, by its kind. None of them keeps a list of kinds, so there was nothing to add; a test checks each one.
 
 ## Frontend
 
