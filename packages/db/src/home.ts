@@ -79,10 +79,12 @@ export async function setUpHome(tx: Db, userId: string, kitStyle: KitStyle, star
 }
 
 // Earned-only pieces (streak lamps, trophies). Once each, never priced.
-export async function grantEarned(tx: Db, userId: string, pieceId: string) {
+// True if this call granted it, false if they already had it.
+export async function grantEarned(tx: Db, userId: string, pieceId: string): Promise<boolean> {
   const piece = getPiece(pieceId);
   if (!piece || piece.band !== "earned") throw new Error(`${pieceId} is not an earned piece`);
-  await tx.insert(items).values({ pieceId, ownerUserId: userId, source: "earned" }).onConflictDoNothing();
+  const granted = await tx.insert(items).values({ pieceId, ownerUserId: userId, source: "earned" }).onConflictDoNothing().returning({ id: items.id });
+  return granted.length > 0;
 }
 
 // --- Buying ---------------------------------------------------------------
