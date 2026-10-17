@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { type CopyInfo, type Delivery, type Effect, ROOM, RoomEngine, chooseCopy } from "../src";
+import { type CopyInfo, type Delivery, type Effect, MOMENTS, ROOM, RoomEngine, type TowerMoment, chooseCopy } from "../src";
 
 const uid = (e: Effect) => ("userId" in e ? e.userId : "");
 
@@ -233,6 +233,70 @@ describe("Cozy", () => {
     for (const u of ["a", "b", "c"]) r.join(person(u, { crewId: "c1" }), T);
     expect(r.tick(T + 60 * MIN).effects).toEqual([]);
     expect(r.nextWake(T)).toBeNull();
+  });
+});
+
+describe("big moments on the screen", () => {
+  const moment = (id: string, over: Partial<TowerMoment> = {}): TowerMoment => ({ id, kind: "swing", marketId: "0b7e8c1a-3f2d-4c5b-9a8e-7d6c5b4a3f2e", question: "Will Lagos FC win?", from: 41, to: 63, at: T, ...over });
+  const KEEP = MOMENTS.showSeconds * 1000;
+  const shown = (ds: Delivery[]) => ds.filter((d) => d.event.t === "moment");
+
+  it("everyone here sees it; anyone joining within 2 minutes gets it, with the time it has left", () => {
+    const r = new RoomEngine("watch_party", { w: 20, h: 14 });
+    r.join(person("a"), T);
+    r.join(person("b", { hidden: new Set(["a"]) }), T); // a block between members doesn't hide the screen
+    const out = r.moment(moment("m1"), T);
+    expect(out.ok).toBe(true);
+    expect(shown(out.deliveries)).toEqual([{ to: ["a", "b"], event: { t: "moment", moment: moment("m1"), showForMs: KEEP } }]);
+    // A newcomer 90 s later: the welcome first, then the moment with 30 s left.
+    const late = r.join(person("c"), T + 90_000).deliveries;
+    expect(late[0]!.event.t).toBe("welcome");
+    expect(late[1]).toEqual({ to: ["c"], event: { t: "moment", moment: moment("m1"), showForMs: KEEP - 90_000 } });
+    // A reconnect gets it again; nobody else hears about it.
+    expect(shown(r.join(person("a"), T + 100_000).deliveries)).toEqual([{ to: ["a"], event: { t: "moment", moment: moment("m1"), showForMs: KEEP - 100_000 } }]);
+    // At 2 minutes it's gone.
+    expect(shown(r.join(person("d"), T + KEEP).deliveries)).toEqual([]);
+    expect(shown(r.join(person("e"), T + KEEP - 1).deliveries)).toHaveLength(1);
+  });
+
+  it("the newest replaces the one kept; the same moment twice is shown once", () => {
+    const r = new RoomEngine("watch_party", { w: 20, h: 14 });
+    r.join(person("a"), T);
+    expect(shown(r.moment(moment("m1"), T).deliveries)).toHaveLength(1);
+    expect(r.moment(moment("m1"), T + 1000)).toMatchObject({ ok: true, deliveries: [] }); // a retried delivery
+    r.moment(moment("m2", { kind: "settled", from: 34, to: undefined, outcome: "no" }), T + 2000);
+    const joiner = shown(r.join(person("b"), T + 3000).deliveries);
+    expect(joiner.map((d) => d.event.t === "moment" && d.event.moment.id)).toEqual(["m2"]);
+    expect(joiner[0]!.event.t === "moment" && joiner[0]!.event.showForMs).toBe(KEEP - 1000);
+  });
+
+  it("refuses bad payloads, and places without a screen", () => {
+    const r = new RoomEngine("watch_party", { w: 20, h: 14 });
+    r.join(person("a"), T);
+    for (const bad of [null, "goal!", { ...moment("m1"), kind: "goal" }, { ...moment("m1"), question: "" }, { ...moment("m1"), from: 500 }]) {
+      expect(r.moment(bad, T)).toEqual({ ok: false, code: "BAD_MOMENT", deliveries: [], effects: [] });
+    }
+    for (const place of ["diner", "tower", "watch_party:2", "home:u1"]) {
+      const other = new RoomEngine(place, { w: 10, h: 10 });
+      other.join(person("a"), T);
+      expect(other.moment(moment("m1"), T), place).toEqual({ ok: false, code: "NO_SCREEN", deliveries: [], effects: [] });
+      expect(other.keptMoment()).toBeNull();
+    }
+    expect(r.keptMoment()).toBeNull(); // nothing bad was kept either
+  });
+
+  it("the kept moment survives a nap through what the server saves; junk saved state is dropped", () => {
+    const r = new RoomEngine("watch_party", { w: 20, h: 14 });
+    r.moment(moment("m1"), T);
+    const saved = JSON.parse(JSON.stringify(r.keptMoment()));
+    const woken = new RoomEngine("watch_party", { w: 20, h: 14 });
+    woken.loadMoment(saved);
+    expect(shown(woken.join(person("a"), T + 60_000).deliveries)).toEqual([{ to: ["a"], event: { t: "moment", moment: moment("m1"), showForMs: KEEP - 60_000 } }]);
+    for (const junk of [undefined, null, "x", { until: T + KEEP }, { moment: { id: "m1" }, until: T + KEEP }, { moment: moment("m1"), until: "later" }]) {
+      const w = new RoomEngine("watch_party", { w: 20, h: 14 });
+      w.loadMoment(junk);
+      expect(w.keptMoment(), JSON.stringify(junk)).toBeNull();
+    }
   });
 });
 
