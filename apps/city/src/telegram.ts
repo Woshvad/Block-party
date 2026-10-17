@@ -15,6 +15,7 @@ type WebApp = {
   enableClosingConfirmation?: () => void;
   disableClosingConfirmation?: () => void;
   showConfirm?: (message: string, callback: (ok: boolean) => void) => void;
+  openTelegramLink?: (url: string) => void;
   HapticFeedback?: { impactOccurred(style: "light" | "medium" | "heavy"): void; notificationOccurred?(kind: "success" | "error" | "warning"): void };
 };
 
