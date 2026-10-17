@@ -85,6 +85,10 @@ describe("permissions", () => {
     expect(can("lead", "dissolve")).toBe(true);
   });
 
+  it("the lead and deputies pin crew chat; members don't", () => {
+    expect(roles.map((r) => can(r, "pin_message"))).toEqual([true, true, false]);
+  });
+
   it("removal: strictly downward, and never the lead", () => {
     const table = roles.flatMap((a) => roles.map((t) => `${a}>${t}:${can(a, "remove", t)}`));
     expect(table).toEqual([
