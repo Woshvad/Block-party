@@ -2,13 +2,14 @@
 import dynamic from "next/dynamic";
 import AppNavigation, { type AppTab } from "./AppNavigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
+import { ApiError, type Api, type Me, apiBase, browserTokenStore, createApi } from "./api";
 import { backStack, useBackLayer } from "./back";
 import { type Screen, boot, screenFor } from "./boot";
 import { boardMode } from "./boardMode";
-import { type Launch, TELEGRAM_APP_URL, freshStart, inviteLink, readLaunch, sessionMemory, withoutLaunch } from "./launch";
+import { type Launch, type LaunchKind, NO_LAUNCH, TELEGRAM_APP_URL, freshStart, inviteLink, onlyKinds, readLaunch, sessionMemory, startKind, withoutLaunch } from "./launch";
 import type { PageId } from "./screens/More";
 import { initTelegram, launchData, startParam, telegram } from "./telegram";
+import { useToast } from "./useToast";
 
 const CityBoard = dynamic(() => import("./CityBoard"), { ssr: false });
 const MoveIn = dynamic(() => import("./MoveIn"), { ssr: false });
@@ -27,6 +28,8 @@ const Crew = dynamic(() => import("./screens/Crew"), { ssr: false });
 const Games = dynamic(() => import("./screens/Games"), { ssr: false });
 const RealMoney = dynamic(() => import("./screens/RealMoney"), { ssr: false });
 const Staff = dynamic(() => import("./screens/Staff"), { ssr: false });
+const ReceiptSheet = dynamic(() => import("./ReceiptSheet"), { ssr: false });
+const Person = dynamic(() => import("./Person"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -38,17 +41,53 @@ async function devLaunchData(id: string): Promise<string | null> {
   return ((await r.json()) as { initData?: string }).initData ?? null;
 }
 
-// The link the app was opened from (see launch.ts), acted on once. The
-// address then drops the link's own parameters, and a Telegram start
-// parameter (which Telegram hands back on every reload) is remembered for
-// the session, so a reload doesn't repeat either.
-let launchTaken = false;
-function takeLaunch(): Launch {
-  if (launchTaken) return { invite: null, notification: null };
-  launchTaken = true;
-  const launch = readLaunch(freshStart(startParam(), sessionMemory("bp.launch.taken")), location.search);
-  if (launch.invite || launch.notification) backStack()?.replaceUrl(location.pathname + withoutLaunch(location.search) + location.hash);
+// The link the app was opened from (see launch.ts), acted on once. Each
+// kind is taken by the first screen that acts on it: a guest looking around
+// takes a receipt or a profile, and leaves a crew invite for its "Open in
+// Telegram" button (and for after moving in). The address then drops what
+// was taken, and a Telegram start parameter (which Telegram hands back on
+// every reload) is remembered for the session, so a reload doesn't repeat it.
+const launchTaken = new Set<LaunchKind>();
+function takeLaunch(kinds: readonly LaunchKind[]): Launch {
+  const want = kinds.filter((k) => !launchTaken.has(k));
+  if (!want.length) return NO_LAUNCH;
+  want.forEach((k) => launchTaken.add(k));
+  const start = startParam();
+  const kind = startKind(start);
+  const fresh = kind && want.includes(kind) ? freshStart(start, sessionMemory("bp.launch.taken")) : null;
+  const launch = onlyKinds(readLaunch(fresh, location.search), want);
+  if (want.some((k) => launch[k])) backStack()?.replaceUrl(location.pathname + withoutLaunch(location.search, want) + location.hash);
   return launch;
+}
+
+// A receipt or a resident's sheet, when the app was opened from its link.
+// Guests get them too: a link shared in a chat often opens in a browser.
+// Your own profile link opens Me instead (onSelf).
+function LinkedSheets({ api, me, onSelf }: { api: Api; me: Me; onSelf?: () => void }) {
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const [person, setPerson] = useState<string | null>(null);
+  const [note, setNote] = useToast<string>();
+  useEffect(() => {
+    const launch = takeLaunch(["receipt", "profile"]);
+    if (launch.receipt) setReceipt(launch.receipt);
+    const handle = launch.profile;
+    if (handle)
+      void api
+        .resident(handle)
+        .then((r) => (r.userId === me.userId && onSelf ? onSelf() : setPerson(r.userId)))
+        .catch((e) => setNote(e instanceof ApiError && e.status === 404 ? `No one in the city goes by @${handle}` : "Couldn't open that profile. Try the link again."));
+  }, [api]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <>
+      {receipt && <ReceiptSheet api={api} me={me} token={receipt} onClose={() => setReceipt(null)} />}
+      {person && <Person api={api} userId={person} guest={!me.resident} onClose={() => setPerson(null)} />}
+      {note && (
+        <div className="toast bad" role="alert">
+          {note}
+        </div>
+      )}
+    </>
+  );
 }
 
 export default function App() {
@@ -124,6 +163,7 @@ export default function App() {
       return (
         <>
           <CityBoard api={api} me={screen.me} />
+          <LinkedSheets api={api} me={screen.me} />
           <div className="claim">
             <b>You're looking around as a guest.</b>
             <span>Open Block Party in Telegram to move in and get your own room.</span>
@@ -169,7 +209,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
   // Opened from a link: a crew invite opens Crew with the code filled in; a
   // push the player tapped is marked opened.
   useEffect(() => {
-    const launch = takeLaunch();
+    const launch = takeLaunch(["invite", "notification"]);
     if (launch.notification) void api.notificationOpened(launch.notification).catch(() => {});
     if (launch.invite) {
       setInvite(launch.invite);
@@ -258,6 +298,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} onBunker={(place) => setTrip({ place, ridesFree: false })} onBoard={() => go("city")} />}
       {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
       <AppNavigation active={page ? "more" : tab} onSelect={go} />
+      <LinkedSheets api={api} me={me} onSelf={() => setPage("me")} />
     </>
   );
 }

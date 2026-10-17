@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOARD, ZOOM, clampTarget, fitCamera, screenOffset, shortCount, startZoom, zoomLevel } from "../src/camera";
+import { BOARD, ZOOM, clampTarget, dollyDistance, fitCamera, screenOffset, shortCount, startZoom, zoomLevel } from "../src/camera";
 import { LANDMARKS } from "../src/citygen";
 import { PLACE_INFO } from "../src/places";
 
@@ -37,6 +37,23 @@ describe("fitCamera for rooms", () => {
       const { distance } = fitCamera(390 / 844, span * 1.25, { min: span * 0.9, max: span * 3 });
       expect(distance).toBeGreaterThanOrEqual(span * 0.9);
       expect(distance).toBeLessThanOrEqual(span * 3);
+    }
+  });
+});
+
+describe("dollyDistance (the home's + and - buttons)", () => {
+  it("steps closer and further, and back again", () => {
+    expect(dollyDistance(20, "in", 6, 64)).toBeCloseTo(16);
+    expect(dollyDistance(16, "out", 6, 64)).toBeCloseTo(20);
+  });
+
+  it("stays inside the orbit's limits, even for junk distances", () => {
+    expect(dollyDistance(7, "in", 6, 64)).toBe(6);
+    expect(dollyDistance(60, "out", 6, 64)).toBe(64);
+    for (const junk of [NaN, -5, 0, Infinity]) {
+      const d = dollyDistance(junk, "out", 6, 64);
+      expect(d).toBeGreaterThanOrEqual(6);
+      expect(d).toBeLessThanOrEqual(64);
     }
   });
 });

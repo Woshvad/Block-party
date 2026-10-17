@@ -17,6 +17,15 @@ export function fitCamera(aspect: number, seeWidth = 22, range: { min: number; m
   return { fov, distance: Math.min(Math.max(distance, range.min), range.max) };
 }
 
+// The + and - buttons over a room you orbit (your home): each press moves the
+// camera a step closer or further along its line of sight, inside the
+// orbit's own limits. Pinching does the same through the orbit controls.
+export const DOLLY_STEP = 1.25;
+export function dollyDistance(distance: number, dir: "in" | "out", min: number, max: number): number {
+  const d = Number.isFinite(distance) && distance > 0 ? distance : min;
+  return Math.min(max, Math.max(min, dir === "in" ? d / DOLLY_STEP : d * DOLLY_STEP));
+}
+
 // --- The board's isometric view ----------------------------------------------
 
 // The board camera looks along this direction (from the camera's target up

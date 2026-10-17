@@ -9,6 +9,7 @@
     "start": "next start -p 3100",
     "test": "vitest run",
     "typecheck": "tsc -p . --noEmit",
+    "icons": "node scripts/icons.mjs",
     "verify": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

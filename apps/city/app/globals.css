@@ -676,3 +676,30 @@ button:disabled { cursor: default; }
 @media(min-width:900px){.social-live-stage { bottom:20px; right:340px; }.social-live-stage.is-clean { right:0; }}
 .social-room-demo .social-live-stage { top:115px; }.social-room-demo .social-live-stage.is-clean { right:0; }
 .social-live-stage ~ .toast { top:calc(var(--safe-top) + 140px); z-index:8; max-width:calc(100% - 32px); }
+/* Read by screen readers, not shown. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* A Tower receipt from its link: the stamp, the call, the prices when it locked. */
+.receipt-stamp { align-self: flex-start; padding: 6px 12px; border-radius: 10px; border: 2px solid currentColor; font-size: 13px; font-weight: 850; letter-spacing: 0.12em; transform: rotate(-2deg); color: var(--muted); }
+.receipt-stamp.called { color: var(--green); }
+.receipt-stamp.rekt { color: #c0392b; }
+.receipt-q { font-size: 22px; letter-spacing: -0.03em; margin: 0; overflow-wrap: anywhere; }
+.receipt-ratio { font-style: italic; margin: 0; }
+/* Neighbours in the city now, from the places' live headcounts. */
+.neighbours-now .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 0 3px #3ddc9733; margin-right: 7px; vertical-align: middle; }
+/* The list instead of the 3D map (Me, Graphics, List): no canvas at all; the banner, the HUD and the places scroll as one page. */
+.as-list { position: fixed; inset: 0; overflow-y: auto; padding: calc(var(--safe-top) + 10px) 12px calc(var(--safe-bottom) + 96px); background: var(--bg); }
+.as-list > .banner, .as-list > .hud, .as-list > .map-directory { position: static; }
+.as-list > .banner { display: block; width: 100%; max-width: 560px; margin: 0 auto; text-align: left; }
+.as-list > .hud { flex-direction: row; flex-wrap: wrap; max-width: 560px; margin: 10px auto; }
+.as-list > .map-directory { width: auto; max-width: 560px; max-height: none; overflow: visible; margin: 0 auto; backdrop-filter: none; box-shadow: 0 4px 18px #26392b0a; }
+.map-directory button > span:first-of-type { flex: 1; }
+.list-board button { min-height: 56px; }
+.list-board button.soon { color: var(--muted); }
+body:has(.claim) .as-list { padding-bottom: calc(var(--safe-bottom) + 210px); }
+/* Your home's camera: zoom, a photo, and a clean view that hides every button (the tab bar too) but the one that brings them back. */
+.home-tools { position: fixed; right: 10px; top: calc(var(--safe-top) + 110px); z-index: 3; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.home-tools button, .home-restore { min-width: 44px; height: 44px; border-radius: 14px; border: 1px solid #ffffffb0; background: #fffefaed; color: var(--ink); box-shadow: 0 3px 12px #17342b18; cursor: pointer; font-size: 18px; }
+.home-tools button.wide, .home-restore { padding: 0 14px; font-size: 13px; font-weight: 650; }
+.home-restore { position: fixed; right: 10px; top: calc(var(--safe-top) + 10px); z-index: 5; border-radius: 999px; }
+body:has(.home-clean) .app-navigation { display: none; }
+.photo-sheet img { width: 100%; max-height: 55dvh; object-fit: contain; border-radius: 14px; background: #e9e4db; }

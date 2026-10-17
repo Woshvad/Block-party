@@ -11,8 +11,17 @@
 // player can pick the tier in Me (saved on the device), and a phone where a
 // 3D view lost its WebGL context (it ran short) gets the low tier from then
 // on until they pick otherwise.
+//
+// Me also offers the list: no 3D city at all. The board is the list of
+// places, with the same headcounts and trips, and makes no WebGL context;
+// rooms and your home (which need their 3D) draw on the low tier. A device
+// without WebGL gets the list too. ?city=list or ?city=map forces either.
+
+import { webglSupported } from "./sceneHealth";
 
 export type Quality = "low" | "high";
+export type GraphicsPick = Quality | "list";
+export type CityView = "map" | "list";
 
 // What the browser tells us about the device. Each is missing where the
 // browser doesn't share it (Safari shares neither memory nor data saver).
@@ -88,16 +97,44 @@ const write = (key: string, value: string | null) => {
 };
 
 // The player's pick in Me (null: let the device decide).
-export function savedQuality(): Quality | null {
+export function savedPick(): GraphicsPick | null {
   const v = read(CHOSEN_KEY);
-  return v === "low" || v === "high" ? v : null;
+  return v === "low" || v === "high" || v === "list" ? v : null;
 }
 
-// Takes effect the next time a 3D view is made: a context's antialiasing is
-// fixed when it's created. Picking either way also forgets a lost context.
-export function saveQuality(q: Quality | null) {
-  write(CHOSEN_KEY, q);
+// The tier picked, if any: the list draws what 3D is left on the low tier.
+export function savedQuality(): Quality | null {
+  const p = savedPick();
+  return p === "list" ? "low" : p;
+}
+
+// A tier takes effect the next time a 3D view is made: a context's
+// antialiasing is fixed when it's created. The board follows a switch to or
+// from the list at once (subscribePick). Picking anything also forgets a
+// lost context.
+const listeners = new Set<() => void>();
+export function savePick(p: GraphicsPick | null) {
+  write(CHOSEN_KEY, p);
   write(LOST_KEY, null);
+  for (const l of listeners) l();
+}
+
+export function subscribePick(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+}
+
+// The board's view. WebGL is only probed when it might be used: never once
+// the list is picked, so the list makes no WebGL context at all.
+export function chooseCityView(d: { search: string; pick: GraphicsPick | null; webgl: () => boolean }): CityView {
+  const forced = new URLSearchParams(d.search).get("city");
+  if (forced === "list" || forced === "map") return forced;
+  if (d.pick === "list") return "list";
+  return d.webgl() ? "map" : "list";
+}
+
+export function cityView(): CityView {
+  return chooseCityView({ search: typeof location === "undefined" ? "" : location.search, pick: savedPick(), webgl: webglSupported });
 }
 
 // A 3D view lost its WebGL context: low from now on, unless the player picks.

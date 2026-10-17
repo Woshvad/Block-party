@@ -1,11 +1,14 @@
 "use client";
 import { OrbitControls } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
-import { useRef, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import { useEffect, useRef, useState } from "react";
+import type { Vector3 } from "three";
 import { actionKeysFor } from "./actionKeys";
 import { ApiError, type Api, type Home, type Placement } from "./api";
 import { useBackLayer } from "./back";
+import { dollyDistance } from "./camera";
 import { countdown, useNow } from "./clock";
+import { browserPhotoEnv, photoWay, savePhoto, snapshot } from "./photo";
 import { RoomCamera, RoomLighting } from "./RoomLighting";
 import SceneBoundary from "./SceneBoundary";
 import { HomeRoom } from "./HomeRoom";
@@ -24,6 +27,36 @@ import { useToast } from "./useToast";
 type Mode = { kind: "view" } | { kind: "selected"; itemId: string } | { kind: "placing"; itemId: string; pieceId: string; placement: Placement; isNew: boolean };
 type Sheet = null | "storage" | "shop" | "finishes";
 const BANDS = ["basic", "everyday", "statement", "working"] as const;
+type Zoom = { dir: "in" | "out"; n: number };
+type Take = () => Promise<Blob | null>;
+
+// The + and - buttons: a step along the line of sight to the orbit's centre.
+function DollyRig({ zoom, min, max }: { zoom: Zoom; min: number; max: number }) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update(): void } | null;
+  useEffect(() => {
+    if (!zoom.n || !controls) return;
+    const offset = camera.position.clone().sub(controls.target);
+    offset.setLength(dollyDistance(offset.length(), zoom.dir, min, max));
+    camera.position.copy(controls.target).add(offset);
+    controls.update();
+  }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+// Hands the photo button a way to draw and read one frame (photo.ts).
+function PhotoRig({ take }: { take: React.MutableRefObject<Take | null> }) {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const camera = useThree((s) => s.camera);
+  useEffect(() => {
+    take.current = () => snapshot(gl, scene, camera);
+    return () => {
+      take.current = null;
+    };
+  }, [gl, scene, camera, take]);
+  return null;
+}
 
 export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm: number; onGm: () => void; onGoInside: () => void }) {
   const home = useLoad(() => api.home(), [api]);
@@ -43,6 +76,77 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   // Back closes the open sheet, or drops the piece being moved or placed.
   useBackLayer(mode.kind !== "view", () => setMode({ kind: "view" }));
   useBackLayer(sheet !== null, () => setSheet(null));
+
+  // The camera: zoom buttons, a clean view with every button hidden but the
+  // one that brings them back, and a photo where the device can share or
+  // save one (photo.ts; no photo button where it can do neither).
+  const [zoom, setZoom] = useState<Zoom>({ dir: "in", n: 0 });
+  const [clean, setClean] = useState(false);
+  const [photoEnv] = useState(browserPhotoEnv);
+  const photo = photoWay(photoEnv);
+  const [shot, setShot] = useState<{ blob: Blob; url: string } | null>(null);
+  const take = useRef<Take | null>(null);
+  const shooting = useRef(false);
+  const hideButton = useRef<HTMLButtonElement>(null);
+  const showButton = useRef<HTMLButtonElement>(null);
+  const photoButton = useRef<HTMLButtonElement>(null);
+  // Focus follows the toggle: to Show buttons, back to Hide buttons, and back
+  // to the photo button when the photo closes (once the new buttons are drawn).
+  const focusNext = useRef<React.RefObject<HTMLButtonElement | null> | null>(null);
+  useEffect(() => {
+    focusNext.current?.current?.focus();
+    focusNext.current = null;
+  }, [clean, shot]);
+  const hide = () => {
+    focusNext.current = showButton;
+    setClean(true);
+  };
+  const restore = () => {
+    focusNext.current = hideButton;
+    setClean(false);
+  };
+  const closeShot = () => {
+    focusNext.current = photoButton;
+    setShot(null);
+  };
+  useBackLayer(clean, restore);
+  useBackLayer(shot !== null, closeShot);
+  useEffect(() => {
+    if (!clean) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") restore();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [clean]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!shot) return;
+    return () => URL.revokeObjectURL(shot.url);
+  }, [shot]);
+  // The photo is taken first and shown; the share sheet opens on its own tap,
+  // which phones require (a share must follow a tap closely).
+  const takePhoto = async () => {
+    if (shooting.current || !take.current) return;
+    shooting.current = true;
+    try {
+      const blob = await take.current();
+      if (blob) setShot({ blob, url: URL.createObjectURL(blob) });
+      else setMsg({ text: "Couldn't take the photo. Try again.", bad: true });
+    } finally {
+      shooting.current = false;
+    }
+  };
+  const sendPhoto = async () => {
+    if (!shot) return;
+    const r = await savePhoto(shot.blob, photoEnv);
+    if (r === "cancelled") return;
+    closeShot();
+    if (r === "failed") setMsg({ text: "Couldn't save the photo here", bad: true });
+    else {
+      haptic("light");
+      if (r === "saved") setMsg({ text: "Photo saved", bad: false });
+    }
+  };
 
   // One change at a time; the home reloads after each so the screen is the truth.
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
@@ -94,13 +198,13 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
 
   return (
     <>
-      <div className="stage">
+      <div className={`stage ${clean ? "home-clean" : ""}`}>
         <SceneBoundary what="your home" note="Storage, the shop, and the walls and floor still work.">
           <Canvas shadows={tier.shadows} dpr={tier.dpr} camera={{ position: [size.w * 0.9, size.w * 1.15, size.d * 1.35], fov: 42 }} gl={{ antialias: tier.antialias }} onCreated={watchContext}>
             <RoomLighting span={Math.max(size.w, size.d)} />
             <RoomCamera w={size.w} h={size.d} />
             <HomeRoom
-              editing
+              editing={!clean}
               w={size.w}
               d={size.d}
               wallFinish={h.wallFinish}
@@ -115,18 +219,45 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
               // While placing, taps go through furniture to the floor (to aim, even at a taken spot).
               onPiece={mode.kind === "placing" ? undefined : (id) => setMode({ kind: "selected", itemId: id })}
             />
-            <OrbitControls enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={Math.max(size.w, size.d) * 8} />
+            {/* Pinching zooms too: the orbit dollies with two fingers. */}
+            <OrbitControls makeDefault enablePan={false} minPolarAngle={0.4} maxPolarAngle={1.2} minDistance={6} maxDistance={Math.max(size.w, size.d) * 8} />
+            <DollyRig zoom={zoom} min={6} max={Math.max(size.w, size.d) * 8} />
+            <PhotoRig take={take} />
           </Canvas>
         </SceneBoundary>
       </div>
 
-      <div className="roomtop">
-        <div className="pill">
-          <b>Your home</b> · {h.doorOpen ? "door open" : "door closed"}
-        </div>
-        <div className="pill">{gm.toLocaleString("en-US")} GM</div>
-      </div>
-      {running && Date.parse(running.endsAt) > now && (
+      {clean ? (
+        <button ref={showButton} className="home-restore" onClick={restore}>
+          Show buttons
+        </button>
+      ) : (
+        <>
+          <div className="roomtop">
+            <div className="pill">
+              <b>Your home</b> · {h.doorOpen ? "door open" : "door closed"}
+            </div>
+            <div className="pill">{gm.toLocaleString("en-US")} GM</div>
+          </div>
+          <nav className="home-tools" aria-label="Camera">
+            <button aria-label="Zoom in" onClick={() => setZoom((z) => ({ dir: "in", n: z.n + 1 }))}>
+              +
+            </button>
+            <button aria-label="Zoom out" onClick={() => setZoom((z) => ({ dir: "out", n: z.n + 1 }))}>
+              −
+            </button>
+            {photo && (
+              <button ref={photoButton} aria-label="Take a photo" onClick={() => void takePhoto()}>
+                📷
+              </button>
+            )}
+            <button ref={hideButton} className="wide" onClick={hide}>
+              Hide buttons
+            </button>
+          </nav>
+        </>
+      )}
+      {!clean && running && Date.parse(running.endsAt) > now && (
         <div className="roomstatus">
           😴 {label(running.kind)} · {countdown(Date.parse(running.endsAt) - now)} left{" "}
           <button className="link" onClick={() => run(() => api.cancelAction().then(() => action.reload()))}>
@@ -136,57 +267,59 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
       )}
       {msg && <div className={`toast ${msg.bad ? "bad" : "good"}`}>{msg.text}</div>}
 
-      <div className="homebar">
-        {mode.kind === "view" && (
-          <>
-            <button onClick={() => setSheet("storage")}>📦 Storage ({h.storage.length})</button>
-            <button onClick={() => setSheet("shop")}>🛒 Shop</button>
-            <button onClick={() => setSheet("finishes")}>🎨 Walls & floor</button>
-            <button onClick={() => run(() => api.setHome({ doorOpen: !h.doorOpen }), h.doorOpen ? "Door closed" : "Door open: visitors can drop in")}>{h.doorOpen ? "🚪 Close door" : "🚪 Open door"}</button>
-            <button className="primary" onClick={onGoInside}>
-              {nap ? "Go inside (nap here)" : "Go inside"}
-            </button>
-          </>
-        )}
-        {selected && mode.kind === "selected" && (
-          <>
-            <span className="what">{itemLabel(selected.pieceId)}</span>
-            <button onClick={() => startPlacing(selected.itemId, selected.pieceId, false, selected.placement)}>✥ Move</button>
-            {selected.placement.layer !== "wall" && (
-              <button
-                onClick={() => {
-                  const pl = selected.placement as Placement & { rot: 0 | 90 | 180 | 270 };
-                  const next = { ...pl, rot: nextRot(pl.rot) } as Placement;
-                  const err = checkPlacement(h.tier, selected.pieceId, next, h.placed, selected.itemId);
-                  if (err) return setMsg({ text: `Can't turn it there: ${err}`, bad: true });
-                  void run(() => api.place(selected.itemId, next));
-                }}
-              >
-                ↻ Turn
+      {!clean && (
+        <div className="homebar">
+          {mode.kind === "view" && (
+            <>
+              <button onClick={() => setSheet("storage")}>📦 Storage ({h.storage.length})</button>
+              <button onClick={() => setSheet("shop")}>🛒 Shop</button>
+              <button onClick={() => setSheet("finishes")}>🎨 Walls & floor</button>
+              <button onClick={() => run(() => api.setHome({ doorOpen: !h.doorOpen }), h.doorOpen ? "Door closed" : "Door open: visitors can drop in")}>{h.doorOpen ? "🚪 Close door" : "🚪 Open door"}</button>
+              <button className="primary" onClick={onGoInside}>
+                {nap ? "Go inside (nap here)" : "Go inside"}
               </button>
-            )}
-            <button onClick={() => run(() => api.place(selected.itemId, { ...selected.placement, color: (selected.placement.color + 1) % 16 } as Placement))}>🎨 Colour</button>
-            <button onClick={() => run(() => api.store(selected.itemId), "Put in storage").then(() => setMode({ kind: "view" }))}>📦 Store</button>
-            <button onClick={() => setMode({ kind: "view" })}>Done</button>
-          </>
-        )}
-        {mode.kind === "placing" && (
-          <>
-            <span className="what">{mode.placement.layer === "wall" ? "Tap a wall" : "Tap the floor"} to place {itemLabel(mode.pieceId)}</span>
-            {mode.placement.layer !== "wall" && (
-              <button onClick={() => setMode({ ...mode, placement: { ...mode.placement, rot: nextRot((mode.placement as { rot: number }).rot) } as Placement })}>↻ Turn</button>
-            )}
-            <button
-              className="primary"
-              disabled={!!ghostErr}
-              onClick={() => run(() => api.place(mode.itemId, mode.placement), mode.isNew ? "Placed" : "Moved").then((ok) => ok && setMode({ kind: "view" }))}
-            >
-              {ghostErr ? ghostErr : "Place here"}
-            </button>
-            <button onClick={() => setMode({ kind: "view" })}>Cancel</button>
-          </>
-        )}
-      </div>
+            </>
+          )}
+          {selected && mode.kind === "selected" && (
+            <>
+              <span className="what">{itemLabel(selected.pieceId)}</span>
+              <button onClick={() => startPlacing(selected.itemId, selected.pieceId, false, selected.placement)}>✥ Move</button>
+              {selected.placement.layer !== "wall" && (
+                <button
+                  onClick={() => {
+                    const pl = selected.placement as Placement & { rot: 0 | 90 | 180 | 270 };
+                    const next = { ...pl, rot: nextRot(pl.rot) } as Placement;
+                    const err = checkPlacement(h.tier, selected.pieceId, next, h.placed, selected.itemId);
+                    if (err) return setMsg({ text: `Can't turn it there: ${err}`, bad: true });
+                    void run(() => api.place(selected.itemId, next));
+                  }}
+                >
+                  ↻ Turn
+                </button>
+              )}
+              <button onClick={() => run(() => api.place(selected.itemId, { ...selected.placement, color: (selected.placement.color + 1) % 16 } as Placement))}>🎨 Colour</button>
+              <button onClick={() => run(() => api.store(selected.itemId), "Put in storage").then(() => setMode({ kind: "view" }))}>📦 Store</button>
+              <button onClick={() => setMode({ kind: "view" })}>Done</button>
+            </>
+          )}
+          {mode.kind === "placing" && (
+            <>
+              <span className="what">{mode.placement.layer === "wall" ? "Tap a wall" : "Tap the floor"} to place {itemLabel(mode.pieceId)}</span>
+              {mode.placement.layer !== "wall" && (
+                <button onClick={() => setMode({ ...mode, placement: { ...mode.placement, rot: nextRot((mode.placement as { rot: number }).rot) } as Placement })}>↻ Turn</button>
+              )}
+              <button
+                className="primary"
+                disabled={!!ghostErr}
+                onClick={() => run(() => api.place(mode.itemId, mode.placement), mode.isNew ? "Placed" : "Moved").then((ok) => ok && setMode({ kind: "view" }))}
+              >
+                {ghostErr ? ghostErr : "Place here"}
+              </button>
+              <button onClick={() => setMode({ kind: "view" })}>Cancel</button>
+            </>
+          )}
+        </div>
+      )}
 
       {sheet && (
         <div className="backdrop" onClick={() => setSheet(null)}>
@@ -263,6 +396,25 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {shot && (
+        <div className="backdrop" onClick={closeShot}>
+          <div className="callsheet photo-sheet" role="dialog" aria-modal="true" aria-labelledby="photo-title" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === "Escape" && closeShot()}>
+            <button className="x" aria-label="close" onClick={closeShot}>
+              ×
+            </button>
+            <p className="q" id="photo-title">
+              Your home
+            </p>
+            <img src={shot.url} alt="A photo of your home" />
+            <div className="btnrow">
+              <button className="btn" autoFocus onClick={() => void sendPhoto()}>
+                {photo === "share" ? "Share photo" : "Save photo"}
+              </button>
+            </div>
           </div>
         </div>
       )}
