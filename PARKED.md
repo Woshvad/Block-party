@@ -14,3 +14,12 @@ Still yours:
 - [ ] **Polymarket's written OK on free calls** built on their data (the plan flags this as needed).
 - [ ] **Verified builder tier** application (the free tier allows 100 relayer actions a day).
 - [ ] **Legal opinion** for real trades (Gate 2).
+
+## Ideas from Lagos Life (owner: you)
+
+Lagos Life, a browser life-sim set in Lagos, launched on 1 October 2026 and reports millions of sign-ups. On 17 October we copied the parts that fit Block Party and need no business call (see HANDOFF.md, "Ideas from Lagos Life"). These need yours:
+
+- [ ] **Selling ad space to real brands.** This is most of their revenue: roadside billboards (about ₦5K a week), lagoon plots (about ₦18K), and artists paying about ₦50K to have their music played in clubs. Our lagoon already has chart billboards and "pending" Mempool Plots, labelled "CITY ART · NOT LIVE DATA". Selling them needs pricing, an ad policy (no gambling or crypto shilling next to free calls), a way to take payment, and the privacy policy.
+- [ ] **Sponsored places and partner apps.** They opened a venue tied to a real services company and put a health-care partner in the phone menu. Same questions as above, plus whether a sponsor may run anything inside the Mini App.
+- [ ] **Not copied on purpose.** They sell game money for real money (purchases final, never withdrawable), a ₦500 real-money stadium seat and a real-money IPO panel. Press coverage on 12 October questioned exactly this, along with who controls player data. Our real-money path stays behind the legal opinion, and GM can't be bought.
+- [ ] **A games hub** (Chess, Ludo, Whot, Ayo, zero-stake tables between friends). It fits the rooms, but it's a large build. Decide whether it comes before the launch places' interiors.
