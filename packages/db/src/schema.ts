@@ -1826,3 +1826,47 @@ export const realityChecks = pgTable(
   },
   (t) => [primaryKey({ columns: [t.userId, t.sessionStartedAt, t.hour] })],
 );
+
+// --- Make-goods ------------------------------------------------------------
+
+// GM staff give every resident when the city let them down (an outage). Never
+// two within 7 days of each other, checked under a lock. Every resident reads
+// the reason; a flagged one shows a placeholder until staff look at it. Who
+// made it, when and for how much are fixed once written (a trigger).
+export const makeGoods = pgTable(
+  "make_goods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reason: text("reason").notNull(),
+    amount: integer("amount").notNull(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("make_goods_created").on(t.createdAt),
+    // MAKE_GOOD in @bp/core: 1 to 200 GM, a reason of up to 80 characters.
+    check("make_goods_amount", sql`${t.amount} BETWEEN 1 AND 200`),
+    check("make_goods_reason", sql`char_length(${t.reason}) BETWEEN 1 AND 80`),
+  ],
+);
+
+// Each resident collects a make-good once, ever (append-only, a trigger).
+export const makeGoodCollections = pgTable(
+  "make_good_collections",
+  {
+    makeGoodId: uuid("make_good_id")
+      .notNull()
+      .references(() => makeGoods.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    amount: integer("amount").notNull(),
+    txId: uuid("tx_id")
+      .notNull()
+      .references(() => gmTransactions.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.makeGoodId, t.userId] })],
+);
