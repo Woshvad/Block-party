@@ -127,8 +127,8 @@ export function HomeRoom({ w, d, wallFinish, floorFinish, placed, selected, ghos
         <planeGeometry args={[w, d]} />
         <meshStandardMaterial map={texture} color={floor} roughness={floorFinish === "glass_led" ? 0.25 : 0.85} />
       </mesh>
-      {/* Grid lines in edit mode help aim. */}
-      {editing && <gridHelper args={[Math.max(w, d), Math.max(w, d), "#998b76", "#b9ac96"]} position-y={0.01} />}
+      {/* Grid lines in edit mode help aim. Photos leave them out (photo.ts). */}
+      {editing && <gridHelper args={[Math.max(w, d), Math.max(w, d), "#998b76", "#b9ac96"]} position-y={0.01} userData={{ noPhoto: true }} />}
       {/* Cutaway: tall walls at the back (north, west), low trims at the front. */}
       <mesh castShadow receiveShadow position={[0, 1.3, -d / 2 - 0.05]} onPointerDown={wallTap("n")}>
         <boxGeometry args={[w + 0.2, 2.6, 0.1]} />
