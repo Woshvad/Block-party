@@ -641,6 +641,7 @@ button:disabled { cursor: default; }
 .as-list > .banner { display: block; width: 100%; max-width: 560px; margin: 0 auto; text-align: left; }
 .as-list > .hud { flex-direction: row; flex-wrap: wrap; max-width: 560px; margin: 10px auto; }
 .as-list > .map-directory { width: auto; max-width: 560px; max-height: none; overflow: visible; margin: 0 auto; backdrop-filter: none; box-shadow: 0 4px 18px #26392b0a; }
+.map-directory button > span:first-of-type { flex: 1; }
 .list-board button { min-height: 56px; }
 .list-board button.soon { color: var(--muted); }
 body:has(.claim) .as-list { padding-bottom: calc(var(--safe-bottom) + 210px); }

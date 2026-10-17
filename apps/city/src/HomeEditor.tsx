@@ -90,18 +90,24 @@ export default function HomeEditor({ api, gm, onGm, onGoInside }: { api: Api; gm
   const hideButton = useRef<HTMLButtonElement>(null);
   const showButton = useRef<HTMLButtonElement>(null);
   const photoButton = useRef<HTMLButtonElement>(null);
-  const focusSoon = (el: React.RefObject<HTMLButtonElement | null>) => requestAnimationFrame(() => el.current?.focus());
+  // Focus follows the toggle: to Show buttons, back to Hide buttons, and back
+  // to the photo button when the photo closes (once the new buttons are drawn).
+  const focusNext = useRef<React.RefObject<HTMLButtonElement | null> | null>(null);
+  useEffect(() => {
+    focusNext.current?.current?.focus();
+    focusNext.current = null;
+  }, [clean, shot]);
   const hide = () => {
+    focusNext.current = showButton;
     setClean(true);
-    focusSoon(showButton);
   };
   const restore = () => {
+    focusNext.current = hideButton;
     setClean(false);
-    focusSoon(hideButton);
   };
   const closeShot = () => {
+    focusNext.current = photoButton;
     setShot(null);
-    focusSoon(photoButton);
   };
   useBackLayer(clean, restore);
   useBackLayer(shot !== null, closeShot);
