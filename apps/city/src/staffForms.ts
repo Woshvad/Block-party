@@ -35,6 +35,7 @@ export function itemPlace(item: Pick<ModerationItem, "kind" | "ref">): string {
   if (item.kind === "pitch") return "Mayor pitch";
   if (item.kind === "resident_name") return "Resident's name";
   if (item.kind === "resident_handle") return "Resident's handle";
+  if (item.kind === "make_good") return "Make-good reason";
   return item.kind;
 }
 

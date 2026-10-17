@@ -183,6 +183,9 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     logoutAll: () => request<{ ok: boolean }>("POST", "/v1/auth/logout-all"),
     tenancy: () => request<Record<string, unknown>>("GET", "/v1/tenancy"),
     hodlDay: (key: string) => request<Record<string, unknown>>("POST", "/v1/hodl-days", undefined, { idempotencyKey: key }),
+    // Make-goods: the ones you can still collect, and collecting one (one key per tap).
+    makeGoods: () => request<MakeGood[]>("GET", "/v1/make-goods"),
+    collectMakeGood: (id: string, key: string) => request<MakeGoodCollected>("POST", `/v1/make-goods/${encodeURIComponent(id)}/collect`, undefined, { idempotencyKey: key }),
     faucetFren: (q: string) => request<{ id: string; answer: string }>("GET", `/v1/faucet-fren?q=${encodeURIComponent(q)}`),
 
     // --- City Hall
@@ -315,6 +318,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     altFlags: () => request<Record<string, unknown>[]>("GET", "/v1/staff/alt-flags"),
     staffModeration: () => request<Array<{ id: string; kind: string; ref: string; authorId: string | null; text: string; status: string; categories: string[]; createdAt: string }>>("GET", "/v1/staff/moderation"),
     reviewModeration: (id: string, verdict: "restore" | "remove") => request<Record<string, unknown>>("POST", `/v1/staff/moderation/${encodeURIComponent(id)}/review`, { verdict }),
+    staffMakeGoods: () => request<StaffMakeGood[]>("GET", "/v1/staff/make-goods"),
+    createMakeGood: (b: { reason: string; amount: number }) => request<StaffMakeGood>("POST", "/v1/staff/make-goods", b),
     countrySwitch: (code: string, on: boolean) => request<Record<string, unknown>>("PUT", `/v1/staff/countries/${encodeURIComponent(code)}`, { on }),
     tickets: () => request<{ tickets: number; max: number }>("GET", "/v1/tower/tickets"),
   };
@@ -422,5 +427,11 @@ export type Syndicate = { id: string; marketId: string | null; cityMarketId: str
 export type Duel = { id: string; marketId: string; challengerId: string; opponentId: string; challengerSide: Side; status: string; stakeChallenger: number; stakeOpponent: number; snapChallenger: number; snapOpponent: number; lastCall: boolean; retreatedBy: string | null; winnerId: string | null; createdAt: string };
 export type Grudge = { id: string; cityDay: string; newcomerId: string; inviterId: string; status: string; winnerId: string | null };
 export type CityMarket = { id: string; question: string; kind: string; place: string | null; threshold: number | null; locksAt: string; bellDay: string };
+
+// A make-good: GM for every resident after the city let them down. closesAt
+// is when it stops being collectable (14 days after it went out).
+export type MakeGood = { id: string; reason: string; amount: number; createdAt: string; closesAt: string };
+export type MakeGoodCollected = { makeGoodId: string; amount: number; already: boolean; balance: number };
+export type StaffMakeGood = MakeGood & { createdBy: string; collected: number; paid: number };
 
 export type ReceiptBinder = { season: number; receipts: { callId: string; question: string; side: string; chance: number; world: number; aura: number; resolvedAt: string }[] };

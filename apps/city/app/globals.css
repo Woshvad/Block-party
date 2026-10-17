@@ -354,6 +354,17 @@ button:disabled { cursor: default; }
 .daily-stats p { margin: 0; font-size: 11px; color: #75806f; }
 .dashboard-note { display: flex; gap: 12px; padding: 14px 18px; border-radius: 15px; background: #e7eddb; color: #42593e; font-size: 13px; align-items: center; }
 .dashboard-note p { margin: 0; line-height: 1.5; }
+/* A make-good: the city saying sorry, with GM to collect. */
+.make-good { display: flex; align-items: center; justify-content: space-between; gap: 14px 18px; flex-wrap: wrap; padding: 16px 18px; border-radius: 18px; border: 1px solid #dcd9bc; background: #f4efd9; color: #5c4b27; }
+.make-good .eyebrow { font-size: 10px; letter-spacing: .12em; color: #8a7444; }
+.make-good p { margin: 6px 0 0; font-size: 15px; line-height: 1.45; }
+.make-good p b { white-space: nowrap; color: #2f5233; }
+.make-good-actions { display: flex; align-items: center; gap: 6px; }
+.make-good-actions .cta { padding: 11px 22px; font-size: 15px; }
+.make-good-close { border: 0; background: transparent; color: #8a7444; font-size: 22px; line-height: 1; padding: 6px 10px; border-radius: 10px; cursor: pointer; }
+.make-good-note { margin: 0; padding: 12px 14px; border-radius: 12px; font-size: 13px; }
+.make-good-note.good { background: #e7eddb; color: #325e37; }
+.make-good-note.bad { background: #fff1e9; color: #963c2e; }
 .daily-slate { display: flex; flex-direction: column; gap: 18px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .section-heading h2 { margin: 6px 0 0; font-size: 23px; letter-spacing: -.035em; }

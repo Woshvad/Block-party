@@ -1,4 +1,5 @@
 "use client";
+import type { ReactNode } from "react";
 import type { Slate, SlateCard, Today } from "./api";
 import { CALL_STATE_LABEL, TIER_LABEL } from "./call";
 import { until } from "./clock";
@@ -14,11 +15,14 @@ export type TodayViewProps = {
   today?: Today; slate?: Slate | null; todayError?: string | null; slateError?: string | null;
   now: number; pending: boolean; feedback: { text: string; bad: boolean } | null;
   onGm: () => void; onCall: (id: string) => void; retryToday: () => void; retrySlate: () => void;
+  // Shown under the heading when there's something from the city (a make-good to collect).
+  notice?: ReactNode;
 };
-export default function TodayView({ today: t, slate: s, todayError, slateError, now, pending, feedback, onGm, onCall, retryToday, retrySlate }: TodayViewProps) {
+export default function TodayView({ today: t, slate: s, todayError, slateError, now, pending, feedback, onGm, onCall, retryToday, retrySlate, notice }: TodayViewProps) {
   const summary = s ? slateSummary(s, now) : null;
   return <main className="screen today dashboard">
     <header className="dashboard-heading"><div><span className="eyebrow">YOUR DAILY CHECK-IN</span><h1>A new day in the city.</h1><p className="muted">Say gm. Make your calls. See you at the bell.</p></div><span className="dashboard-seal" aria-hidden="true">bp<span>·</span></span></header>
+    {notice}
     <section className="daily-hero" aria-labelledby="daily-title">
       <div className="hero-orbit" aria-hidden="true">☀</div>
       <span className="eyebrow">A LITTLE HELLO GOES A LONG WAY</span>
