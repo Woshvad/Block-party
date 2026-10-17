@@ -35,6 +35,41 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
 - **Profile the API suite.** It took 15 to 50 minutes on a dev machine; CI allows 90.
 
+## Ideas from Lagos Life (17 October 2026)
+
+Lagos Life, a browser life-sim set in Lagos, launched on 1 October 2026 and grew fast. Its dated updates up to 15 October were reviewed, and the ideas that fit Block Party without a business decision were built. They're on the branch `feat/lagos-ideas`, built on `fix/review-findings`, committed locally and **not pushed**. The migrations are 0050 to 0053. What needs the owner (selling ad space, sponsored places, a games hub) is in [PARKED.md](PARKED.md).
+
+- **The Daily Clue Hunt** (brick 41).
+  - **How it works:** each city day something is hidden at one public place, picked at random on the server. Today shows a riddle, and each resident gets one search a day, where they stand.
+  - **The prize** is a trophy for the home: one on the first find, another at 7 finds. There's no GM, because the clues live in the public repo.
+- **Make-goods** (brick 42).
+  - **What:** staff can give every resident up to 200 GM after an outage, at most once a week, with a reason everyone reads.
+  - **How:** residents collect it on Today within 14 days. Nothing loops over every resident. It's minted under its own ledger kind, paid once per resident, and the record can't be edited or deleted.
+- **Watch Party big moments** (brick 43).
+  - **What:** when a Tower sports market settles, or swings 15 points in 30 minutes, the Watch Party's big screen and a card show it, with quick reactions and "Make your call".
+  - **How:** the API sends it through a new `/internal/moment` rooms route, at most once per result and once an hour per swing.
+- **Pinned chats.** Pin up to 5 DMs to the top, synced across devices. The crew lead or a deputy can pin one crew message.
+  - **Ship the API and the city together:** `GET /v1/crews/mine/chat` now answers `{ pinned, messages }`.
+- **Sharing.**
+  - **Links:** a Share button on locked calls (a signed receipt link, `r-...`) and on your profile (`p-<handle>`). It uses Telegram's share sheet inside Telegram, otherwise the phone's share sheet or the clipboard.
+  - **Tilt:** no share buttons on calls while a resident is tilted, as the plan asks.
+- **The home camera:** zoom buttons, a clean view with every button hidden, and a Photo button that shares or saves a PNG.
+- **Install to home screen:** a web app manifest and icons, for the phone-browser version.
+- **Neighbours online now:** the board shows "N neighbours in the city now" from the live headcounts. It shows nothing while they're unknown, never 0.
+- **List view:** a choice under Me → Graphics that drops the 3D map for the places list, with no WebGL at all. A phone without WebGL gets it automatically.
+
+Tests: on the merged branch, typecheck, every package's suite and the city build passed on the same Windows machine against Postgres 15: core 707, db 909, API 701, rooms 61 and city 327 (after the review fixes: 664, 850, 652, 54 and 263). The API suite took 53 minutes. Every new guard was broken on purpose to check that a test goes red.
+
+Still open:
+
+- **Nothing here has been tried inside Telegram or on a phone.** That includes the share sheets, the photo on iOS and Android, install from the browser, and the list view on a weak phone.
+- **Sharing an image to a Telegram story** needs hosted image storage (R2 or similar).
+- **No swings during a match.** Polymarket sports markets freeze at kickoff and the feed stops pricing them, so during a match the only moment is the result. Fixing that means changing how markets are ingested.
+- **Moments are best effort.** If the rooms refuse one, it's recorded as sent and never retried.
+- **No pushes yet** for a new make-good or the day's clue.
+- **Make-good limits are written twice.** The database checks hardcode 200 GM and 80 characters, so changing `MAKE_GOOD` in core needs a migration too.
+- **DMs with blocked people.** These threads still show in the list, as before, and can stay pinned. Hiding them would change existing behaviour.
+
 ## What exists (one paragraph each)
 
 - **Backend (bricks 1–40).** Accounts, gm and the drip, streaks, residents, crews and gm chains, homes and Build mode, rent and jobs, the bell, moods, City Hall, moderation, live rooms (Durable Objects) and chat, rides, away life, notifications, the Tower (calls, Aura, Slate, bell show, duels, City and Crew markets, Right List), syndicates, the Crew League, Bunkers, Ratio, Tower Lights, and real-money controls (off). It also has the **Receipt Binder** query (`receiptBinder` in `packages/db/src/tower.ts`).
@@ -82,6 +117,7 @@ Still open:
 - [ ] **Proof of Neighbour providers** (phone and crypto verifiers). `PON_PEPPER` is wired; the routes return 503 until a provider is built and configured.
 - [ ] **Cloudflare account, Postgres, the Hyperdrive id, domains and the city's hosting.** `wrangler.jsonc` marks each as an `OWNER ITEM`; README "Deploying" lists the steps.
 - [ ] **A privacy and retention policy**, before account deletion and export can be built.
+- [ ] **The Lagos Life ideas that are business calls:** selling the lagoon billboards and Mempool Plots to real brands, sponsored places, and whether a games hub comes before the launch places' interiors (PARKED.md).
 
 PARKED.md was brought up to date on 12 October: the odds worker, the tick store and resolution ingestion exist; the items above are what's left.
 
