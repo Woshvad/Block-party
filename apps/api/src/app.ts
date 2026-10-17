@@ -222,6 +222,10 @@ import {
   proposeRivalry,
   acceptRivalry,
   endRivalry,
+  createMakeGood,
+  staffMakeGoods,
+  myMakeGoods,
+  collectMakeGood,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -551,6 +555,14 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/hodl-days", auth, async (c) => c.json(await buyHodlDay(db, c.get("userId"), idem(c, "hodl"))));
   app.get("/v1/tenancy", auth, async (c) => c.json(await tenancy(db, c.get("userId"), opts())));
 
+  // Make-goods: the ones you can still collect (Today shows a card), and
+  // collecting one, which moves GM, so it takes a key like every route that does.
+  app.get("/v1/make-goods", auth, async (c) => c.json(await myMakeGoods(db, c.get("userId"), opts())));
+  app.post("/v1/make-goods/:id/collect", auth, async (c) => {
+    const key = idem(c, "make-good");
+    return c.json(await collectMakeGood(db, c.get("userId"), uuid(c, "id"), key, opts()));
+  });
+
   // --- Resident ------------------------------------------------------------
 
   app.get("/v1/resident/pick-for-me", auth, async (c) => {
@@ -823,6 +835,13 @@ export function createApp(cfg: AppConfig) {
     const to = new Date(c.req.query("to") ?? "");
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw new ApiError(400, "INVALID_INPUT", "from and to must be dates, from before to");
     return c.json(await reportSla(db, { from, to, now: now() }));
+  });
+  // Make-goods: GM for every resident after an outage, one a week at most.
+  // The reason goes through the same checks as chat, staff's blocked words included.
+  app.get("/v1/staff/make-goods", auth, async (c) => c.json(await staffMakeGoods(db, c.get("userId"))));
+  app.post("/v1/staff/make-goods", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await createMakeGood(db, c.get("userId"), { reason: b.reason, amount: b.amount }, sendOpts()), 201);
   });
   // What the AI check flagged, or couldn't check, waiting for a person.
   app.get("/v1/staff/moderation", auth, async (c) => c.json(await moderationQueue(db, c.get("userId"))));
