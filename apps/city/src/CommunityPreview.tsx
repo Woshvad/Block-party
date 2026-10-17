@@ -23,12 +23,19 @@ export default function CommunityPreview() {
     const methods: Partial<Api> = {
       who: async () => residents,
       relationships: () => read(state === "empty" ? { ...rel, frens: [], bestFrens: [], crewBonds: [] } : rel),
-      dms: () => read(state === "empty" ? [] : residents.slice(0, 2).map((r, i) => ({ id: `preview-thread-${i}`, a: me.userId, b: r.userId, createdBy: me.userId, createdAt: "2026-10-10T12:00:00Z" }))),
+      dms: () => read(state === "empty" ? [] : residents.slice(0, 2).map((r, i) => ({ id: `preview-thread-${i}`, a: me.userId, b: r.userId, createdBy: me.userId, createdAt: "2026-10-10T12:00:00Z", pinned: i === 0 }))),
       dmThread: async () => ({ notice: "Simulated conversation", messages: state === "empty" ? [] : [
         { id: "preview-msg-1", authorId: residents[0]!.userId, text: "gm! Anyone heading to the diner later?", createdAt: "2026-10-10T12:00:00Z" },
         { id: "preview-msg-2", authorId: me.userId, text: "Count me in. See you at the corner table.", createdAt: "2026-10-10T12:01:00Z" },
       ] }),
       board: async () => [],
+      crewChat: () => read(state === "empty" ? { pinned: null, messages: [] } : {
+        pinned: { id: "preview-crew-1", authorId: residents[1]!.userId, text: "Crew House vote tonight after the bell. Bring ideas!", createdAt: "2026-10-10T11:00:00Z", pinnedAt: "2026-10-10T11:05:00Z" },
+        messages: [
+          { id: "preview-crew-1", authorId: residents[1]!.userId, text: "Crew House vote tonight after the bell. Bring ideas!", createdAt: "2026-10-10T11:00:00Z" },
+          { id: "preview-crew-2", authorId: residents[0]!.userId, text: "I vote for the neon sign.", createdAt: "2026-10-10T11:02:00Z" },
+        ],
+      }),
       myCrew: () => read(screen === "discover" ? null : crew),
       openTables: () => read(state === "empty" ? [] : [{ id: "preview-table", name: "The Sunday Club", members: 4, banner: [...DEFAULT_BANNER] }]),
       chain: () => read({ length: 7, needsRelight: null, relightVotes: 0, relightNeeded: 3, today: { gms: 3, needed: 3, active: 4 } }),

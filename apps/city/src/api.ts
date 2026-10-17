@@ -224,6 +224,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     dms: () => request<DmThread[]>("GET", "/v1/dms"),
     dmThread: (id: string) => request<{ notice: string; messages: Msg[] }>("GET", `/v1/dms/${encodeURIComponent(id)}`),
     dm: (userId: string, text: string) => request<{ threadId: string; message: Msg; notice: string }>("POST", `/v1/dms/to/${encodeURIComponent(userId)}`, { text }),
+    // Pinned to the top of your list (5 at most), on every device.
+    pinDm: (threadId: string, on: boolean) => request<{ threadId: string; pinned: boolean }>(on ? "PUT" : "DELETE", `/v1/dms/${encodeURIComponent(threadId)}/pin`),
     board: (place: string) => request<(Msg & { npc?: { name: string; label: string } })[]>("GET", `/v1/boards/${encodeURIComponent(place)}`),
     postBoard: (place: string, text: string) => request<Msg>("POST", `/v1/boards/${encodeURIComponent(place)}`, { text }),
     follow: (place: string, on: boolean) => request<unknown>(on ? "POST" : "DELETE", `/v1/boards/${encodeURIComponent(place)}/follow`),
@@ -247,8 +249,11 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     pot: (amount: number, key: string) => request<Record<string, unknown>>("POST", "/v1/crews/mine/pot", { amount }, { idempotencyKey: key }),
     chain: () => request<Chain>("GET", "/v1/crews/mine/chain"),
     relight: () => request<Record<string, unknown>>("POST", "/v1/crews/mine/chain/relight"),
-    crewChat: () => request<Msg[]>("GET", "/v1/crews/mine/chat"),
+    crewChat: () => request<CrewChat>("GET", "/v1/crews/mine/chat"),
     postCrewChat: (text: string) => request<Msg>("POST", "/v1/crews/mine/chat", { text }),
+    // The lead and deputies only; a new pin replaces the old one.
+    pinCrewMessage: (messageId: string) => request<{ pinned: PinnedMsg | null }>("PUT", "/v1/crews/mine/chat/pin", { messageId }),
+    unpinCrewMessage: () => request<{ pinned: null }>("DELETE", "/v1/crews/mine/chat/pin"),
     crewHouse: () => request<CrewHouse>("GET", "/v1/crews/mine/house"),
     proposePiece: (pieceId: string) => request<Record<string, unknown>>("POST", "/v1/crews/mine/house/proposals", { pieceId }),
     approvePiece: (id: string) => request<Record<string, unknown>>("POST", `/v1/crews/house/proposals/${encodeURIComponent(id)}/approve`),
@@ -403,7 +408,10 @@ export type Law = { id: string; name: string; touches: string[]; effects: Record
 export type BigNight = { place: string; kind: string; days?: string | number[]; day?: number | null; region?: string; hourUtc?: number };
 export type Who = { userId: string; handle: string; name: string; look: Look | null; npc: string | null };
 export type Msg = { id: string; authorId: string; text: string; createdAt: string };
-export type DmThread = { id: string; a: string; b: string; createdBy: string; createdAt: string };
+export type PinnedMsg = Msg & { pinnedAt: string; npc?: { name: string; label: string } };
+// pinned: null when nothing is pinned, or when you can't see the pinned message.
+export type CrewChat = { pinned: PinnedMsg | null; messages: Msg[] };
+export type DmThread = { id: string; a: string; b: string; createdBy: string; createdAt: string; pinned: boolean };
 export type Relationships = {
   frens: { userId: string; crewmate: boolean; bestFren: boolean; mutualBest: boolean }[];
   bestFrens: string[];

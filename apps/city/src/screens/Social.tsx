@@ -1,7 +1,9 @@
 "use client";
 import dynamic from "next/dynamic";
+import { RELATIONSHIPS } from "@bp/core";
 import { useState } from "react";
-import type { Api, Me } from "../api";
+import type { Api, DmThread, Me } from "../api";
+import { PIN_FULL, pinTap, splitPinned } from "../pins";
 import { PLACE_INFO } from "../places";
 import Thread from "../Thread";
 import { EmptyState, Loading, Page, useAction } from "../ui";
@@ -26,6 +28,24 @@ export default function Social({ api, me, onBack, startWith }: { api: Api; me: M
   const other = (t: { a: string; b: string }) => (t.a === me.userId ? t.b : t.a);
   const r = rel.data;
   useWho(api, [...(r?.frens.map((f) => f.userId) ?? []), ...(r?.rivals.map((x) => x.userId) ?? []), ...(r?.rivalRequests.incoming ?? []), ...(dms.data ?? []).map(other)]);
+  const lists = splitPinned(dms.data ?? []);
+  // Pins live on the server, so they follow you to every device.
+  const togglePin = (t: DmThread) => {
+    const tap = pinTap(dms.data ?? [], t.id);
+    if (tap.kind === "full") return act.say(tap.message, true);
+    void act.run(() => api.pinDm(t.id, tap.kind === "pin"), tap.kind === "pin" ? "Pinned to the top" : "Unpinned").then((x) => x && dms.reload());
+  };
+  const conversation = (t: DmThread) => (
+    <div className="conversation-item" key={t.id}>
+      <button className="conversation-row" onClick={() => setView({ kind: "dm", userId: other(t) })}>
+        <span className="neighbour-avatar" aria-hidden="true">{handleOf(other(t)).replace(/^@/, "").slice(0, 1).toUpperCase()}</span>
+        <span className="neighbour-info"><b>{handleOf(other(t))}</b><small>{t.pinned ? "📌 Pinned" : "Open your conversation"}</small></span><span aria-hidden="true">↗</span>
+      </button>
+      <button className="pin-toggle" aria-pressed={t.pinned} aria-label={`${t.pinned ? "Unpin" : "Pin"} your chat with ${handleOf(other(t))}`} disabled={act.pending} onClick={() => togglePin(t)}>
+        <span aria-hidden="true">📌</span>
+      </button>
+    </div>
+  );
 
   if (view.kind === "dm") {
     return (
@@ -135,12 +155,13 @@ export default function Social({ api, me, onBack, startWith }: { api: Api; me: M
           ) : dms.data.length === 0 ? (
             <EmptyState icon="↗" title="Start a conversation" description="Send a little hello to a fren. Your conversations will live here." action={<button className="btn light" onClick={() => setTab("frens")}>Find your frens</button>} />
           ) : (
-            dms.data.map((t) => (
-              <button className="conversation-row" key={t.id} onClick={() => setView({ kind: "dm", userId: other(t) })}>
-                <span className="neighbour-avatar" aria-hidden="true">{handleOf(other(t)).replace(/^@/, "").slice(0, 1).toUpperCase()}</span>
-                <span className="neighbour-info"><b>{handleOf(other(t))}</b><small>Open your conversation</small></span><span aria-hidden="true">↗</span>
-              </button>
-            ))
+            <>
+              {lists.pinned.length > 0 && <h3 className="band">Pinned</h3>}
+              {lists.pinned.map(conversation)}
+              {lists.pinned.length >= RELATIONSHIPS.pinnedDms && <p className="pin-note">{PIN_FULL}</p>}
+              {lists.pinned.length > 0 && lists.rest.length > 0 && <h3 className="band">Everyone else</h3>}
+              {lists.rest.map(conversation)}
+            </>
           )}
         </section>
       )}
