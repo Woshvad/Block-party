@@ -157,8 +157,8 @@ describe("the cap and racing", () => {
     expect(picked).toHaveLength(MOMENTS.perPoll);
     expect(new Set(picked.map((m) => m.marketId)).size).toBe(MOMENTS.perPoll);
     expect(picked.map((m) => m.marketId).sort()).toEqual([...results, swings[3]!].sort());
-    const [{ n }] = await client`SELECT count(*)::int AS n FROM tower_moments WHERE at = ${new Date(t).toISOString()}`;
-    expect(n).toBe(MOMENTS.perPoll);
+    const [row] = await client`SELECT count(*)::int AS n FROM tower_moments WHERE at = ${new Date(t).toISOString()}`;
+    expect(row!.n).toBe(MOMENTS.perPoll);
   });
 
   it("refuses a date that isn't one, without throwing synchronously", async () => {
