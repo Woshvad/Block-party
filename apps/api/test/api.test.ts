@@ -100,7 +100,7 @@ describe("auth", () => {
 describe("idempotency over HTTP", () => {
   it("GM-moving routes need a key", async () => {
     const u = await resident();
-    for (const [path, body] of [["/v1/home/buy", { pieceId: "stool" }], ["/v1/hodl-days", {}]] as const) {
+    for (const [path, body] of [["/v1/home/buy", { pieceId: "stool" }], ["/v1/hodl-days", {}], [`/v1/make-goods/${crypto.randomUUID()}/collect`, {}]] as const) {
       const r = await call("POST", path, { token: u.token, body });
       expect(r.status).toBe(400);
       expect(r.body.error.code).toBe("IDEMPOTENCY_KEY_REQUIRED");

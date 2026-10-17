@@ -1,0 +1,133 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { call, client, close, idem, logs, makeApp, ready, resident } from "./harness";
+
+beforeAll(ready);
+afterAll(close);
+
+const DAY = 86_400_000;
+const HOUR = 3_600_000;
+const SORRY = "The city's sorry about the outage.";
+const REASON = "Repeatedly asked other residents for their seed phrases in DMs.";
+
+// Make-goods are city-wide and never two within 7 days of each other, so each
+// test sends its own a week and an hour after the last, after everyone here
+// moved in. Sessions last 30 days, so the last one still fits inside them.
+const BASE = Date.now();
+const slot = (k: number) => new Date(BASE + k * (7 * DAY + HOUR));
+const at = (t: Date) => makeApp({ now: () => t });
+
+async function staffer() {
+  const s = await resident();
+  await client`INSERT INTO staff (user_id, role) VALUES (${s.userId}, 'moderator')`;
+  return s;
+}
+
+describe("staff routes", () => {
+  it("non-staff get the same refusal as every other staff route", async () => {
+    const u = await resident();
+    const reports = await call("GET", "/v1/staff/reports", { token: u.token });
+    const list = await call("GET", "/v1/staff/make-goods", { token: u.token });
+    const send = await call("POST", "/v1/staff/make-goods", { token: u.token, body: { reason: SORRY, amount: 100 } });
+    for (const r of [list, send]) expect([r.status, r.body.error.code, r.body.error.message]).toEqual([reports.status, reports.body.error.code, reports.body.error.message]);
+    expect(reports.status).toBe(403);
+    expect(await client`SELECT 1 FROM make_goods WHERE created_by = ${u.userId}`).toHaveLength(0);
+  });
+
+  it("the cap, the chat filter and the week, over HTTP", async () => {
+    const mod = await staffer();
+    const via = at(slot(1));
+    const send = (body: unknown, app = via) => call("POST", "/v1/staff/make-goods", { token: mod.token, body, via: app });
+    expect((await send({ reason: SORRY, amount: 201 })).body.error.code).toBe("INVALID_INPUT");
+    expect((await send({ reason: SORRY, amount: 99.5 })).status).toBe(400);
+    expect((await send({ reason: "hi", amount: 100 })).status).toBe(400);
+    const scam = await send({ reason: "Sorry! Connect your wallet to claim", amount: 100 });
+    expect([scam.status, scam.body.error.code]).toEqual([422, "MODERATED"]);
+    const blocked = await send({ reason: "Sorry about the badword outage", amount: 100 }, makeApp({ now: () => slot(1), blockedWords: ["badword"] }));
+    expect([blocked.status, blocked.body.error.code]).toEqual([422, "MODERATED"]);
+    const ok = await send({ reason: SORRY, amount: 200 });
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ reason: SORRY, amount: 200, createdBy: mod.userId, createdAt: slot(1).toISOString(), closesAt: new Date(slot(1).getTime() + 14 * DAY).toISOString(), collected: 0, paid: 0 });
+    const again = await send({ reason: SORRY, amount: 50 }, at(new Date(slot(1).getTime() + 6 * DAY)));
+    expect([again.status, again.body.error.code]).toEqual([409, "TOO_SOON"]);
+    // Hostile values never 500 or reach the database unchecked, and nothing gets past the week.
+    const nasty = ["\u0000", "a\u0000b sorry folks", "' OR '1'='1", "<script>alert(1)</script>", "\u202eevil reason", "x".repeat(5000), 0, -1, 1e308, true, null, [], {}, [[["deep"]]]];
+    for (const v of nasty) {
+      for (const body of [{ reason: v, amount: 100 }, { reason: SORRY, amount: v }]) expect((await send(body)).status, JSON.stringify(body).slice(0, 60)).toBeLessThan(500);
+    }
+    expect(logs.filter((l) => l.msg === "input reached the database unvalidated")).toEqual([]);
+    expect(await client`SELECT 1 FROM make_goods WHERE created_by = ${mod.userId}`).toHaveLength(1);
+  });
+});
+
+describe("residents collect it", () => {
+  it("Today lists it; collecting needs a key, pays once, and the staff list counts it", async () => {
+    const [mod, u] = [await staffer(), await resident()];
+    const sent = await call("POST", "/v1/staff/make-goods", { token: mod.token, body: { reason: SORRY, amount: 100 }, via: at(slot(2)) });
+    const id = sent.body.id as string;
+    const later = at(new Date(slot(2).getTime() + HOUR));
+    // The last one is still open too (14 days); this test looks at its own.
+    const mine = async () => ((await call("GET", "/v1/make-goods", { token: u.token, via: later })).body as Array<{ id: string }>).filter((m) => m.id === id);
+    expect(await mine()).toEqual([{ id, reason: SORRY, amount: 100, createdAt: slot(2).toISOString(), closesAt: new Date(slot(2).getTime() + 14 * DAY).toISOString() }]);
+
+    const keyless = await call("POST", `/v1/make-goods/${id}/collect`, { token: u.token, via: later });
+    expect([keyless.status, keyless.body.error.code]).toEqual([400, "IDEMPOTENCY_KEY_REQUIRED"]);
+    const h = idem();
+    const first = await call("POST", `/v1/make-goods/${id}/collect`, { token: u.token, headers: h, via: later });
+    expect([first.status, first.body]).toEqual([200, { makeGoodId: id, amount: 100, already: false, balance: 1100 }]);
+    // The same tap retried, and a new tap: neither pays again.
+    for (const headers of [h, idem()]) expect((await call("POST", `/v1/make-goods/${id}/collect`, { token: u.token, headers, via: later })).body).toEqual({ makeGoodId: id, amount: 100, already: true, balance: 1100 });
+    expect((await call("GET", "/v1/me", { token: u.token })).body.gm).toBe(1100);
+    expect(await mine()).toEqual([]);
+    const staffView = await call("GET", "/v1/staff/make-goods", { token: mod.token });
+    expect(staffView.body.find((m: { id: string }) => m.id === id)).toMatchObject({ reason: SORRY, amount: 100, createdBy: mod.userId, collected: 1, paid: 100 });
+  });
+
+  it("a double tap from two devices is paid once", async () => {
+    const [mod, u] = [await staffer(), await resident()];
+    const id = (await call("POST", "/v1/staff/make-goods", { token: mod.token, body: { reason: SORRY, amount: 80 }, via: at(slot(3)) })).body.id as string;
+    const later = at(new Date(slot(3).getTime() + HOUR));
+    const taps = await Promise.all([0, 1, 2].map(() => call("POST", `/v1/make-goods/${id}/collect`, { token: u.token, headers: idem(), via: later })));
+    expect(taps.map((t) => t.status)).toEqual([200, 200, 200]);
+    expect(taps.filter((t) => t.body.already === false)).toHaveLength(1);
+    expect((await call("GET", "/v1/me", { token: u.token })).body.gm).toBe(1080);
+  });
+
+  it("a suspension refuses it as it refuses the drip; a chat mute doesn't", async () => {
+    const [mod, other, suspended, muted] = [await staffer(), await staffer(), await resident(), await resident()];
+    const id = (await call("POST", "/v1/staff/make-goods", { token: mod.token, body: { reason: SORRY, amount: 100 }, via: at(slot(4)) })).body.id as string;
+    for (const [who, kind] of [[suspended, "suspended"], [muted, "chat_mute"]] as const) {
+      expect((await call("POST", "/v1/staff/restrictions", { token: other.token, body: { userId: who.userId, kind, reason: REASON } })).status).toBe(201);
+    }
+    const later = at(new Date(slot(4).getTime() + HOUR));
+    const gm = await call("POST", "/v1/gm", { token: suspended.token, via: later });
+    const collect = await call("POST", `/v1/make-goods/${id}/collect`, { token: suspended.token, headers: idem(), via: later });
+    expect([collect.status, collect.body.error.code]).toEqual([gm.status, gm.body.error.code]);
+    expect(collect.body.error).toMatchObject({ code: "RESTRICTED" });
+    expect((await call("GET", "/v1/make-goods", { token: suspended.token, via: later })).body.map((m: { id: string }) => m.id)).toContain(id); // reading is still fine
+    expect((await call("POST", `/v1/make-goods/${id}/collect`, { token: muted.token, headers: idem(), via: later })).body).toMatchObject({ amount: 100, already: false });
+  });
+
+  it("nothing for guests, newcomers since it went out, or anyone after 14 days", async () => {
+    const [mod, u] = [await staffer(), await resident()];
+    // Sent now by the database's clock (which stamps move-ins), a week before the first slot's.
+    const [{ t }] = (await client`SELECT clock_timestamp() AS t`) as unknown as [{ t: string }];
+    const sentAt = new Date(new Date(t).getTime() + 2);
+    const id = (await call("POST", "/v1/staff/make-goods", { token: mod.token, body: { reason: SORRY, amount: 100 }, via: at(sentAt) })).body.id as string;
+    const newcomer = await resident();
+    const guest = (await call("POST", "/v1/auth/guest", { body: { ageAck: true } })).body.sessionToken as string;
+    const later = at(new Date(sentAt.getTime() + HOUR));
+
+    expect((await call("GET", "/v1/make-goods", { token: newcomer.token, via: later })).body).toEqual([]);
+    const late = await call("POST", `/v1/make-goods/${id}/collect`, { token: newcomer.token, headers: idem(), via: later });
+    expect([late.status, late.body.error.code]).toEqual([403, "NOT_ELIGIBLE"]);
+    expect((await call("GET", "/v1/make-goods", { token: guest, via: later })).body).toEqual([]);
+    const g = await call("POST", `/v1/make-goods/${id}/collect`, { token: guest, headers: idem(), via: later });
+    expect([g.status, g.body.error.code]).toEqual([404, "NO_RESIDENT"]);
+    const closed = await call("POST", `/v1/make-goods/${id}/collect`, { token: u.token, headers: idem(), via: at(new Date(sentAt.getTime() + 14 * DAY)) });
+    expect([closed.status, closed.body.error.code]).toEqual([409, "TOO_LATE"]);
+    const nope = await call("POST", `/v1/make-goods/${crypto.randomUUID()}/collect`, { token: u.token, headers: idem(), via: later });
+    expect([nope.status, nope.body.error.code]).toEqual([404, "NO_SUCH_MAKE_GOOD"]);
+    expect((await call("POST", "/v1/make-goods/not-an-id/collect", { token: u.token, headers: idem(), via: later })).status).toBe(404);
+    expect((await call("GET", "/v1/me", { token: u.token })).body.gm).toBe(1000);
+  });
+});

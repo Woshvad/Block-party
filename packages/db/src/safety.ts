@@ -17,6 +17,7 @@ import {
   crews,
   frenTaps,
   frens,
+  makeGoods,
   messages,
   moderationItems,
   mutes,
@@ -423,16 +424,18 @@ export type FlaggedItem = { id: string; kind: string; ref: string; authorId: str
 // The original stays in its moderation item, for staff to read and restore.
 export const PITCH_UNDER_REVIEW = "This pitch is waiting for a moderator.";
 export const CREW_NAME_UNDER_REVIEW = "Crew name under review";
+// A flagged make-good keeps paying out; only its words wait.
+export const MAKE_GOOD_UNDER_REVIEW = "The city's sorry for the trouble.";
 
 const PITCH_REF = /^(\d{4}-\d{2}-\d{2}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 type Takeable = { id?: string; kind: string; ref: string; text: string };
 
 // Takes flagged text down where it lives: board, crew and DM messages and
-// Ratio headlines are hidden; a pitch or crew name is swapped for the
-// placeholder above, and a resident's display name for their @handle, but
-// only while it still says what was flagged (a newer pitch or a rename is
-// checked on its own). Room lines live in the rooms Worker, so the API takes
+// Ratio headlines are hidden; a pitch, crew name or make-good's reason is
+// swapped for the placeholder above, and a resident's display name for their
+// @handle, but only while it still says what was flagged (a newer pitch or a
+// rename is checked on its own). Room lines live in the rooms Worker, so the API takes
 // those down. A handle can't change (a database guard), so a flagged handle
 // stays up and staff deal with the resident instead.
 export async function takeDownFlagged(db: Db, item: Takeable) {
@@ -455,12 +458,14 @@ export async function takeDownFlagged(db: Db, item: Takeable) {
     if (UUID.test(ref)) await db.update(crews).set({ name: CREW_NAME_UNDER_REVIEW }).where(and(eq(crews.id, ref.toLowerCase()), eq(crews.name, text)));
   } else if (kind === "resident_name") {
     if (UUID.test(ref)) await db.update(residents).set({ name: sql`${residents.handle}` }).where(and(eq(residents.userId, ref.toLowerCase()), eq(residents.name, text)));
+  } else if (kind === "make_good") {
+    if (UUID.test(ref)) await db.update(makeGoods).set({ reason: MAKE_GOOD_UNDER_REVIEW }).where(and(eq(makeGoods.id, ref.toLowerCase()), eq(makeGoods.reason, text)));
   }
 }
 
-// Staff found it was fine: the text goes back up. A pitch, crew name or
-// resident's name comes back only if it still shows the placeholder and
-// nothing newer has been written there since.
+// Staff found it was fine: the text goes back up. A pitch, crew name,
+// resident's name or make-good's reason comes back only if it still shows the
+// placeholder and nothing newer has been written there since.
 async function putBack(tx: Db, item: Takeable & { id: string }) {
   const { kind, ref, text } = item;
   // Compared in the database: a JavaScript Date drops the microseconds.
@@ -504,6 +509,9 @@ async function putBack(tx: Db, item: Takeable & { id: string }) {
         .set({ name: text })
         .where(and(eq(residents.userId, ref.toLowerCase()), sql`${residents.name} = ${residents.handle}`));
     }
+  } else if (kind === "make_good") {
+    // A make-good's reason is written once, so nothing newer can be there.
+    if (UUID.test(ref)) await tx.update(makeGoods).set({ reason: text }).where(and(eq(makeGoods.id, ref.toLowerCase()), eq(makeGoods.reason, MAKE_GOOD_UNDER_REVIEW)));
   }
 }
 

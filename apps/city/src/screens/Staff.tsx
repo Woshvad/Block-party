@@ -1,6 +1,8 @@
 "use client";
+import { MAKE_GOOD } from "@bp/core";
 import { useState } from "react";
 import type { Api } from "../api";
+import { makeGoodConfirm, makeGoodProblem } from "../makeGoods";
 import { label } from "../palette";
 import { RESTRICT_FOR, itemPlace, itemState, resolveProblem, reviewChoices } from "../staffForms";
 import { ifConfirmed } from "../telegram";
@@ -15,15 +17,15 @@ type Any = Record<string, unknown>;
 const RESTRICTIONS = ["chat_mute", "suspended"] as const;
 
 export default function Staff({ api, onBack }: { api: Api; onBack: () => void }) {
-  const [tab, setTab] = useState<"reports" | "flagged" | "appeals" | "markets" | "alts" | "controls">("reports");
+  const [tab, setTab] = useState<"reports" | "flagged" | "appeals" | "markets" | "make_goods" | "alts" | "controls">("reports");
   const act = useAction();
   return (
     <Page title="Staff" onBack={onBack}>
       {act.toast}
       <div className="chips">
-        {(["reports", "flagged", "appeals", "markets", "alts", "controls"] as const).map((t) => (
+        {(["reports", "flagged", "appeals", "markets", "make_goods", "alts", "controls"] as const).map((t) => (
           <button key={t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
-            {label(t)}
+            {t === "make_goods" ? "Make-goods" : label(t)}
           </button>
         ))}
       </div>
@@ -31,6 +33,7 @@ export default function Staff({ api, onBack }: { api: Api; onBack: () => void })
       {tab === "flagged" && <Flagged api={api} act={act} />}
       {tab === "appeals" && <Appeals api={api} act={act} />}
       {tab === "markets" && <Markets api={api} act={act} />}
+      {tab === "make_goods" && <MakeGoods api={api} act={act} />}
       {tab === "alts" && <Alts api={api} />}
       {tab === "controls" && <Controls api={api} act={act} />}
     </Page>
@@ -251,6 +254,67 @@ function Markets({ api, act }: { api: Api; act: Act }) {
           </div>
         ))}
         {open.data?.length === 0 && <p className="muted">Nothing open.</p>}
+      </section>
+    </>
+  );
+}
+
+// Make-goods: GM for every resident after the city let them down. The
+// confirm says the cap and that everyone can collect it before anything goes
+// out; the API holds it to one a week.
+function MakeGoods({ api, act }: { api: Api; act: Act }) {
+  const sent = useLoad(() => api.staffMakeGoods(), [api]);
+  const [f, setF] = useState({ reason: "", amount: "100" });
+  useWho(api, (sent.data ?? []).map((m) => m.createdBy));
+  const problem = makeGoodProblem(f);
+  const send = () => {
+    const b = { reason: f.reason.trim(), amount: Number(f.amount) };
+    ifConfirmed(makeGoodConfirm(b), () =>
+      act.run(() => api.createMakeGood(b), `Sent: +${b.amount} GM for every resident`).then((r) => {
+        if (!r) return;
+        setF({ reason: "", amount: "100" });
+        void sent.reload();
+      }),
+    );
+  };
+  return (
+    <>
+      <section className="card">
+        <h2>New make-good</h2>
+        <p className="muted">
+          Up to {MAKE_GOOD.max} GM, one a week. Every resident who has moved in can collect it once, within {MAKE_GOOD.collectDays} days.
+        </p>
+        <label className="field">
+          Reason (every resident reads it)
+          <input value={f.reason} maxLength={MAKE_GOOD.reasonMaxChars} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="The city's sorry about the outage." />
+        </label>
+        <label className="field">
+          GM each
+          <input inputMode="numeric" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value.replace(/[^0-9]/g, "") })} />
+        </label>
+        {f.reason.trim() && problem && <p className="muted">{problem}</p>}
+        <button className="btn" disabled={!!problem || act.pending} onClick={send}>
+          Send to everyone
+        </button>
+      </section>
+      <section className="card">
+        <h2>Sent</h2>
+        {!sent.data && <Loading error={sent.error} retry={sent.reload} />}
+        {sent.data?.length === 0 && <p className="muted">No make-goods yet.</p>}
+        {sent.data?.map((m) => (
+          <div className="listrow" key={m.id}>
+            <span>
+              "{m.reason}" · +{m.amount} GM
+              <br />
+              <small className="muted">
+                {new Date(m.createdAt).toLocaleString()} by {handleOf(m.createdBy)} · {Date.parse(m.closesAt) > Date.now() ? `open until ${new Date(m.closesAt).toLocaleDateString()}` : "closed"}
+              </small>
+            </span>
+            <span>
+              {m.collected.toLocaleString("en-US")} collected · {m.paid.toLocaleString("en-US")} GM
+            </span>
+          </div>
+        ))}
       </section>
     </>
   );

@@ -17,11 +17,14 @@ export type TodayViewProps = {
   onGm: () => void; onCall: (id: string) => void; retryToday: () => void; retrySlate: () => void;
   // The Daily clue card (DailyClue.tsx), between your progress and the Slate.
   clue?: ReactNode;
+  // Shown under the heading when there's something from the city (a make-good to collect).
+  notice?: ReactNode;
 };
-export default function TodayView({ today: t, slate: s, todayError, slateError, now, pending, feedback, onGm, onCall, retryToday, retrySlate, clue }: TodayViewProps) {
+export default function TodayView({ today: t, slate: s, todayError, slateError, now, pending, feedback, onGm, onCall, retryToday, retrySlate, clue, notice }: TodayViewProps) {
   const summary = s ? slateSummary(s, now) : null;
   return <main className="screen today dashboard">
     <header className="dashboard-heading"><div><span className="eyebrow">YOUR DAILY CHECK-IN</span><h1>A new day in the city.</h1><p className="muted">Say gm. Make your calls. See you at the bell.</p></div><span className="dashboard-seal" aria-hidden="true">bp<span>·</span></span></header>
+    {notice}
     <section className="daily-hero" aria-labelledby="daily-title">
       <div className="hero-orbit" aria-hidden="true">☀</div>
       <span className="eyebrow">A LITTLE HELLO GOES A LONG WAY</span>

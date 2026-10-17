@@ -31,6 +31,7 @@ import {
   LightsError,
   RealMoneyError,
   HuntError,
+  MakeGoodError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -279,7 +280,18 @@ const REAL_MONEY: Record<RealMoneyError["code"], number> = { INVALID_INPUT: 400,
 
 const HUNT: Record<HuntError["code"], number> = { INVALID_INPUT: 400, NO_RESIDENT: 404, NOT_AT_A_PLACE: 409, ALREADY_SEARCHED: 409 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET, SYNDICATE, RATIO, LIGHTS, REAL_MONEY, HUNT };
+const MAKE_GOOD: Record<MakeGoodError["code"], number> = {
+  NOT_STAFF: 403,
+  INVALID_INPUT: 400,
+  MODERATED: 422,
+  TOO_SOON: 409,
+  NO_SUCH_MAKE_GOOD: 404,
+  NO_RESIDENT: 404,
+  NOT_ELIGIBLE: 403,
+  TOO_LATE: 409,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET, SYNDICATE, RATIO, LIGHTS, REAL_MONEY, HUNT, MAKE_GOOD };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -307,6 +319,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof PonError) return out(PON_STATUS[e.code], e.code, e.message);
   if (e instanceof RealMoneyError) return out(REAL_MONEY[e.code], e.code, e.message);
   if (e instanceof HuntError) return out(HUNT[e.code], e.code, e.message);
+  if (e instanceof MakeGoodError) return out(MAKE_GOOD[e.code], e.code, e.message);
   if (e instanceof LightsError) return out(LIGHTS[e.code], e.code, e.message);
   if (e instanceof RatioError) return out(RATIO[e.code], e.code, e.message);
   if (e instanceof SyndicateError) return out(SYNDICATE[e.code], e.code, e.message);

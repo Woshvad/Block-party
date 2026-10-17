@@ -32,6 +32,7 @@ describe("the flagged queue", () => {
     expect(itemPlace({ kind: "pitch", ref: "2026-10-12:u" })).toBe("Mayor pitch");
     expect(itemPlace({ kind: "resident_name", ref: "u" })).toBe("Resident's name");
     expect(itemPlace({ kind: "resident_handle", ref: "u" })).toBe("Resident's handle");
+    expect(itemPlace({ kind: "make_good", ref: "m" })).toBe("Make-good reason");
   });
 
   it("offers only what can actually happen", () => {
