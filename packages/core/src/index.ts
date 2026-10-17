@@ -14,6 +14,7 @@ export * from "./politics";
 export * from "./moderation";
 export * from "./openai-moderation";
 export * from "./room";
+export * from "./moments";
 export * from "./ticket";
 export * from "./rides";
 export * from "./away";

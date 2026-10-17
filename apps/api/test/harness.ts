@@ -1,4 +1,4 @@
-import { pickForMe, seededRandomInt, signTelegramInitData } from "@bp/core";
+import { type TowerMoment, pickForMe, seededRandomInt, signTelegramInitData } from "@bp/core";
 import { createDb, ensureSystemAccounts } from "@bp/db";
 import { type AppConfig, createApp } from "../src/app";
 
@@ -15,12 +15,16 @@ export const roomsState = {
   where: new Map<string, number>(), // `${userId}|${place}` -> copy
   evidence: new Map<string, Array<{ id: string; userId: string; handle: string; text: string; at: number }>>(), // `${place}#${copy}`
   takedowns: [] as string[],
+  moments: [] as Array<{ place: string; moment: TowerMoment }>,
 };
 export const fakeRooms = {
   where: async (u: string, place: string) => roomsState.where.get(`${u}|${place}`) ?? null,
   evidence: async (place: string, copy: number) => roomsState.evidence.get(`${place}#${copy}`) ?? [],
   takedown: async (place: string, copy: number, lineId: string) => {
     roomsState.takedowns.push(`${place}#${copy}#${lineId}`);
+  },
+  moment: async (place: string, moment: TowerMoment) => {
+    roomsState.moments.push({ place, moment });
   },
 };
 export const TICKET_SECRET = "k".repeat(40);

@@ -8,8 +8,8 @@ export type CronResult = PromiseSettledResult<unknown> & { job: string };
 // The minute cron: the bell, finished actions, Last Call, the Ratio prompt,
 // real-trade settling, notifications, the daily pings every 15 minutes, the
 // sweeps every 10 minutes, the odds poll that publishes the Slate and the
-// NPCs' calls, and the AI moderation check over the queue (with the rooms, for
-// room lines). One list for the Worker's scheduled() and the local Node
+// NPCs' calls and sends the Watch Party its big moments (with the rooms), and
+// the AI moderation check over the queue (with the rooms, for room lines). One list for the Worker's scheduled() and the local Node
 // server, so they can't drift apart. Every job runs even if another fails.
 // Add a job as its own named entry.
 export async function runMinute(
@@ -44,7 +44,16 @@ export async function runMinute(
     // day the poll couldn't grant is its own failure (retried by the next
     // poll), not a reason to hold back the day's Slate.
     const poll = pollOdds(db, deps.odds, { now: at });
-    jobs.odds = poll;
+    // A poll that polled may have brought big moments for the Watch Party.
+    // Best effort, and only with the rooms to send them to: the odds job's
+    // result is the poll's whatever becomes of them.
+    const rooms = deps.rooms;
+    jobs.odds = rooms
+      ? poll.then(async (r) => {
+          if (r.ok && !r.skipped) await (await import("./moments")).announceMoments(db, rooms, at);
+          return r;
+        })
+      : poll;
     jobs.slate = poll.catch(() => undefined).then(() => publishSlate(db, { now: at })).then(() => npcCalls(db, { now: at }));
   }
   const moderation = deps.moderation;

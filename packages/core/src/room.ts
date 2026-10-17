@@ -2,6 +2,8 @@
 // event-driven: the Durable Object feeds it events and the time, and sends
 // whatever deliveries it returns. Nothing runs between events (rooms sleep).
 
+import { MOMENTS, type TowerMoment, hasScreen, parseMoment } from "./moments";
+
 export const ROOM = {
   capacity: 60, // people, not counting away residents
   awayDrawn: 10, // away residents drawn on top of the 60; the rest are only counted
@@ -95,6 +97,8 @@ export type ServerEvent =
   | { t: "removed"; lineId: string }
   | { t: "emote"; userId: string; emote: Emote }
   | { t: "headcount"; headcount: Headcount }
+  // A Tower moment for the big screen; showForMs: how long it has left.
+  | { t: "moment"; moment: TowerMoment; showForMs: number }
   | { t: "error"; code: string; message: string };
 
 export type Headcount = { here: number; npc: number; away: number };
@@ -109,6 +113,9 @@ export type Effect =
 
 export type Outcome = { ok: boolean; code?: string; deliveries: Delivery[]; effects: Effect[] };
 
+// The latest moment a room holds, until when (ms).
+export type KeptMoment = { moment: TowerMoment; until: number };
+
 const done = (deliveries: Delivery[] = [], effects: Effect[] = []): Outcome => ({ ok: true, deliveries, effects });
 const refuse = (to: string, code: string, message: string): Outcome => ({ ok: false, code, deliveries: [{ to: [to], event: { t: "error", code, message } }], effects: [] });
 
@@ -118,6 +125,7 @@ export class RoomEngine {
   private evidence: ChatLine[] = [];
   private rate = new Map<string, number[]>(); // `${kind}:${userId}` -> timestamps
   private seq = 0;
+  private kept: KeptMoment | null = null;
 
   constructor(
     readonly place: string,
@@ -219,7 +227,7 @@ export class RoomEngine {
     if (existing) {
       // A reconnect (a deploy, a flaky phone): same place in the room, fresh view.
       Object.assign(existing, { handle: input.handle, crewId: input.crewId, hidden: input.hidden, blocked: input.blocked, canChat: input.canChat });
-      return done([{ to: [input.userId], event: this.welcome(existing, now) }]);
+      return done([{ to: [input.userId], event: this.welcome(existing, now) }, ...this.momentFor(input.userId, now)]);
     }
     if (this.members.size >= ROOM.capacity) return refuse(input.userId, "ROOM_FULL", "this room is full; the directory will send you to a copy");
     const pos = this.clamp(input.pos ?? { x: Math.floor(this.size.w / 2), y: this.size.h - 1 });
@@ -228,6 +236,7 @@ export class RoomEngine {
     const view = { userId: m.userId, handle: m.handle, pos: m.pos, seat: m.seat };
     return done([
       { to: [m.userId], event: this.welcome(m, now) },
+      ...this.momentFor(m.userId, now),
       { to: this.audience(m.userId, false), event: { t: "joined", member: view } },
       { to: this.everyone(), event: { t: "headcount", headcount: this.headcount() } },
     ]);
@@ -395,6 +404,38 @@ export class RoomEngine {
     if (typeof emote !== "string" || !(EMOTES as readonly string[]).includes(emote)) return refuse(userId, "BAD_EMOTE", "no such emote");
     if (!this.allowed("emote", userId, ROOM.emotePerWindow, now)) return refuse(userId, "SLOW_DOWN", "slow down, ser");
     return done([{ to: this.audience(userId), event: { t: "emote", userId, emote: emote as Emote } }]);
+  }
+
+  // --- Big moments -----------------------------------------------------------------
+
+  // A Tower moment for the big screen: everyone here sees it now, and anyone
+  // who joins in the next 2 minutes gets it as they arrive. Only a place with
+  // a screen takes one, and the same moment twice (a retried delivery) is
+  // shown once. The newest replaces the one kept before it.
+  moment(input: unknown, now: number): Outcome {
+    if (!hasScreen(this.place)) return { ok: false, code: "NO_SCREEN", deliveries: [], effects: [] };
+    const m = parseMoment(input);
+    if (!m) return { ok: false, code: "BAD_MOMENT", deliveries: [], effects: [] };
+    if (this.kept?.moment.id === m.id) return done();
+    const showForMs = MOMENTS.showSeconds * 1000;
+    this.kept = { moment: m, until: now + showForMs };
+    return done([{ to: this.everyone(), event: { t: "moment", moment: m, showForMs } }]);
+  }
+
+  private momentFor(userId: string, now: number): Delivery[] {
+    const k = this.kept;
+    return k && now < k.until ? [{ to: [userId], event: { t: "moment", moment: k.moment, showForMs: k.until - now } }] : [];
+  }
+
+  // What the server saves so the moment outlives a nap, and loads back.
+  keptMoment(): KeptMoment | null {
+    return this.kept ? { ...this.kept } : null;
+  }
+
+  loadMoment(saved: unknown): void {
+    const s = saved as Partial<KeptMoment> | null | undefined;
+    const m = s && typeof s === "object" && Number.isFinite(s.until) ? parseMoment(s.moment) : null;
+    this.kept = m ? { moment: m, until: s!.until! } : null;
   }
 
   // Moderation hid a line after the fact (the AI check flagged it).

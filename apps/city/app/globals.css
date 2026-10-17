@@ -703,3 +703,34 @@ body:has(.claim) .as-list { padding-bottom: calc(var(--safe-bottom) + 210px); }
 .home-restore { position: fixed; right: 10px; top: calc(var(--safe-top) + 10px); z-index: 5; border-radius: 999px; }
 body:has(.home-clean) .app-navigation { display: none; }
 .photo-sheet img { width: 100%; max-height: 55dvh; object-fit: contain; border-radius: 14px; background: #e9e4db; }
+/* The Watch Party's big moment: a card over the room, a burst when it lands, a fade as its 2 minutes end. */
+.moment-card { position:fixed; z-index:7; top:calc(var(--safe-top) + 72px); left:16px; right:16px; max-width:420px; margin:auto; padding:16px 18px 14px; border-radius:22px; background:#15233b; color:#f3f7ff; box-shadow:0 14px 40px #0b162a55; overflow:hidden; transition:opacity .9s ease, transform .9s ease; }
+.moment-card.settled { background:#163a2b; }
+.moment-card.is-fading { opacity:0; transform:translateY(-8px); }
+.moment-card h3 { margin:4px 34px 6px 0; font-size:17px; line-height:1.25; }
+.moment-eyebrow { margin:0; font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:#8fc1ff; }
+.moment-card.settled .moment-eyebrow { color:#8fe0b4; }
+.moment-move { margin:0; font-size:26px; font-weight:900; letter-spacing:-.01em; }
+.moment-detail { margin:4px 0 0; font-size:12px; opacity:.8; }
+.moment-reactions { display:flex; gap:8px; margin-top:12px; }
+.moment-reactions button { flex:1; min-height:44px; border:0; border-radius:14px; background:#ffffff1c; font-size:22px; cursor:pointer; }
+.moment-reactions button:disabled { opacity:.45; cursor:default; }
+.moment-call { margin-top:10px; width:100%; min-height:42px; border:0; border-radius:14px; background:#f2d04b; color:#1d2433; font:inherit; font-size:14px; font-weight:800; cursor:pointer; }
+.moment-close { position:absolute; top:8px; right:8px; min-width:36px; min-height:36px; border:0; background:transparent; color:inherit; font-size:22px; cursor:pointer; opacity:.75; }
+.moment-more { margin:10px 0 0; padding:8px 0 0; border-top:1px solid #ffffff22; list-style:none; font-size:11px; opacity:.75; }
+.moment-more li { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.moment-card button:focus-visible { outline:3px solid #f2d04b; outline-offset:2px; }
+.moment-burst { position:absolute; inset:0; pointer-events:none; }
+.social-room-connection ~ .moment-card { top:calc(var(--safe-top) + 130px); }
+.social-room-demo .moment-card { top:124px; }
+@media(min-width:900px){.moment-card, .social-room-demo .moment-card, .social-room-connection ~ .moment-card { top:auto; bottom:24px; left:24px; right:auto; width:400px; max-width:calc(100% - 412px); margin:0; }}
+@media (prefers-reduced-motion: no-preference) {
+  .moment-card { animation:moment-in .5s cubic-bezier(.2,1.4,.4,1); }
+  .moment-reactions button:active { transform:scale(.92); }
+  .moment-burst::before, .moment-burst::after { content:""; position:absolute; left:50%; top:42%; width:30px; height:30px; margin:-15px; border-radius:50%; border:3px solid #f2d04b; opacity:0; animation:moment-ring 1.1s ease-out 2; }
+  .moment-burst::after { border-color:#8fc1ff; animation-delay:.25s; }
+}
+@keyframes moment-in { 0% { opacity:0; transform:translateY(-14px) scale(.92); } 100% { opacity:1; transform:none; } }
+@keyframes moment-ring { 0% { opacity:.9; transform:scale(.4); } 100% { opacity:0; transform:scale(14); } }
+@media (prefers-reduced-motion: reduce) { .moment-card, .moment-burst::before, .moment-burst::after { animation:none; } .moment-card { transition:none; } }
+@media(max-width:899px){.social-room-demo .moment-card ~ .social-preview-notice { top:430px; }}

@@ -1,6 +1,6 @@
 import { parseBlockedWords as apiParseBlockedWords } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, SYNC_MS, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "../src/directory";
+import { DIRECTORY_TTL_MS, type DirState, RESERVATION_MS, SYNC_MS, emptyDirectory, expire, headcounts, joined, left, momentCopies, present, reserve, synced, where } from "../src/directory";
 import { OUTBOX, Outbox, type OutboxStorage } from "../src/outbox";
 import { BUCKET, configProblems, parseBlockedWords, takeToken } from "../src/worker";
 
@@ -44,6 +44,20 @@ describe("the directory's memory", () => {
     expect(left(s, 2, "a")).toBe(true);
     expect(left(s, 2, "a")).toBe(false);
     expect(left(s, 9, "nobody")).toBe(false);
+  });
+
+  it("a moment goes to every copy someone is in or on their way to, and to where the next arrival lands", () => {
+    const s = emptyDirectory();
+    expect(momentCopies(s, T)).toEqual([0]); // nobody's ever been: the first arrival's copy
+    for (let i = 0; i < 60; i++) joined(s, 0, `a${i}`, null, T);
+    expect(momentCopies(s, T)).toEqual([0, 1]); // copy 0 is full, so the next one opens copy 1
+    joined(s, 1, "b", null, T);
+    reserve(s, "c", 3, null, T); // on the way to copy 3
+    expect(momentCopies(s, T)).toEqual([0, 1, 3]);
+    expect(momentCopies(s, T + RESERVATION_MS)).toEqual([0, 1]); // a lapsed reservation is nobody
+    // Everyone leaves copy 0: it sleeps through the moment; 1 still has b.
+    for (let i = 0; i < 60; i++) left(s, 0, `a${i}`);
+    expect(momentCopies(s, T + RESERVATION_MS)).toEqual([1]);
   });
 
   it("a directory saved in the old shape (plain lists) gets one TTL, then forgets", () => {

@@ -1,6 +1,8 @@
 "use client";
 import { Html, OrbitControls } from "@react-three/drei";
 import { Canvas, type ThreeEvent, useFrame } from "@react-three/fiber";
+import { type TowerMoment, hasScreen } from "@bp/core";
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
 import { ApiError, type Api, type CityHall, type Home, type Look, type MarketRow } from "./api";
@@ -16,12 +18,16 @@ import { footprintSize, homeSize, pieceOf } from "./furniture";
 import { RoomCamera, RoomLighting } from "./RoomLighting";
 import { useNow } from "./clock";
 import { placeName, roomSize } from "./places";
-import { type RoomState, applyEvent, bubbles, emptyRoom, showingEmote } from "./roomState";
+import { type RoomState, applyEvent, bubbles, emptyRoom, liveMoments, showingEmote } from "./roomState";
 import { type SocketStatus, openRoomSocket } from "./roomSocket";
 import { chatDraft } from "./chatDraft";
 import { haptic } from "./telegram";
 import { useToast } from "./useToast";
 import { type Board, type FeedKey, type FeedStatus, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
+import MomentCard from "./MomentCard";
+import { momentBoard } from "./moments";
+
+const CallSheet = dynamic(() => import("./CallSheet"), { ssr: false });
 
 // A live room: everyone here walking where they tapped, chat bubbles over
 // heads, emotes, and the dimmed away residents. Every body part is one
@@ -128,8 +134,9 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
 }
 
 // The live boards for this room's screens: fetched on entry and every minute.
-// The odds come with the feed's status, so a paused feed dims the wall.
-function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<FeedKey, Board>> {
+// The odds come with the feed's status, so a paused feed dims the wall. A
+// Tower moment takes over the Watch Party's screen while it's on.
+function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment | null): Partial<Record<FeedKey, Board>> {
   const [odds, setOdds] = useState<MarketRow[] | null>(null);
   const [feed, setFeed] = useState<FeedStatus | null>(null);
   const [hall, setHall] = useState<CityHall | null>(null);
@@ -152,10 +159,11 @@ function useRoomFeeds(api: Api, place: string, now: number): Partial<Record<Feed
     const at = minute * 60_000;
     return {
       ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed) } : {}),
+      ...(moment ? { match: momentBoard(moment, feed?.credit ?? null) } : {}),
       ...(hall ? { hall: hallBoard(hall, at) } : {}),
       diner: dinerBoard(new Date(at).toISOString().slice(0, 10)),
     };
-  }, [odds, feed, hall, minute]);
+  }, [odds, feed, hall, minute, moment]);
 }
 
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
@@ -196,9 +204,19 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   const conn = useRef<ReturnType<typeof openRoomSocket> | null>(null);
   const drawn = useRef<Drawn[]>([]);
   const now = useNow(1000);
+  // The Watch Party's big moments (only a place with a screen gets them),
+  // less any you've closed; a market's call sheet opened from one.
+  const [hiddenMoments, setHiddenMoments] = useState<string[]>([]);
+  const [calling, setCalling] = useState<string | null>(null);
+  const moments = hasScreen(place) ? liveMoments(room, now).filter((m) => !hiddenMoments.includes(m.id)) : [];
+  // A buzz when a new one lands (not when closing one uncovers an older one).
+  const newestMoment = hasScreen(place) ? room.moments[0]?.id : undefined;
+  useEffect(() => {
+    if (newestMoment) haptic("medium");
+  }, [newestMoment]);
 
   const layout = useMemo(() => layoutFor(place), [place]);
-  const feeds = useRoomFeeds(api, place, now);
+  const feeds = useRoomFeeds(api, place, now, moments[0] ?? null);
   // What blocks walking here: the place's layout, or a home's floor furniture.
   const plan = useMemo<Plan>(() => {
     const p = planFor(place);
@@ -373,6 +391,19 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
       <RoomPanel name={placeName(place)} room={room} status={status} text={text} pending={!!draft.pending} clean={clean}
         onClean={()=>setClean(v=>!v)} onLeave={onLeave} onText={text=>updateDraft({type:'edit',text})} onSend={say}
         onEmote={emote=>{if(send({t:'emote',emote}))haptic('light');}} onPerson={id=>{if(id!==room.you)setPerson(id);}} actions={actions}/>
+      {!clean && (
+        <MomentCard
+          moments={moments}
+          now={now}
+          live={status.kind === "live"}
+          onReact={(emote) => {
+            if (send({ t: "emote", emote })) haptic("light");
+          }}
+          onCall={setCalling}
+          onDismiss={(id) => setHiddenMoments((h) => [...h, id].slice(-20))}
+        />
+      )}
+      {calling && <CallSheet api={api} marketId={calling} onClose={() => setCalling(null)} onCalled={() => {}} />}
       {err && <div className="toast bad" role="alert">{err.message}</div>}
       {napMsg && <div className="toast" role="status">{napMsg}</div>}
       {person && <Person api={api} userId={person} place={place} onClose={() => setPerson(null)} />}

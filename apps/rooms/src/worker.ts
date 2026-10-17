@@ -4,15 +4,18 @@ import {
   type Effect,
   type Member,
   type RoomTicket,
+  MOMENTS,
   ROOM,
   RoomEngine,
   TicketError,
   checkMessage,
   chooseCopy,
+  hasScreen,
   parseBlockedWords,
+  parseMoment,
   verifyRoomTicket,
 } from "@bp/core";
-import { type DirState, SYNC_MS, copyInfos, emptyDirectory, expire, headcounts, joined, left, present, reserve, synced, where } from "./directory";
+import { type DirState, SYNC_MS, copyInfos, emptyDirectory, expire, headcounts, joined, left, momentCopies, present, reserve, synced, where } from "./directory";
 import { OUTBOX, Outbox } from "./outbox";
 
 // The live city: one Durable Object per room copy, one directory per place.
@@ -60,6 +63,13 @@ function timingSafeEqual(a: string, b: string) {
 }
 
 const internalOk = (req: Request, env: Env) => env.INTERNAL_SECRET?.length >= 32 && timingSafeEqual(req.headers.get("x-internal-secret") ?? "", env.INTERNAL_SECRET);
+
+// A request body of at most `max` bytes, or null when it's bigger.
+async function smallBody(req: Request, max: number): Promise<string | null> {
+  if (Number(req.headers.get("content-length")) > max) return null;
+  const bytes = await req.arrayBuffer();
+  return bytes.byteLength > max ? null : new TextDecoder().decode(bytes);
+}
 
 // Why this Worker can't run safely, by setting name, never value: a missing
 // or short secret lets anyone write tickets or call the internal routes, and
@@ -174,6 +184,23 @@ export default {
         if (place.includes(":")) return json({ error: "NOT_FOUND" }, 404);
         return dir.fetch("https://dir/copies");
       }
+      // A Tower moment for a place's big screen (the API sends one after a
+      // poll): checked here, then the place's directory hands it to every
+      // copy someone is in or would be sent to.
+      if (url.pathname === "/internal/moment") {
+        if (req.method !== "POST") return json({ error: "NOT_FOUND" }, 404);
+        if (!hasScreen(place)) return json({ error: "NO_SCREEN", message: "only a place with a big screen takes moments" }, 400);
+        const body = await smallBody(req, MOMENTS.bodyBytes);
+        if (body === null) return json({ error: "TOO_LARGE", message: `a moment is at most ${MOMENTS.bodyBytes} bytes` }, 413);
+        let moment = null;
+        try {
+          moment = parseMoment(JSON.parse(body));
+        } catch {
+          // not JSON: refused below
+        }
+        if (!moment) return json({ error: "BAD_MOMENT", message: "that's not a moment" }, 400);
+        return dir.fetch("https://dir/moment", { method: "POST", body: JSON.stringify(moment), headers: { "x-place": place } });
+      }
       const copy = Number(url.searchParams.get("copy"));
       if (!Number.isSafeInteger(copy) || copy < 0) return json({ error: "BAD_COPY" }, 400);
       const room = env.ROOMS.get(env.ROOMS.idFromName(`${place}#${copy}`));
@@ -271,6 +298,30 @@ export class DirectoryDO implements DurableObject {
     }
 
     if (url.pathname === "/copies") return json(headcounts(s));
+
+    // A moment for the place's screen, to every copy that could have someone
+    // in it over the next 2 minutes, at once. Any copy that didn't take it
+    // makes this a 502, so the API logs it.
+    if (url.pathname === "/moment" && req.method === "POST") {
+      const place = req.headers.get("x-place") ?? "";
+      const body = await req.text();
+      const copies = momentCopies(s, now);
+      const took = await Promise.all(
+        copies.map(async (copy) => {
+          try {
+            const room = this.env.ROOMS.get(this.env.ROOMS.idFromName(`${place}#${copy}`));
+            const res = await room.fetch("https://room/moment", { method: "POST", body, headers: { "x-place": place, "x-copy": String(copy) } });
+            await res.body?.cancel();
+            return res.ok;
+          } catch (err) {
+            console.warn(`rooms: moment for ${place}#${copy} failed: ${String(err)}`);
+            return false;
+          }
+        }),
+      );
+      const failed = copies.filter((_, i) => !took[i]);
+      return json({ ok: failed.length === 0, copies, failed }, failed.length ? 502 : 200);
+    }
     return json({ error: "NOT_FOUND" }, 404);
   }
 }
@@ -333,7 +384,7 @@ export class RoomDO implements DurableObject {
   }
 
   private async wake(): Promise<RoomEngine> {
-    const saved = await this.ctx.storage.get(["meta", "evidence"]);
+    const saved = await this.ctx.storage.get(["meta", "evidence", "moment"]);
     const meta = saved.get("meta") as { place: string; copy: number } | undefined;
     if (meta) {
       this.place = meta.place;
@@ -346,6 +397,7 @@ export class RoomDO implements DurableObject {
       if (a) e.restore(fromAttachment(a));
     }
     e.loadEvidence((saved.get("evidence") as ChatLine[] | undefined) ?? []);
+    e.loadMoment(saved.get("moment"));
     this.engine = e;
     if (this.place) this.syncDirectory(e).catch((err) => console.error(`rooms: directory sync failed: ${String(err)}`));
     return e;
@@ -637,6 +689,7 @@ export class RoomDO implements DurableObject {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === "/join") return this.join(req);
+    if (url.pathname === "/moment" && req.method === "POST") return this.moment(req);
     if (url.pathname === "/forget" && req.method === "POST") {
       this.forgetAll();
       return json({ ok: true });
@@ -662,14 +715,42 @@ export class RoomDO implements DurableObject {
   // network call, and holding the whole room for it let one resident stall
   // everyone. Engine changes are synchronous, and everything is re-checked
   // after each await.
+  // A room learns which place and copy it is from the first join or moment
+  // it's sent (the directory names it after both), and remembers. An engine
+  // woken before that (an internal call to an empty copy) had no place, so
+  // it has nobody in it either: it's rebuilt as this place's.
+  private async adoptPlace(req: Request) {
+    if (this.place) return;
+    this.place = req.headers.get("x-place") ?? "";
+    this.copy = Number(req.headers.get("x-copy") ?? "0");
+    await this.ctx.storage.put("meta", { place: this.place, copy: this.copy });
+    if (this.engine && this.engine.place !== this.place && this.engine.members.size === 0) this.engine = null;
+  }
+
+  // A Tower moment from the directory: everyone here sees it, and the room
+  // keeps it, in storage too so a nap doesn't lose it, for whoever joins in
+  // the next 2 minutes. The engine refuses a bad one, and any place without
+  // a screen, whatever the Worker let through.
+  private async moment(req: Request): Promise<Response> {
+    await this.adoptPlace(req);
+    const e = await this.ensure();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(await req.text());
+    } catch {
+      // refused by the engine
+    }
+    const out = e.moment(body, Date.now());
+    if (!out.ok) return json({ error: out.code }, 400);
+    this.deliver(out.deliveries);
+    await this.ctx.storage.put("moment", e.keptMoment());
+    return json({ ok: true });
+  }
+
   private async join(req: Request): Promise<Response> {
     const t = JSON.parse(req.headers.get("x-ticket") ?? "null") as RoomTicket | null;
     if (!t) return json({ error: "NO_TICKET" }, 400);
-    if (!this.place) {
-      this.place = req.headers.get("x-place") ?? "";
-      this.copy = Number(req.headers.get("x-copy") ?? "0");
-      await this.ctx.storage.put("meta", { place: this.place, copy: this.copy });
-    }
+    await this.adoptPlace(req);
     let e = await this.ensure();
     let access: Access | undefined;
     try {

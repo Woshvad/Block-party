@@ -1,4 +1,4 @@
-import type { CopyInfo } from "@bp/core";
+import { type CopyInfo, chooseCopy } from "@bp/core";
 
 // The directory's memory for one place: who is in which copy, as the rooms
 // report it. Pure: the DirectoryDO feeds it requests and the time.
@@ -108,4 +108,16 @@ export function synced(s: DirState, copy: number, list: ReadonlyArray<{ u: strin
 
 export function headcounts(s: DirState): Record<string, number> {
   return Object.fromEntries(Object.entries(s.copies).map(([k, c]) => [k, Object.keys(c.members).length]));
+}
+
+// Where a moment for the place's screen goes: every copy with someone in it
+// or on their way in, and the copy the next arrival would be sent to (copy 0
+// at a place nobody's in), so whoever walks in over the next 2 minutes gets
+// it too. Copies that have emptied out are left to sleep.
+export function momentCopies(s: DirState, now: number): number[] {
+  const out = new Set<number>();
+  for (const [copy, c] of Object.entries(s.copies)) if (Object.keys(c.members).length) out.add(Number(copy));
+  for (const r of Object.values(s.reservations)) if (r.until > now) out.add(r.copy);
+  out.add(chooseCopy(copyInfos(s), { crewId: null, frens: new Set() }));
+  return [...out].sort((a, b) => a - b);
 }
