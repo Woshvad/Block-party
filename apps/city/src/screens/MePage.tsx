@@ -6,7 +6,7 @@ import { type Api, type Me } from "../api";
 import { toggleTrait } from "../draft";
 import { profileLink } from "../launch";
 import { label, plural } from "../palette";
-import { type Quality, deviceTier, saveQuality, savedQuality } from "../quality";
+import { type GraphicsPick, cityView, deviceTier, savePick, savedPick } from "../quality";
 import { PROFILE_SHARE_TEXT } from "../share";
 import ShareButton from "../ShareButton";
 import { ifConfirmed } from "../telegram";
@@ -38,7 +38,7 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
   const [traits, setTraits] = useState<string[]>(r.traits);
   const [appeal, setAppeal] = useState<Record<string, string>>({});
   const keys = actionKeysFor("me");
-  const [graphics, setGraphics] = useState<Quality | null>(() => savedQuality());
+  const [graphics, setGraphics] = useState<GraphicsPick | null>(() => savedPick());
   useEffect(() => {
     setTraits(r.traits);
   }, [r.traits]);
@@ -259,23 +259,25 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
 
       <section className="card">
         <h2>Graphics</h2>
-        <p className="muted">Light draws the city simpler (no shadows, no strollers), for phones that run hot or close the app.</p>
+        <p className="muted">Light draws the city simpler (no shadows, no strollers), for phones that run hot or close the app. List skips the 3D map: the places as a list, with the same headcounts and trips.</p>
         <div className="btnrow">
-          {([null, "high", "low"] as const).map((q) => (
+          {([null, "high", "low", "list"] as const).map((q) => (
             <button
               key={q ?? "auto"}
               className={`btn ${graphics === q ? "" : "light"}`}
               aria-pressed={graphics === q}
               onClick={() => {
-                saveQuality(q);
+                savePick(q);
                 setGraphics(q);
               }}
             >
-              {q === null ? "Let the phone decide" : q === "high" ? "Full" : "Light"}
+              {q === null ? "Let the phone decide" : q === "high" ? "Full" : q === "low" ? "Light" : "List"}
             </button>
           ))}
         </div>
-        <p className="muted">Now: {deviceTier().quality === "low" ? "Light" : "Full"}. A change applies the next time the app opens.</p>
+        <p className="muted">
+          Now: {cityView() === "list" ? "List" : deviceTier().quality === "low" ? "Light" : "Full"}. Full and Light apply the next time the app opens; List applies straight away.
+        </p>
       </section>
 
       {restr.data && restr.data.length > 0 && (

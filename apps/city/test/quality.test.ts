@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseQuality, deviceFrom, rememberContextLost, saveQuality, savedQuality, tierFor } from "../src/quality";
+import { chooseCityView, chooseQuality, deviceFrom, rememberContextLost, savePick, savedPick, savedQuality, subscribePick, tierFor } from "../src/quality";
 
 describe("choosing a quality tier", () => {
   it("gives a phone short on memory the low tier", () => {
@@ -58,16 +58,71 @@ describe("the player's pick, and a phone that ran short", () => {
       expect(savedQuality()).toBeNull();
       rememberContextLost();
       expect(stored.get("bp.quality.contextLost")).toBe("1");
-      saveQuality("high");
+      savePick("high");
       expect(savedQuality()).toBe("high");
       expect(stored.has("bp.quality.contextLost")).toBe(false);
-      saveQuality(null);
+      savePick(null);
       expect(savedQuality()).toBeNull();
     } finally {
       delete g.window;
     }
     // No storage at all: nothing remembered, nothing thrown.
     expect(savedQuality()).toBeNull();
-    expect(() => saveQuality("low")).not.toThrow();
+    expect(() => savePick("low")).not.toThrow();
+  });
+});
+
+describe("the list instead of the 3D city", () => {
+  const withStorage = (run: (stored: Map<string, string>) => void) => {
+    const g = globalThis as unknown as { window?: unknown };
+    const stored = new Map<string, string>();
+    g.window = { localStorage: { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v), removeItem: (k: string) => void stored.delete(k) } };
+    try {
+      run(stored);
+    } finally {
+      delete g.window;
+    }
+  };
+
+  it("is a third pick in Me, kept on the device, and draws what 3D is left on the low tier", () => {
+    withStorage((stored) => {
+      savePick("list");
+      expect(stored.get("bp.quality")).toBe("list");
+      expect(savedPick()).toBe("list");
+      expect(savedQuality()).toBe("low"); // rooms and your home
+      stored.set("bp.quality", "ultra");
+      expect(savedPick()).toBeNull();
+    });
+    // No storage: the map, as before, and nothing thrown.
+    expect(savedPick()).toBeNull();
+    expect(() => savePick("list")).not.toThrow();
+  });
+
+  it("never probes WebGL once the list is picked, so no WebGL context is made", () => {
+    let probed = 0;
+    const webgl = () => (probed++, true);
+    expect(chooseCityView({ search: "", pick: "list", webgl })).toBe("list");
+    expect(chooseCityView({ search: "?city=list", pick: null, webgl })).toBe("list");
+    expect(probed).toBe(0);
+    expect(chooseCityView({ search: "", pick: "high", webgl })).toBe("map");
+    expect(chooseCityView({ search: "", pick: null, webgl })).toBe("map");
+    expect(probed).toBe(2);
+  });
+
+  it("is what a device without WebGL gets; ?city= forces either", () => {
+    expect(chooseCityView({ search: "", pick: null, webgl: () => false })).toBe("list");
+    expect(chooseCityView({ search: "", pick: "low", webgl: () => false })).toBe("list");
+    expect(chooseCityView({ search: "?city=map", pick: "list", webgl: () => true })).toBe("map");
+    expect(chooseCityView({ search: "?city=globe", pick: null, webgl: () => true })).toBe("map");
+  });
+
+  it("tells the board at once when the pick changes", () => {
+    let heard = 0;
+    const stop = subscribePick(() => heard++);
+    savePick("list");
+    savePick(null);
+    stop();
+    savePick("high");
+    expect(heard).toBe(2);
   });
 });
