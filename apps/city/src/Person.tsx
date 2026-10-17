@@ -15,11 +15,12 @@ const Avatar = dynamic(() => import("./Avatar"), { ssr: false });
 
 // Anyone in the city: their look and the things you can do. Frens are made
 // in person (sharing a room), so "Fren" only shows when you're in one together.
+// A guest (opened from someone's profile link) only gets a look.
 
-export default function Person({ api, userId, place, onClose, onMessage }: { api: Api; userId: string; place?: string; onClose: () => void; onMessage?: (userId: string) => void }) {
+export default function Person({ api, userId, place, guest = false, onClose, onMessage }: { api: Api; userId: string; place?: string; guest?: boolean; onClose: () => void; onMessage?: (userId: string) => void }) {
   useWho(api, [userId]);
   const w = who(userId);
-  const rel = useLoad(() => api.relationships(), [api]);
+  const rel = useLoad(() => (guest ? Promise.resolve(null) : api.relationships()), [api, guest]);
   const act = useAction();
   const [reporting, setReporting] = useState(false);
   const [reason, setReason] = useState<string>("spam");
@@ -56,7 +57,8 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           </div>
         )}
         <header className="person-heading"><h2 id="person-title">{w ? w.name : "Your neighbour"}</h2><p className="muted">{handleOf(userId, "Profile unavailable")}</p></header>
-        {!r && <Loading error={rel.error} retry={rel.reload} />}
+        {!guest && !r && <Loading error={rel.error} retry={rel.reload} />}
+        {guest && <p className="muted">Move in to say hi: open Block Party in Telegram.</p>}
         {fren && <p className="muted">{fren.crewmate ? "Crewmate" : "Fren"}{best ? " · ⭐ best fren" : ""}{fren.mutualBest ? " (both ways)" : ""}</p>}
         {rival && <p className="muted">⚔️ Rivals</p>}
 
@@ -99,11 +101,13 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           )}
         </div>
 
-        <div className="btnrow person-actions">
-          <button className="btn light" aria-expanded={dueling} onClick={() => setDueling((v) => !v)}>
-            ⚔️ Fade Duel
-          </button>
-        </div>
+        {!guest && (
+          <div className="btnrow person-actions">
+            <button className="btn light" aria-expanded={dueling} onClick={() => setDueling((v) => !v)}>
+              ⚔️ Fade Duel
+            </button>
+          </div>
+        )}
         {dueling && (
           <div className="card">
             <p className="muted">Pick a market you've both called on opposite sides. 10 GM each to start.</p>
@@ -118,24 +122,28 @@ export default function Person({ api, userId, place, onClose, onMessage }: { api
           </div>
         )}
 
-        <h3 className="band">Safety</h3>
-        <div className="btnrow person-actions">
-          <button className="btn light" onClick={() => act.run(() => api.mute(userId, 24), "Muted for 24 hours: you won't see them")}>
-            🔇 Mute 24h
-          </button>
-          <button className="btn light" onClick={() => act.run(() => api.unmute(userId), "Unmuted")}>
-            Unmute
-          </button>
-          <button className="btn danger" onClick={() => ifConfirmed("Block them? Neither of you will see the other.", () => act.run(() => api.block(userId), "Blocked"))}>
-            🚫 Block
-          </button>
-          <button className="btn light" onClick={() => act.run(() => api.unblock(userId), "Unblocked")}>
-            Unblock
-          </button>
-          <button className="btn light" aria-expanded={reporting} onClick={() => setReporting((v) => !v)}>
-            🚩 Report
-          </button>
-        </div>
+        {!guest && (
+          <>
+            <h3 className="band">Safety</h3>
+            <div className="btnrow person-actions">
+              <button className="btn light" onClick={() => act.run(() => api.mute(userId, 24), "Muted for 24 hours: you won't see them")}>
+                🔇 Mute 24h
+              </button>
+              <button className="btn light" onClick={() => act.run(() => api.unmute(userId), "Unmuted")}>
+                Unmute
+              </button>
+              <button className="btn danger" onClick={() => ifConfirmed("Block them? Neither of you will see the other.", () => act.run(() => api.block(userId), "Blocked"))}>
+                🚫 Block
+              </button>
+              <button className="btn light" onClick={() => act.run(() => api.unblock(userId), "Unblocked")}>
+                Unblock
+              </button>
+              <button className="btn light" aria-expanded={reporting} onClick={() => setReporting((v) => !v)}>
+                🚩 Report
+              </button>
+            </div>
+          </>
+        )}
         {reporting && (
           <div className="card">
             <div className="chips">

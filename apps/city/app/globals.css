@@ -625,3 +625,11 @@ button:disabled { cursor: default; }
 @media(min-width:900px){.social-live-stage { bottom:20px; right:340px; }.social-live-stage.is-clean { right:0; }}
 .social-room-demo .social-live-stage { top:115px; }.social-room-demo .social-live-stage.is-clean { right:0; }
 .social-live-stage ~ .toast { top:calc(var(--safe-top) + 140px); z-index:8; max-width:calc(100% - 32px); }
+/* Read by screen readers, not shown. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* A Tower receipt from its link: the stamp, the call, the prices when it locked. */
+.receipt-stamp { align-self: flex-start; padding: 6px 12px; border-radius: 10px; border: 2px solid currentColor; font-size: 13px; font-weight: 850; letter-spacing: 0.12em; transform: rotate(-2deg); color: var(--muted); }
+.receipt-stamp.called { color: var(--green); }
+.receipt-stamp.rekt { color: #c0392b; }
+.receipt-q { font-size: 22px; letter-spacing: -0.03em; margin: 0; overflow-wrap: anywhere; }
+.receipt-ratio { font-style: italic; margin: 0; }

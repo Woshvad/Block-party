@@ -4,8 +4,11 @@ import { useEffect, useState } from "react";
 import { actionKeysFor } from "../actionKeys";
 import { type Api, type Me } from "../api";
 import { toggleTrait } from "../draft";
+import { profileLink } from "../launch";
 import { label, plural } from "../palette";
 import { type Quality, deviceTier, saveQuality, savedQuality } from "../quality";
+import { PROFILE_SHARE_TEXT } from "../share";
+import ShareButton from "../ShareButton";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
@@ -63,6 +66,8 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
           <button className="btn" disabled={act.pending || name.trim() === r.name} onClick={() => act.run(() => api.updateResident({ name }), "Name saved").then((x) => x && onChanged())}>
             Save name
           </button>
+          {/* Your link opens your sheet for whoever taps it. */}
+          <ShareButton url={profileLink(r.handle, location.origin)} text={PROFILE_SHARE_TEXT} label="Share my profile" />
         </div>
       </section>
 

@@ -5,6 +5,9 @@ import { ApiError, type Api, type CallState, type MarketView, type Side } from "
 import { useBackLayer } from "./back";
 import { CALL_STATE_LABEL, auraIf, callsOpen, clampChance, sliderRange } from "./call";
 import { until, useNow } from "./clock";
+import { receiptLink, receiptTokenFrom } from "./launch";
+import { receiptShareText } from "./share";
+import ShareButton, { useSharePrompts } from "./ShareButton";
 import { haptic } from "./telegram";
 
 // Make a call: pick a side, slide your "Chance of YES" past the market on that
@@ -24,6 +27,24 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
   const sending = useRef(false);
   const now = useNow(1000);
   useBackLayer(true, onClose);
+  // A locked call has a public receipt to share, unless the resident is tilted.
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const locked = state?.status === "locked";
+  const shareable = useSharePrompts(api, true, locked);
+  useEffect(() => {
+    if (!state || state.status !== "locked") return;
+    let live = true;
+    void api
+      .myCall(state.id)
+      .then((c) => {
+        const token = receiptTokenFrom(c.receiptLink);
+        if (live) setReceiptUrl(token && receiptLink(token, location.origin));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [api, state?.id, state?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMarket = async (keepSide = side) => {
     try {
@@ -141,6 +162,7 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
                     Go to the {side.toUpperCase()} Bunker
                   </button>
                 )}
+                {locked && receiptUrl && shareable && <ShareButton url={receiptUrl} text={receiptShareText({ handle: "", side, question: m.question }, true)} label="Share receipt" />}
                 {(state.status === "price_moved" || state.status === "expired") && (
                   <button className="cta" onClick={() => setState(null)}>
                     Call again

@@ -150,6 +150,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     market: (id: string) => request<MarketView>("GET", `/v1/tower/markets/${encodeURIComponent(id)}`),
     call: (c: { marketId: string; side: Side; chance: number; seenPrice: number }) => request<CallMade>("POST", "/v1/tower/calls", c),
     myCall: (id: string) => request<CallStatus>("GET", `/v1/tower/calls/${encodeURIComponent(id)}`),
+    // Public: anyone with the link can read a receipt (see packages/core/src/receipt.ts).
+    receipt: (token: string) => request<Receipt>("GET", `/v1/receipts/${encodeURIComponent(token)}`),
     whereabouts: () => request<Whereabouts>("GET", "/v1/whereabouts"),
     // The key makes a retried tap the same ride: never charged twice.
     ride: (to: string, mode: string, key: string) => request<{ ride: Ride; replayed: boolean }>("POST", "/v1/rides", { to, mode }, { idempotencyKey: key }),
@@ -369,7 +371,9 @@ export type MarketView = {
   source: string;
 };
 export type CallMade = { id: string; status: CallState; side: Side; chance: number; onSlate: boolean; ticket: boolean };
-export type CallStatus = { id: string; marketId: string; side: Side; chance: number; status: CallState; lockedPrice: number | null };
+// Once locked it also carries the receipt's public link ("/v1/receipts/<token>";
+// null while the API has no receipt secret).
+export type CallStatus = { id: string; marketId: string; side: Side; chance: number; status: CallState; lockedPrice: number | null; receiptLink?: string | null };
 export type CallState = "pending" | "locked" | "price_moved" | "expired";
 export type MarketRow = { id: string; question: string; category: string; price: number; freezesAt: string; infoOnly: boolean };
 export type Whereabouts = { area: string; arrived: boolean; arriveAt: string | null; from: string | null };
@@ -422,5 +426,10 @@ export type Syndicate = { id: string; marketId: string | null; cityMarketId: str
 export type Duel = { id: string; marketId: string; challengerId: string; opponentId: string; challengerSide: Side; status: string; stakeChallenger: number; stakeOpponent: number; snapChallenger: number; snapOpponent: number; lastCall: boolean; retreatedBy: string | null; winnerId: string | null; createdAt: string };
 export type Grudge = { id: string; cityDay: string; newcomerId: string; inviterId: string; status: string; winnerId: string | null };
 export type CityMarket = { id: string; question: string; kind: string; place: string | null; threshold: number | null; locksAt: string; bellDay: string };
+
+// A Tower receipt as its public link shows it: never a wallet, a dollar amount
+// or whether it was real. The stamp says IN THE MEMPOOL and the Aura is null
+// until the bell reveals the result.
+export type Receipt = { id: string; handle: string; npc: string | null; question: string; side: Side; chance: number; world: number | null; city: number | null; vibeGap: number | null; lockedAt: string | null; bellAt: string; stamp: string; aura: number | null; ratio: string | null };
 
 export type ReceiptBinder = { season: number; receipts: { callId: string; question: string; side: string; chance: number; world: number; aura: number; resolvedAt: string }[] };
