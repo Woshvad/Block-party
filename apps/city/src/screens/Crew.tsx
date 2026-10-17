@@ -1,5 +1,5 @@
 "use client";
-import { BUYABLE_IDS, CREW, CREW_POST_KINDS, DEFAULT_BANNER } from "@bp/core";
+import { BUYABLE_IDS, CREW, CREW_POST_KINDS, DEFAULT_BANNER, can } from "@bp/core";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { actionKeysFor } from "../actionKeys";
@@ -133,7 +133,17 @@ function InCrew({ api, me, m, act, onBack, reload, onGoToHouse }: { api: Api; me
         ))}
       </nav>
 
-      {tab === "chat" && <Thread api={api} me={me.userId} load={() => api.crewChat()} send={(t) => api.postCrewChat(t)} placeholder="Message the crew…" onAuthor={setPerson} />}
+      {tab === "chat" && (
+        <Thread
+          api={api}
+          me={me.userId}
+          load={() => api.crewChat()}
+          send={(t) => api.postCrewChat(t)}
+          placeholder="Message the crew…"
+          onAuthor={setPerson}
+          pins={can(m.role, "pin_message") ? { pin: (id) => api.pinCrewMessage(id), unpin: () => api.unpinCrewMessage() } : undefined}
+        />
+      )}
       {tab === "house" && <House api={api} crewId={c.id} act={act} onGo={() => onGoToHouse(c.id)} />}
       {tab === "table" && <Table api={api} act={act} />}
 

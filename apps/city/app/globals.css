@@ -529,6 +529,19 @@ button:disabled { cursor: default; }
 .thread .message-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .thread .author { color: #46663d; text-align: left; font-weight: 650; padding: 0; }
 .thread .msg small { font-size: 10px; }
+.msg-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.msg-foot .pin-tag { font-weight: 650; }
+.msg-action { border: 0; background: none; color: inherit; font: inherit; font-size: 11px; font-weight: 650; text-decoration: underline; padding: 4px 2px; min-height: 28px; cursor: pointer; }
+.pinned-banner { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid #d6dfc8; background: #f1f5e8; border-radius: 16px; }
+.pinned-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.pinned-body small { font-size: 11px; color: #46663d; font-weight: 650; }
+.pinned-body .message-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.conversation-item { display: flex; align-items: stretch; gap: 8px; }
+.conversation-item .conversation-row { flex: 1; min-width: 0; }
+.pin-toggle { flex: none; width: 52px; border: 1px solid #e0e5d8; background: #fffefa; border-radius: 16px; font-size: 18px; cursor: pointer; filter: grayscale(1); opacity: 0.6; }
+.pin-toggle[aria-pressed="true"] { background: #e5ebd9; border-color: #aebe9e; filter: none; opacity: 1; }
+.pin-toggle:hover { opacity: 1; }
+.pin-note { margin: 0; font-size: 12px; color: var(--muted); }
 .message-composer { padding: 8px; background: #fffefa; border: 1px solid #dce3d2; border-radius: 18px; }
 .message-composer .ask { background: transparent; border: 0; min-height: 44px; }
 .message-composer .btn { min-height: 44px; }

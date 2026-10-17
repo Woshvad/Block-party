@@ -1,9 +1,9 @@
-import { AREAS, CAST, PLACE_RE, checkMessage, npcById } from "@bp/core";
+import { AREAS, CAST, PLACE_RE, RELATIONSHIPS, can, checkMessage, npcById } from "@bp/core";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { hitRateLimit } from "./ratelimit";
 import { accountAgeDays, allowNewDmThread, enqueueModeration, isBlockedEitherWay, isRestricted } from "./safety";
-import { bestFrens, blocks, boardFollows, crewMembers, dmThreads, frenTaps, frens, messages, mutes, restrictions, users } from "./schema";
+import { bestFrens, blocks, boardFollows, crewMembers, crewPins, crews, dmPins, dmThreads, frenTaps, frens, messages, mutes, restrictions, users } from "./schema";
 
 export type ChatErrorCode =
   | "INVALID_INPUT"
@@ -16,7 +16,9 @@ export type ChatErrorCode =
   | "TOO_FAST"
   | "FOLLOW_LIMIT"
   | "NOT_TOGETHER"
-  | "NO_SUCH_THREAD";
+  | "NO_SUCH_THREAD"
+  | "NO_SUCH_MESSAGE"
+  | "PIN_LIMIT";
 
 export class ChatError extends Error {
   constructor(
@@ -151,6 +153,22 @@ export async function roomAccess(db: Db, userIds: string[], now = new Date()) {
   });
 }
 
+// Conditions on a messages query that leave out authors this reader must not
+// see: blocked either way, or muted by them (until the mute runs out).
+function authorShown(readerId: string, now: Date) {
+  const nowIso = now.toISOString();
+  return [
+    sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${readerId} AND ${blocks.blockedId} = ${messages.authorId}) OR (${blocks.blockerId} = ${messages.authorId} AND ${blocks.blockedId} = ${readerId}))`,
+    sql`NOT EXISTS (SELECT 1 FROM ${mutes} WHERE ${mutes.muterId} = ${readerId} AND ${mutes.mutedId} = ${messages.authorId} AND (${mutes.until} IS NULL OR ${mutes.until} > ${nowIso}::timestamptz))`,
+  ];
+}
+
+// Every line from the cast carries its label.
+function labelled<T extends { authorId: string }>(r: T) {
+  const k = npcById(r.authorId);
+  return k ? { ...r, npc: { name: CAST[k].name, label: CAST[k].label } } : r;
+}
+
 async function read(db: Db, readerId: string, where: Channel, opts: { before?: unknown; now: Date }) {
   let before: Date | null = null;
   if (opts.before !== undefined) {
@@ -160,7 +178,6 @@ async function read(db: Db, readerId: string, where: Channel, opts: { before?: u
   }
   // Blocked (either way) and muted authors are left out before the page is
   // cut, so a muted spammer's 50 posts can't push everyone else off it.
-  const nowIso = opts.now.toISOString();
   const rows = await db
     .select({ id: messages.id, authorId: messages.authorId, text: messages.text, createdAt: messages.createdAt })
     .from(messages)
@@ -170,17 +187,12 @@ async function read(db: Db, readerId: string, where: Channel, opts: { before?: u
         eq(messages.channel, where.channel),
         eq(messages.hidden, false),
         before ? lt(messages.createdAt, before) : undefined,
-        sql`NOT EXISTS (SELECT 1 FROM ${blocks} WHERE (${blocks.blockerId} = ${readerId} AND ${blocks.blockedId} = ${messages.authorId}) OR (${blocks.blockerId} = ${messages.authorId} AND ${blocks.blockedId} = ${readerId}))`,
-        sql`NOT EXISTS (SELECT 1 FROM ${mutes} WHERE ${mutes.muterId} = ${readerId} AND ${mutes.mutedId} = ${messages.authorId} AND (${mutes.until} IS NULL OR ${mutes.until} > ${nowIso}::timestamptz))`,
+        ...authorShown(readerId, opts.now),
       ),
     )
     .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(CHAT.pageSize);
-  // Every line from the cast carries its label.
-  return rows.map((r) => {
-    const k = npcById(r.authorId);
-    return k ? { ...r, npc: { name: CAST[k].name, label: CAST[k].label } } : r;
-  });
+  return rows.map(labelled);
 }
 
 // --- Boards ---------------------------------------------------------------------
@@ -242,9 +254,69 @@ export async function postToCrew(db: Db, authorId: string, text: unknown, opts: 
   return post(db, authorId, { kind: "crew", channel: crewId }, text, { now: opts.now ?? new Date(), blockedWords: opts.blockedWords });
 }
 
+// A page of crew chat, plus the crew's pinned message as this reader may see it.
 export async function readCrew(db: Db, readerId: string, opts: { before?: unknown; now?: Date } = {}) {
+  const now = opts.now ?? new Date();
   const crewId = await myCrewId(db, readerId);
-  return read(db, readerId, { kind: "crew", channel: crewId }, { before: opts.before, now: opts.now ?? new Date() });
+  const [page, pinned] = await Promise.all([read(db, readerId, { kind: "crew", channel: crewId }, { before: opts.before, now }), crewPinFor(db, readerId, crewId, now)]);
+  return { pinned, messages: page };
+}
+
+// The pin drops out while moderation has the message hidden, and for a reader
+// who can't see its author (the same filter as the page). An author who has
+// since left the crew still shows.
+async function crewPinFor(db: Db, readerId: string, crewId: string, now: Date) {
+  const [p] = await db
+    .select({ id: messages.id, authorId: messages.authorId, text: messages.text, createdAt: messages.createdAt, pinnedAt: crewPins.pinnedAt })
+    .from(crewPins)
+    .innerJoin(messages, eq(messages.id, crewPins.messageId))
+    .where(and(eq(crewPins.crewId, crewId), eq(messages.hidden, false), ...authorShown(readerId, now)));
+  return p ? labelled(p) : null;
+}
+
+// Pins are for the lead and deputies. The crew row is locked first, as every
+// roster change locks it, so a deputy demoted or removed at the same moment
+// can't pin on their old role, and two pins at once land one after the other.
+async function lockCrewPin(tx: Db, actorId: string, crewId: string) {
+  const [c] = await tx.select({ dissolvedAt: crews.dissolvedAt }).from(crews).where(eq(crews.id, crewId)).for("no key update");
+  const [me] = await tx
+    .select({ role: crewMembers.role })
+    .from(crewMembers)
+    .where(and(eq(crewMembers.crewId, crewId), eq(crewMembers.userId, actorId), isNull(crewMembers.leftAt)));
+  if (!c || c.dissolvedAt || !me) throw new ChatError("NOT_ALLOWED", "you're not in a crew");
+  if (!can(me.role, "pin_message")) throw new ChatError("NOT_ALLOWED", "only the lead and deputies can pin");
+}
+
+// Pin one crew-chat message for the whole crew, replacing any earlier pin.
+export async function pinCrewMessage(db: Db, actorId: string, messageId: unknown, opts: { now?: Date } = {}) {
+  if (typeof messageId !== "string" || !UUID.test(messageId)) throw new ChatError("NO_SUCH_MESSAGE", "no such message");
+  const id = messageId.toLowerCase();
+  const now = opts.now ?? new Date();
+  const crewId = await myCrewId(db, actorId);
+  return db.transaction(async (tx) => {
+    await lockCrewPin(tx, actorId, crewId);
+    // Only this crew's chat, and never a message moderation took down.
+    const [m] = await tx
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.id, id), eq(messages.kind, "crew"), eq(messages.channel, crewId), eq(messages.hidden, false)));
+    if (!m) throw new ChatError("NO_SUCH_MESSAGE", "that message isn't in your crew chat");
+    await tx
+      .insert(crewPins)
+      .values({ crewId, messageId: m.id, pinnedBy: actorId, pinnedAt: now })
+      .onConflictDoUpdate({ target: crewPins.crewId, set: { messageId: m.id, pinnedBy: actorId, pinnedAt: now } });
+    return { pinned: await crewPinFor(tx, actorId, crewId, now) };
+  });
+}
+
+// Unpinning twice is fine.
+export async function unpinCrewMessage(db: Db, actorId: string) {
+  const crewId = await myCrewId(db, actorId);
+  return db.transaction(async (tx) => {
+    await lockCrewPin(tx, actorId, crewId);
+    await tx.delete(crewPins).where(eq(crewPins.crewId, crewId));
+    return { pinned: null };
+  });
 }
 
 // --- DMs --------------------------------------------------------------------------
@@ -287,8 +359,40 @@ export async function readDm(db: Db, readerId: string, threadId: unknown, opts: 
   return { notice: DM_NOTICE, messages: await read(db, readerId, { kind: "dm", channel: t.id }, { before: opts.before, now: opts.now ?? new Date() }) };
 }
 
+// Your conversations: pinned ones first (most recently pinned on top), then
+// the rest, newest first.
 export async function myThreads(db: Db, userId: string) {
-  return db.select().from(dmThreads).where(or(eq(dmThreads.a, userId), eq(dmThreads.b, userId))).orderBy(desc(dmThreads.createdAt)).limit(200);
+  const rows = await db
+    .select({ id: dmThreads.id, a: dmThreads.a, b: dmThreads.b, createdBy: dmThreads.createdBy, createdAt: dmThreads.createdAt, pinnedAt: dmPins.pinnedAt })
+    .from(dmThreads)
+    .leftJoin(dmPins, and(eq(dmPins.threadId, dmThreads.id), eq(dmPins.userId, userId)))
+    .where(or(eq(dmThreads.a, userId), eq(dmThreads.b, userId)))
+    .orderBy(sql`${dmPins.pinnedAt} DESC NULLS LAST`, desc(dmThreads.createdAt))
+    .limit(200);
+  return rows.map(({ pinnedAt, ...t }) => ({ ...t, pinned: pinnedAt !== null }));
+}
+
+// Pin a conversation to the top of your list, up to 5. Pinning one that's
+// already pinned is fine and keeps its place.
+export async function pinThread(db: Db, userId: string, threadId: unknown, opts: { now?: Date } = {}) {
+  const t = await myThread(db, userId, threadId);
+  const now = opts.now ?? new Date();
+  return db.transaction(async (tx) => {
+    // The resident's row first, so two pins at once can't both find room.
+    await tx.execute(sql`SELECT 1 FROM users WHERE id = ${userId} FOR NO KEY UPDATE`);
+    const pins = await tx.select({ threadId: dmPins.threadId }).from(dmPins).where(eq(dmPins.userId, userId));
+    if (pins.some((p) => p.threadId === t.id)) return { threadId: t.id, pinned: true };
+    if (pins.length >= RELATIONSHIPS.pinnedDms) throw new ChatError("PIN_LIMIT", `you can pin up to ${RELATIONSHIPS.pinnedDms} chats; unpin one first`);
+    await tx.insert(dmPins).values({ userId, threadId: t.id, pinnedAt: now });
+    return { threadId: t.id, pinned: true };
+  });
+}
+
+// Unpinning one that isn't pinned is fine.
+export async function unpinThread(db: Db, userId: string, threadId: unknown) {
+  const t = await myThread(db, userId, threadId);
+  await db.delete(dmPins).where(and(eq(dmPins.userId, userId), eq(dmPins.threadId, t.id)));
+  return { threadId: t.id, pinned: false };
 }
 
 // --- Moderation follow-through and report evidence ---------------------------------

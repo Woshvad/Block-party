@@ -67,7 +67,7 @@ const NASTY: unknown[] = [
   { $gt: "" },
   [[[[[[[[[[[]]]]]]]]]]],
 ];
-const FIELDS = ["text", "firstDm", "targetUserId", "reason", "place", "note", "hours", "action", "restriction", "overturn", "kind", "pitch", "candidateId", "lawId", "hideCandleColor", "name", "handle", "look", "traits", "goal", "kitStyle", "pieceId", "code", "amount", "answers", "room", "placement", "layer", "x", "y", "rot", "color", "wall", "floor", "doorOpen", "deputy", "userId", "ttlHours", "joinPolicy", "banner", "ageAck", "initData", "accessToken"];
+const FIELDS = ["text", "firstDm", "targetUserId", "reason", "place", "note", "hours", "action", "restriction", "overturn", "kind", "pitch", "candidateId", "lawId", "hideCandleColor", "name", "handle", "look", "traits", "goal", "kitStyle", "pieceId", "code", "amount", "answers", "room", "placement", "layer", "x", "y", "rot", "color", "wall", "floor", "doorOpen", "deputy", "userId", "ttlHours", "joinPolicy", "banner", "ageAck", "initData", "accessToken", "messageId"];
 
 function hostileBody(rand: (n: number) => number): unknown {
   const kind = rand(5);

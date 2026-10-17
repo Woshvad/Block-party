@@ -990,6 +990,38 @@ export const dmThreads = pgTable(
   (t) => [uniqueIndex("dm_threads_pair").on(t.a, t.b), check("dm_threads_ordered", sql`${t.a} < ${t.b}`)],
 );
 
+// DM threads a resident pinned to the top of their list (5 at most). Kept on
+// the server, so pins follow you from phone to browser; the other side never
+// sees them.
+export const dmPins = pgTable(
+  "dm_pins",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => dmThreads.id),
+    pinnedAt: timestamp("pinned_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.threadId] })],
+);
+
+// The one crew-chat message the lead or a deputy pinned for the crew. A new
+// pin replaces the row; unpinning deletes it.
+export const crewPins = pgTable("crew_pins", {
+  crewId: uuid("crew_id")
+    .primaryKey()
+    .references(() => crews.id),
+  messageId: uuid("message_id")
+    .notNull()
+    .references(() => messages.id),
+  pinnedBy: uuid("pinned_by")
+    .notNull()
+    .references(() => users.id),
+  pinnedAt: timestamp("pinned_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // --- Getting around ---------------------------------------------------------
 
 export const rideMode = pgEnum("ride_mode", ["walk", "rollup", "priority"]);

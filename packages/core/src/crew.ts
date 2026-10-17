@@ -83,6 +83,7 @@ export type CrewAction =
   | "set_deputy"
   | "transfer_lead"
   | "edit_crew"
+  | "pin_message" // the one crew-chat message pinned for everyone
   | "dissolve";
 
 const rank: Record<CrewRole, number> = { member: 0, deputy: 1, lead: 2 };
@@ -93,6 +94,7 @@ export function can(actor: CrewRole, action: CrewAction, target?: CrewRole): boo
       return true;
     case "approve_join":
     case "edit_crew":
+    case "pin_message":
       return actor !== "member";
     case "remove":
       // Deputies remove members; the lead removes anyone but themself.

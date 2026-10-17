@@ -4,6 +4,7 @@ export const RELATIONSHIPS = {
   bestFrens: 3,
   rivals: 3, // active and pending together, per resident
   bondLevels: [1, 5, 15, 40] as readonly number[], // shared days for levels 1 to 4
+  pinnedDms: 5, // DM threads pinned to the top of your list
 } as const;
 
 export function bondLevel(days: number): number {

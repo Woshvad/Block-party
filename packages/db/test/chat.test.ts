@@ -252,7 +252,7 @@ describe("Boards and crew chat", () => {
     await createCrew(db, lead, { name: `Chat ${randomUUID().slice(0, 6)}` });
     await redeemInvite(db, mate, (await createInvite(db, lead)).code);
     await postToCrew(db, lead, "crew meeting at the roof");
-    expect((await readCrew(db, mate)).map((m) => m.text)).toEqual(["crew meeting at the roof"]);
+    expect((await readCrew(db, mate)).messages.map((m) => m.text)).toEqual(["crew meeting at the roof"]);
     expect(await code(postToCrew(db, outsider, "let me in"))).toBe("NOT_ALLOWED");
     expect(await code(readCrew(db, outsider))).toBe("NOT_ALLOWED");
   });
