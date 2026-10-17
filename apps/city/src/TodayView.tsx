@@ -1,4 +1,5 @@
 "use client";
+import type { ReactNode } from "react";
 import type { Slate, SlateCard, Today } from "./api";
 import { CALL_STATE_LABEL, TIER_LABEL } from "./call";
 import { until } from "./clock";
@@ -14,8 +15,10 @@ export type TodayViewProps = {
   today?: Today; slate?: Slate | null; todayError?: string | null; slateError?: string | null;
   now: number; pending: boolean; feedback: { text: string; bad: boolean } | null;
   onGm: () => void; onCall: (id: string) => void; retryToday: () => void; retrySlate: () => void;
+  // The Daily clue card (DailyClue.tsx), between your progress and the Slate.
+  clue?: ReactNode;
 };
-export default function TodayView({ today: t, slate: s, todayError, slateError, now, pending, feedback, onGm, onCall, retryToday, retrySlate }: TodayViewProps) {
+export default function TodayView({ today: t, slate: s, todayError, slateError, now, pending, feedback, onGm, onCall, retryToday, retrySlate, clue }: TodayViewProps) {
   const summary = s ? slateSummary(s, now) : null;
   return <main className="screen today dashboard">
     <header className="dashboard-heading"><div><span className="eyebrow">YOUR DAILY CHECK-IN</span><h1>A new day in the city.</h1><p className="muted">Say gm. Make your calls. See you at the bell.</p></div><span className="dashboard-seal" aria-hidden="true">bp<span>·</span></span></header>
@@ -34,6 +37,7 @@ export default function TodayView({ today: t, slate: s, todayError, slateError, 
       <div><span>Slate progress</span><strong>{summary ? summary.submitted : "—"}<small>{summary ? ` / ${summary.total}` : ""}</small></strong><p>Calls submitted</p></div>
     </section>
     {t && !t.playedToday && t.streak > 0 && <div className="dashboard-note"><span aria-hidden="true">↗</span><p>Keep your {t.streak}-day streak going: make a call today.</p></div>}
+    {clue}
     <section className="daily-slate" aria-labelledby="slate-title">
       <div className="section-heading"><div><span className="eyebrow">YOUR READ ON THE WORLD</span><h2 id="slate-title">{s ? `The daily Slate · #${s.number}` : "The daily Slate"}</h2></div><span className="section-badge">Free calls · Aura scoring</span></div>
       {slateError && <Loading error={slateError} retry={retrySlate} />}

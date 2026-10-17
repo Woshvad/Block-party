@@ -255,7 +255,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
         />
       )}
       {!pageView && tab === "home" && <HomeEditor api={api} gm={me.gm} onGm={refreshGm} onGoInside={() => setTrip({ place: `home:${me.userId}`, ridesFree: false })} />}
-      {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
+      {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} onBunker={(place) => setTrip({ place, ridesFree: false })} onBoard={() => go("city")} />}
       {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
       <AppNavigation active={page ? "more" : tab} onSelect={go} />
     </>

@@ -6,9 +6,10 @@ import { useNow } from "./clock";
 import { haptic } from "./telegram";
 import { useLoad } from "./useLoad";
 import TodayView from "./TodayView";
+import DailyClue from "./DailyClue";
 const CallSheet = dynamic(() => import("./CallSheet"), { ssr: false });
 
-export default function Today({ api, onGm, onBunker }: { api: Api; onGm: (balance: number) => void; onBunker?: (place: string) => void }) {
+export default function Today({ api, onGm, onBunker, onBoard }: { api: Api; onGm: (balance: number) => void; onBunker?: (place: string) => void; onBoard?: () => void }) {
   const today = useLoad(() => api.today(), [api]);
   const slate = useLoad(() => api.slate(), [api]);
   const [calling, setCalling] = useState<string | null>(null);
@@ -32,7 +33,7 @@ export default function Today({ api, onGm, onBunker }: { api: Api; onGm: (balanc
     } finally { saying.current = false; setPending(false); }
   };
   return <>
-    <TodayView today={today.data} slate={slate.data} todayError={today.error} slateError={slate.error} now={now} pending={pending} feedback={feedback} onGm={() => void sayGm()} onCall={setCalling} retryToday={() => void today.reload()} retrySlate={() => void slate.reload()} />
+    <TodayView today={today.data} slate={slate.data} todayError={today.error} slateError={slate.error} now={now} pending={pending} feedback={feedback} onGm={() => void sayGm()} onCall={setCalling} retryToday={() => void today.reload()} retrySlate={() => void slate.reload()} clue={<DailyClue api={api} now={now} onBoard={onBoard} />} />
     {calling && <CallSheet api={api} marketId={calling} onClose={() => setCalling(null)} onBunker={onBunker} onCalled={() => { void slate.reload(); void today.reload(); }} />}
   </>;
 }

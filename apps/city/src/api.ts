@@ -151,6 +151,10 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     call: (c: { marketId: string; side: Side; chance: number; seenPrice: number }) => request<CallMade>("POST", "/v1/tower/calls", c),
     myCall: (id: string) => request<CallStatus>("GET", `/v1/tower/calls/${encodeURIComponent(id)}`),
     whereabouts: () => request<Whereabouts>("GET", "/v1/whereabouts"),
+    // The Daily Clue Hunt. A search sends the place the player confirmed, so
+    // moving in between spends nothing; one search a day, so no key.
+    hunt: () => request<Hunt>("GET", "/v1/hunt"),
+    huntSearch: (place: string) => request<HuntSearch>("POST", "/v1/hunt/search", { place }),
     // The key makes a retried tap the same ride: never charged twice.
     ride: (to: string, mode: string, key: string) => request<{ ride: Ride; replayed: boolean }>("POST", "/v1/rides", { to, mode }, { idempotencyKey: key }),
     roomTicket: (place: string) => request<{ ticket: string; url: string }>("POST", "/v1/rooms/ticket", { place }),
@@ -373,6 +377,18 @@ export type CallStatus = { id: string; marketId: string; side: Side; chance: num
 export type CallState = "pending" | "locked" | "price_moved" | "expired";
 export type MarketRow = { id: string; question: string; category: string; price: number; freezesAt: string; infoOnly: boolean };
 export type Whereabouts = { area: string; arrived: boolean; arriveAt: string | null; from: string | null };
+// searched: your own search today (today's place is never sent otherwise).
+export type Hunt = {
+  day: string;
+  clue: string;
+  endsAt: string;
+  searched: { place: string; found: boolean } | null;
+  foundToday: number;
+  yesterday: { place: string; clue: string; finders: number } | null;
+  finds: number;
+};
+// trophies: pieces this search just won.
+export type HuntSearch = { day: string; place: string; found: boolean; finds: number; trophies: string[] };
 export type Ride = { id: string; fromArea: string; toArea: string; mode: string; fare: number; busId: string | null; departedAt: string; arriveAt: string };
 export type PublicResident = { userId: string; handle: string; name: string; look: Look } & Record<string, unknown>;
 
