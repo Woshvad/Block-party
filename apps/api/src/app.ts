@@ -222,6 +222,8 @@ import {
   proposeRivalry,
   acceptRivalry,
   endRivalry,
+  todaysHunt,
+  searchHere,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -924,6 +926,14 @@ export function createApp(cfg: AppConfig) {
     const b = await body(c);
     return c.json(await takeRide(db, c.get("userId"), { to: b.to, mode: b.mode, idempotencyKey: idem(c, "ride") }, opts()), 201);
   });
+
+  // --- The Daily Clue Hunt ---------------------------------------------------
+
+  app.get("/v1/hunt", auth, async (c) => c.json(await todaysHunt(db, c.get("userId"), opts())));
+  // One search a day, wherever you've arrived. `place` is the place the
+  // player confirmed; if they've moved since, nothing is spent. No GM moves,
+  // and the day's one search is the key, so no Idempotency-Key.
+  app.post("/v1/hunt/search", auth, async (c) => c.json(await searchHere(db, c.get("userId"), { ...opts(), place: (await body(c)).place }), 201));
 
   // --- Frens and chat --------------------------------------------------------
 
