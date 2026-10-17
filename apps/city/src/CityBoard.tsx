@@ -1,7 +1,7 @@
 "use client";
 import { Html, MapControls, useProgress } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import * as THREE from "three";
 import { ISO, ZOOM, clampTarget, shortCount, startZoom, zoomLevel } from "./camera";
 import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, SQUARE, blockRect, zoneOf } from "./citygen";
@@ -16,8 +16,9 @@ import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import { boardShown } from "./boardMode";
 import { until, useNow } from "./clock";
 import { useLoad } from "./useLoad";
+import { cityTotal, cityTotalLabel } from "./neighbours";
 import { PerfProbe, SHOW_PERF } from "./PerfHud";
-import { deviceTier, watchContext } from "./quality";
+import { cityView, deviceTier, subscribePick, watchContext } from "./quality";
 import { haptic, initTelegram } from "./telegram";
 
 // The city board, SimCity style: an isometric view over a street grid of
@@ -72,6 +73,41 @@ function SoonPins({ onTap }: { onTap: (p: Picked) => void }) {
         </Html>
       ))}
     </>
+  );
+}
+
+// Every place as a list: "Explore places" over the map, and the whole board
+// in the list view (Me → Graphics → List), where the launch places join it.
+// Same headcounts as the pins (none shown when unknown), same taps.
+function PlaceList({ counts, board, onPlace, onSoon }: { counts: Record<string, number | null>; board: boolean; onPlace: (p: Place) => void; onSoon: (p: Picked) => void }) {
+  return (
+    <section className={`map-directory ${board ? "list-board" : ""}`} aria-label="Places in the city">
+      <h2>Where to?</h2>
+      {PLACES.map((p) => (
+        <button key={p.key} onClick={() => onPlace(p)}>
+          {p.icon}
+          <span>
+            <b>{p.name}</b>
+            <small>
+              {p.info}
+              {counts[p.key] != null ? ` · ${counts[p.key]} here` : ""}
+            </small>
+          </span>
+          <span aria-hidden="true">↗</span>
+        </button>
+      ))}
+      {board &&
+        Object.values(SOON).map((p) => (
+          <button key={p.name} className="soon" onClick={() => onSoon({ name: p.name, icon: p.icon, info: "Opens at launch.", soon: true })} aria-label={`${p.name}, opens at launch`}>
+            {p.icon}
+            <span>
+              <b>{p.name}</b>
+              <small>Opens at launch</small>
+            </span>
+            <span aria-hidden="true">🔒</span>
+          </button>
+        ))}
+    </section>
   );
 }
 
@@ -212,7 +248,10 @@ function Strollers() {
 // another screen (App.tsx), so coming back to it doesn't rebuild the city.
 export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, onOpenMe, showcase = false, active = true }: { showcase?: boolean; active?: boolean; api: Pick<Api, "cityHall" | "slate"> & Partial<Pick<Api, "headcounts">>; me: Me; onOpenToday?: () => void; onPlace?: (place: string, ridesFree: boolean) => void; onOpenHall?: () => void; onOpenMe?: () => void }) {
   const tier = deviceTier();
+  // The list view mounts no Canvas at all, so the board makes no WebGL context.
+  const list = useSyncExternalStore(subscribePick, cityView, () => "map" as const) === "list";
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const total = cityTotalLabel(cityTotal(counts));
   // Headcounts are polled only while the board shows.
   useEffect(() => {
     if (!api.headcounts || !active) return;
@@ -266,8 +305,19 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
   useEffect(() => {
     initTelegram();
   }, []);
+  // Residents go there; guests can only look.
+  const visit = (p: Place) => {
+    haptic("light");
+    setGuide(false);
+    if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
+    else setPicked(p);
+  };
+  const look = (p: Picked) => {
+    haptic("light");
+    setPicked(p);
+  };
   return (
-    <div className="city-board" hidden={!active}>
+    <div className={`city-board ${list ? "as-list" : ""}`} hidden={!active}>
       {/* The live banner: City Hall's Mayor and this week's Law, from the API. */}
       <button className="banner" onClick={onOpenHall} disabled={!onOpenHall} aria-label="Open City Hall">
         {h?.mayor ? (
@@ -304,34 +354,42 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
             Slate #{s.number} · {s.cards.filter((c) => c.mine).length}/{s.cards.length} called ›
           </button>
         )}
-        <button className="pill" onClick={() => setNight((n) => !n)}>
-          {night ? "Show day" : "Show night"}
-        </button>
-        {loading && (
+        {/* Only from real headcounts: unknown shows nothing, never 0 (neighbours.ts). */}
+        {total && (
+          <div className="pill neighbours-now">
+            <span className="live" aria-hidden="true" />
+            {total}
+          </div>
+        )}
+        {!list && (
+          <button className="pill" onClick={() => setNight((n) => !n)}>
+            {night ? "Show day" : "Show night"}
+          </button>
+        )}
+        {!list && loading && (
           <div className="pill muted" role="status">
             Loading the city…
           </div>
         )}
-        {SHOW_PERF && (
+        {SHOW_PERF && !list && (
           <div className="perf" ref={perf}>
             measuring…
           </div>
         )}
       </div>
-      <nav className="map-tools" aria-label="Map controls">
-        <button className="map-guide" aria-expanded={guide} onClick={() => setGuide((v) => !v)}>Explore places {guide ? "−" : "+"}</button>
-        <button aria-label="Zoom out" onClick={() => mapAction("out")}>−</button>
-        <button aria-label="Zoom in" onClick={() => mapAction("in")}>+</button>
-        <button aria-label="Recenter city" onClick={() => mapAction("reset")}>⌖</button>
-      </nav>
-      {guide && <section className="map-directory" aria-label="Places in the city">
-        <h2>Where to?</h2>
-        {PLACES.map((p) => <button key={p.key} onClick={() => {
-          setGuide(false);
-          if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
-          else setPicked(p);
-        }}>{p.icon}<span><b>{p.name}</b><small>{p.info}{counts[p.key] != null ? ` · ${counts[p.key]} here` : ""}</small></span><span aria-hidden="true">↗</span></button>)}
-      </section>}
+      {list ? (
+        <PlaceList board counts={counts} onPlace={visit} onSoon={look} />
+      ) : (
+        <>
+          <nav className="map-tools" aria-label="Map controls">
+            <button className="map-guide" aria-expanded={guide} onClick={() => setGuide((v) => !v)}>Explore places {guide ? "−" : "+"}</button>
+            <button aria-label="Zoom out" onClick={() => mapAction("out")}>−</button>
+            <button aria-label="Zoom in" onClick={() => mapAction("in")}>+</button>
+            <button aria-label="Recenter city" onClick={() => mapAction("reset")}>⌖</button>
+          </nav>
+          {guide && <PlaceList board={false} counts={counts} onPlace={visit} onSoon={look} />}
+        </>
+      )}
       {picked && (
         <div className="sheet" onClick={() => setPicked(null)}>
           <strong>
@@ -341,72 +399,62 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
           <span className="go">{picked.soon ? "Being built now: the doors open at launch." : "Move in to visit: open Block Party in Telegram."}</span>
         </div>
       )}
-      <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
-        <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
-          {/* Hidden, it draws nothing ("never") but keeps everything it built. */}
-          <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }} onCreated={watchContext}>
-            <CityAtmosphere night={night} />
-            <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
-            {/* The sun, casting real shadows over the whole city. */}
-            <directionalLight
-              position={[-28, 42, 24]}
-              color={night ? "#b1c7f7" : "#fff1d9"}
-              intensity={night ? 0.7 : 2.5}
-              castShadow={tier.shadows}
-              shadow-mapSize={[2048, 2048]}
-              shadow-camera-left={-62}
-              shadow-camera-right={62}
-              shadow-camera-top={62}
-              shadow-camera-bottom={-62}
-              shadow-camera-far={120}
-              shadow-bias={-0.0004}
-              shadow-normalBias={0.03}
-            />
-            <CityScape night={night} lamps={tier.nightLamps} />
-            <TowerTop night={night} />
-            {tier.strollers && <Strollers />}
-            <Pins counts={counts}
-              onTap={(p) => {
-                haptic("light");
-                // Residents go there; guests can only look.
-                if (me.resident && onPlace) onPlace(p.key, h?.law?.id === "gas_holiday");
-                else setPicked(p);
-              }}
-            />
-            <SoonPins
-              onTap={(p) => {
-                haptic("light");
-                setPicked(p);
-              }}
-            />
-            <DistrictLabels />
-            <ZoomLevel />
-            <IsoRig command={command} />
-            <MapControls
-              makeDefault
-              enableRotate={false}
-              screenSpacePanning={false}
-              minZoom={ZOOM.min}
-              maxZoom={ZOOM.max}
-              onChange={(e) => {
-                // Keep the board under the player's thumb: shift camera and focus together.
-                const c = e?.target as unknown as { target: THREE.Vector3; object: THREE.Camera } | undefined;
-                if (!c) return;
-                const t = clampTarget(c.target.x, c.target.z);
-                const dx = t.x - c.target.x;
-                const dz = t.z - c.target.z;
-                if (dx || dz) {
-                  c.target.x += dx;
-                  c.target.z += dz;
-                  c.object.position.x += dx;
-                  c.object.position.z += dz;
-                }
-              }}
-            />
-            {SHOW_PERF && <PerfProbe target={perf} quality={tier.quality} />}
-          </Canvas>
-        </SceneBoundary>
-      </div>
+      {!list && (
+        <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
+          <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
+            {/* Hidden, it draws nothing ("never") but keeps everything it built. */}
+            <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }} onCreated={watchContext}>
+              <CityAtmosphere night={night} />
+              <hemisphereLight args={[night ? "#8fa3da" : "#eaf4ff", night ? "#182422" : "#bba789", night ? 0.65 : 0.8]} />
+              {/* The sun, casting real shadows over the whole city. */}
+              <directionalLight
+                position={[-28, 42, 24]}
+                color={night ? "#b1c7f7" : "#fff1d9"}
+                intensity={night ? 0.7 : 2.5}
+                castShadow={tier.shadows}
+                shadow-mapSize={[2048, 2048]}
+                shadow-camera-left={-62}
+                shadow-camera-right={62}
+                shadow-camera-top={62}
+                shadow-camera-bottom={-62}
+                shadow-camera-far={120}
+                shadow-bias={-0.0004}
+                shadow-normalBias={0.03}
+              />
+              <CityScape night={night} lamps={tier.nightLamps} />
+              <TowerTop night={night} />
+              {tier.strollers && <Strollers />}
+              <Pins counts={counts} onTap={visit} />
+              <SoonPins onTap={look} />
+              <DistrictLabels />
+              <ZoomLevel />
+              <IsoRig command={command} />
+              <MapControls
+                makeDefault
+                enableRotate={false}
+                screenSpacePanning={false}
+                minZoom={ZOOM.min}
+                maxZoom={ZOOM.max}
+                onChange={(e) => {
+                  // Keep the board under the player's thumb: shift camera and focus together.
+                  const c = e?.target as unknown as { target: THREE.Vector3; object: THREE.Camera } | undefined;
+                  if (!c) return;
+                  const t = clampTarget(c.target.x, c.target.z);
+                  const dx = t.x - c.target.x;
+                  const dz = t.z - c.target.z;
+                  if (dx || dz) {
+                    c.target.x += dx;
+                    c.target.z += dz;
+                    c.object.position.x += dx;
+                    c.object.position.z += dz;
+                  }
+                }}
+              />
+              {SHOW_PERF && <PerfProbe target={perf} quality={tier.quality} />}
+            </Canvas>
+          </SceneBoundary>
+        </div>
+      )}
     </div>
   );
 }

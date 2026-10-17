@@ -633,3 +633,14 @@ button:disabled { cursor: default; }
 .receipt-stamp.rekt { color: #c0392b; }
 .receipt-q { font-size: 22px; letter-spacing: -0.03em; margin: 0; overflow-wrap: anywhere; }
 .receipt-ratio { font-style: italic; margin: 0; }
+/* Neighbours in the city now, from the places' live headcounts. */
+.neighbours-now .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 0 3px #3ddc9733; margin-right: 7px; vertical-align: middle; }
+/* The list instead of the 3D map (Me, Graphics, List): no canvas at all; the banner, the HUD and the places scroll as one page. */
+.as-list { position: fixed; inset: 0; overflow-y: auto; padding: calc(var(--safe-top) + 10px) 12px calc(var(--safe-bottom) + 96px); background: var(--bg); }
+.as-list > .banner, .as-list > .hud, .as-list > .map-directory { position: static; }
+.as-list > .banner { display: block; width: 100%; max-width: 560px; margin: 0 auto; text-align: left; }
+.as-list > .hud { flex-direction: row; flex-wrap: wrap; max-width: 560px; margin: 10px auto; }
+.as-list > .map-directory { width: auto; max-width: 560px; max-height: none; overflow: visible; margin: 0 auto; backdrop-filter: none; box-shadow: 0 4px 18px #26392b0a; }
+.list-board button { min-height: 56px; }
+.list-board button.soon { color: var(--muted); }
+body:has(.claim) .as-list { padding-bottom: calc(var(--safe-bottom) + 210px); }
