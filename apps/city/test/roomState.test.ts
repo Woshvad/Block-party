@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { BUBBLE_MS, LINES_KEPT, applyEvent, bubbles, emptyRoom, showingEmote } from "../src/roomState";
+import { MOMENTS, type TowerMoment } from "@bp/core";
+import { BUBBLE_MS, LINES_KEPT, MOMENTS_SHOWN, applyEvent, bubbles, emptyRoom, liveMoments, showingEmote } from "../src/roomState";
 
 const me = "u-me";
 const welcome = {
@@ -94,5 +95,51 @@ describe("bubbles", () => {
     expect(bubbles(s, 2000 + BUBBLE_MS)["u-b"]).toBeUndefined();
     s = applyEvent(s, { t: "left", userId: "u-b" }, 0);
     expect(bubbles(s, 2500)["u-b"]).toBeUndefined();
+  });
+});
+
+describe("big moments", () => {
+  const FULL = MOMENTS.showSeconds * 1000;
+  const swing = (id: string, over: Partial<TowerMoment> = {}): TowerMoment => ({ id, kind: "swing", marketId: "0b7e8c1a-3f2d-4c5b-9a8e-7d6c5b4a3f2e", question: "Will Lagos FC win?", from: 41, to: 63, at: 1, ...over });
+  const ev = (moment: unknown, showForMs?: unknown) => ({ t: "moment", moment, ...(showForMs === undefined ? {} : { showForMs }) });
+
+  it("shows a moment for the time the room says it has left, then it's gone", () => {
+    let s = applyEvent(emptyRoom(), welcome, 0);
+    s = applyEvent(s, ev(swing("m1"), FULL), 1000);
+    expect(s.moments).toEqual([{ ...swing("m1"), until: 1000 + FULL }]);
+    expect(liveMoments(s, 1000 + FULL - 1).map((m) => m.id)).toEqual(["m1"]);
+    expect(liveMoments(s, 1000 + FULL)).toEqual([]);
+    // Joining 90 s into it: 30 s left.
+    const late = applyEvent(applyEvent(emptyRoom(), welcome, 0), ev(swing("m1"), 30_000), 5000);
+    expect(late.moments[0]!.until).toBe(35_000);
+    // A room that says more than 2 minutes is held to 2; one that says nothing gets the full 2.
+    expect(applyEvent(s, ev(swing("m2"), 10 * FULL), 0).moments[0]!.until).toBe(FULL);
+    expect(applyEvent(s, ev(swing("m3")), 7).moments[0]!.until).toBe(7 + FULL);
+  });
+
+  it("newest first, each once, at most 3, and the faded ones dropped", () => {
+    let s = applyEvent(emptyRoom(), welcome, 0);
+    s = applyEvent(s, ev(swing("m1"), FULL), 0);
+    s = applyEvent(s, ev(swing("m1"), FULL), 10); // the same one again: no change
+    expect(s.moments).toHaveLength(1);
+    for (const id of ["m2", "m3", "m4"]) s = applyEvent(s, ev(swing(id), FULL), 20);
+    expect(s.moments.map((m) => m.id)).toEqual(["m4", "m3", "m2"]);
+    expect(s.moments).toHaveLength(MOMENTS_SHOWN);
+    s = applyEvent(s, ev(swing("short"), 5), 30);
+    s = applyEvent(s, ev(swing("m5"), FULL), 40); // "short" faded at 35
+    expect(s.moments.map((m) => m.id)).toEqual(["m5", "m4", "m3"]);
+  });
+
+  it("a welcome starts the list again (the room sends what it keeps right after)", () => {
+    let s = applyEvent(applyEvent(emptyRoom(), welcome, 0), ev(swing("m1"), FULL), 0);
+    s = applyEvent(s, welcome, 10);
+    expect(s.moments).toEqual([]);
+  });
+
+  it("junk moments change nothing", () => {
+    const s = applyEvent(emptyRoom(), welcome, 0);
+    for (const junk of [ev(null), ev("goal"), ev({ ...swing("x"), kind: "goal" }), ev({ ...swing("x"), question: "" }), ev({ ...swing("x"), from: 500 }), ev(swing("x"), 0), ev(swing("x"), -5), { t: "moment" }]) {
+      expect(applyEvent(s, junk, 0), JSON.stringify(junk)).toBe(s);
+    }
   });
 });

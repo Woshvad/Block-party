@@ -1,10 +1,14 @@
 // A live room as the client sees it, built only from the server's events.
 // Pure: (state, event) -> state, so every event order can be tested.
 
+import { MOMENTS, type TowerMoment, parseMoment } from "@bp/core";
+
 export type Pos = { x: number; y: number };
 export type Person = { userId: string; handle: string; pos: Pos; seat: string | null; emote: { name: string; at: number } | null };
 export type Line = { id: string; userId: string; handle: string; text: string; at: number };
 export type Headcount = { here: number; npc: number; away: number };
+// A Tower moment on the big screen, and when it fades by this device's clock.
+export type ShownMoment = TowerMoment & { until: number };
 
 export type RoomState = {
   you: string | null;
@@ -13,14 +17,16 @@ export type RoomState = {
   awayCount: number;
   headcount: Headcount;
   lines: Line[]; // newest last, capped
+  moments: ShownMoment[]; // newest first, capped
   lastError: { code: string; message: string; at: number } | null;
 };
 
 export const LINES_KEPT = 80;
 export const BUBBLE_MS = 120_000; // matches the room's bubbleSeconds
 export const EMOTE_MS = 3_000;
+export const MOMENTS_SHOWN = 3;
 
-export const emptyRoom = (): RoomState => ({ you: null, people: {}, away: [], awayCount: 0, headcount: { here: 0, npc: 0, away: 0 }, lines: [], lastError: null });
+export const emptyRoom = (): RoomState => ({ you: null, people: {}, away: [], awayCount: 0, headcount: { here: 0, npc: 0, away: 0 }, lines: [], moments: [], lastError: null });
 
 const isPos = (p: unknown): p is Pos => typeof p === "object" && p !== null && Number.isFinite((p as Pos).x) && Number.isFinite((p as Pos).y);
 const str = (s: unknown): s is string => typeof s === "string";
@@ -81,6 +87,17 @@ export function applyEvent(s: RoomState, ev: unknown, now: number): RoomState {
     }
     case "headcount":
       return isHeadcount(e.headcount) ? { ...s, headcount: e.headcount } : s;
+    // A Tower moment: shown for what the room says it has left (2 minutes at
+    // most), newest first, each once. A welcome starts the list again, and
+    // the room sends the moment it's keeping straight after it.
+    case "moment": {
+      const m = parseMoment(e.moment);
+      if (!m || s.moments.some((x) => x.id === m.id)) return s;
+      const full = MOMENTS.showSeconds * 1000;
+      const left = typeof e.showForMs === "number" && Number.isFinite(e.showForMs) ? Math.min(full, e.showForMs) : full;
+      if (left <= 0) return s;
+      return { ...s, moments: [{ ...m, until: now + left }, ...s.moments.filter((x) => x.until > now)].slice(0, MOMENTS_SHOWN) };
+    }
     case "error":
       return { ...s, lastError: { code: str(e.code) ? e.code : "ERROR", message: str(e.message) ? e.message : "something went wrong", at: now } };
     default:
@@ -105,3 +122,6 @@ export function bubbles(s: RoomState, now: number): Record<string, Line> {
 }
 
 export const showingEmote = (p: Person, now: number) => (p.emote && now - p.emote.at < EMOTE_MS ? p.emote.name : null);
+
+// The moments still showing, newest first.
+export const liveMoments = (s: RoomState, now: number) => s.moments.filter((m) => m.until > now);
