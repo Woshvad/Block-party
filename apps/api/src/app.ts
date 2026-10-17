@@ -71,6 +71,10 @@ import {
   grantMood,
   isBlockedEitherWay,
   myThreads,
+  pinCrewMessage,
+  pinThread,
+  unpinCrewMessage,
+  unpinThread,
   postToBoard,
   postToCrew,
   readBoard,
@@ -954,8 +958,14 @@ export function createApp(cfg: AppConfig) {
   });
   app.get("/v1/crews/mine/chat", auth, async (c) => c.json(await readCrew(db, c.get("userId"), { before: c.req.query("before"), now: now() })));
   app.post("/v1/crews/mine/chat", auth, async (c) => c.json(await postToCrew(db, c.get("userId"), (await body(c)).text, sendOpts()), 201));
+  // The lead or a deputy pins one message for the crew; a new pin replaces it.
+  app.put("/v1/crews/mine/chat/pin", auth, async (c) => c.json(await pinCrewMessage(db, c.get("userId"), (await body(c)).messageId, opts())));
+  app.delete("/v1/crews/mine/chat/pin", auth, async (c) => c.json(await unpinCrewMessage(db, c.get("userId"))));
   app.get("/v1/dms", auth, async (c) => c.json(await myThreads(db, c.get("userId"))));
   app.get("/v1/dms/:threadId", auth, async (c) => c.json(await readDm(db, c.get("userId"), uuid(c, "threadId"), { before: c.req.query("before"), now: now() })));
+  // Up to 5 conversations pinned to the top of your list, on every device.
+  app.put("/v1/dms/:threadId/pin", auth, async (c) => c.json(await pinThread(db, c.get("userId"), uuid(c, "threadId"), opts())));
+  app.delete("/v1/dms/:threadId/pin", auth, async (c) => c.json(await unpinThread(db, c.get("userId"), uuid(c, "threadId"))));
   app.post("/v1/dms/to/:userId", auth, async (c) => c.json(await sendDm(db, c.get("userId"), uuid(c, "userId"), (await body(c)).text, sendOpts()), 201));
 
   // --- Moods ---------------------------------------------------------------
