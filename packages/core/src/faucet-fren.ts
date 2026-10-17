@@ -2,6 +2,7 @@ import { AWAY } from "./away";
 import { CREW } from "./crew";
 import { GM } from "./daily";
 import { HALVING_LINE, RENT, SHIFT } from "./economy";
+import { HUNT_TROPHIES } from "./hunt";
 import { NAP } from "./life";
 import { MOOD } from "./moods";
 import { NOTIFY } from "./notifications";
@@ -81,6 +82,11 @@ export const FAQ: readonly Faq[] = [
     id: "away",
     keywords: ["away", "offline", "while you were away", "recap", "logged off"],
     answer: `Offline, your resident keeps wandering by its traits for up to ${AWAY.livesForDays} days and you get a "while you were away" recap. Away residents never chat, call, vote or spend for you.`,
+  },
+  {
+    id: "hunt",
+    keywords: ["clue", "daily clue", "clue hunt", "hunt", "hidden", "search here", "trophy", "trophies"],
+    answer: `Every city day something is hidden at one place, and Today has the clue. Ride there and search: one search a day, and the answer shows after the bell. Your first find brings ${HUNT_TROPHIES[0]!.name} for your home, and ${HUNT_TROPHIES[1]!.finds} finds bring ${HUNT_TROPHIES[1]!.name}. Trophies only, never GM.`,
   },
   {
     id: "pings",

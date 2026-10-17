@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { FAQ, FAUCET_FREN_FALLBACK, GM, NEVER_SAY, RENT, RIDES, faucetFrenAnswer } from "../src";
+import { FAQ, FAUCET_FREN_FALLBACK, GM, HUNT_TROPHIES, NEVER_SAY, RENT, RIDES, faucetFrenAnswer } from "../src";
 
 // NPCs never mention real trades, wallets, deposits or dollar amounts, and never tell anyone what to call.
 const NPC_NEVER = /\b(wallet|deposit|withdraw|usdc|usd|dollars?|real trades?|back it for real|you should (call|bet|pick)|go long|go short)\b|\$/i;
@@ -34,6 +34,8 @@ describe("Faucet Fren", () => {
       ["gm", "gm"],
       ["what is gm", "gm"],
       ["how do I add frens", "frens"],
+      ["where is today's clue hidden?", "hunt"],
+      ["how does the daily clue hunt work", "hunt"],
     ];
     for (const [q, id] of cases) expect(faucetFrenAnswer(q).id, q).toBe(id);
   });
@@ -42,6 +44,7 @@ describe("Faucet Fren", () => {
     expect(faucetFrenAnswer("rent").answer).toContain(String(RENT.tenement));
     expect(faucetFrenAnswer("drip").answer).toContain(`${GM.drip} GM`);
     expect(faucetFrenAnswer("rollup").answer).toContain(`${RIDES.rollup.fare} GM`);
+    expect(faucetFrenAnswer("clue").answer).toContain(`${HUNT_TROPHIES[1]!.finds} finds bring ${HUNT_TROPHIES[1]!.name}`);
   });
 
   it("anything else gets the fallback; nothing ever throws", () => {
