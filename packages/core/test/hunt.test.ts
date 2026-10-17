@@ -61,7 +61,7 @@ describe("picking the day", () => {
     for (const yesterday of HUNT_PLACES) {
       const seen = new Map<string, number>();
       for (let i = 0; i < 6000; i++) {
-        const d = pickHuntDay(rand, yesterday);
+        const d = pickHuntDay(rand, [yesterday]);
         seen.set(d.place, (seen.get(d.place) ?? 0) + 1);
       }
       expect(seen.has(yesterday), yesterday).toBe(false);
@@ -70,11 +70,16 @@ describe("picking the day", () => {
     }
   });
 
-  it("with no yesterday, any place can come up; the clue is one of that place's", () => {
+  it("avoids both neighbouring days when both are known", () => {
+    const rand = seededRandomInt(5);
+    for (let i = 0; i < 2000; i++) expect(["roof", "diner"]).not.toContain(pickHuntDay(rand, ["roof", "diner"]).place);
+  });
+
+  it("with nothing to avoid, any place can come up; the clue is one of that place's", () => {
     const rand = seededRandomInt(7);
     const seen = new Set<string>();
     for (let i = 0; i < 2000; i++) {
-      const d = pickHuntDay(rand, null);
+      const d = pickHuntDay(rand);
       seen.add(d.place);
       expect(Number.isSafeInteger(d.clueIndex)).toBe(true);
       expect(d.clueIndex).toBeGreaterThanOrEqual(0);
@@ -86,7 +91,7 @@ describe("picking the day", () => {
   it("the same seed gives the same days (tests can pin it)", () => {
     const a = seededRandomInt(99);
     const b = seededRandomInt(99);
-    for (let i = 0; i < 50; i++) expect(pickHuntDay(a, "roof")).toEqual(pickHuntDay(b, "roof"));
+    for (let i = 0; i < 50; i++) expect(pickHuntDay(a, ["roof"])).toEqual(pickHuntDay(b, ["roof"]));
   });
 });
 

@@ -1,5 +1,5 @@
 import { type CityDay, HUNT_PLACE_NAMES, HUNT_TROPHIES, type HuntPlace, type RandomInt, addDays, cityDay, cryptoRandomInt, huntClue, isHuntPlace, nextBell, pickHuntDay } from "@bp/core";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { grantEarned } from "./home";
 import { whereabouts } from "./rides";
@@ -51,11 +51,15 @@ async function huntDay(db: Db, day: CityDay, rand: RandomInt, now: Date): Promis
   const [had] = await db.select().from(huntDays).where(eq(huntDays.day, day));
   if (had) return asHuntDay(had);
   return db.transaction(async (tx) => {
-    // One pick at a time, so a day's pick always sees the day before's: first
-    // askers either side of the bell can't both land on the same place.
+    // One pick at a time, each avoiding the days either side: two first
+    // askers either side of the bell can't land on the same place, whichever
+    // of them picks first.
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('hunt_days'))`);
-    const [before] = await tx.select({ place: huntDays.place }).from(huntDays).where(eq(huntDays.day, addDays(day, -1)));
-    const pick = pickHuntDay(rand, before && isHuntPlace(before.place) ? before.place : null);
+    const near = await tx
+      .select({ place: huntDays.place })
+      .from(huntDays)
+      .where(inArray(huntDays.day, [addDays(day, -1), addDays(day, 1)]));
+    const pick = pickHuntDay(rand, near.map((n) => n.place).filter(isHuntPlace));
     await tx.insert(huntDays).values({ day, place: pick.place, clueIndex: pick.clueIndex, createdAt: now }).onConflictDoNothing();
     const [row] = await tx.select().from(huntDays).where(eq(huntDays.day, day));
     return asHuntDay(row!);

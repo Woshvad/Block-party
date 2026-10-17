@@ -83,6 +83,18 @@ describe("the day's hiding place", () => {
     expect(picks).toEqual([0, 1, 0, 1, 0, 1].map((i) => HUNT_PLACES[i]));
   });
 
+  it("first askers either side of the bell never land on the same place", async () => {
+    // Both dice pinned to the first choice: whichever day is picked second
+    // must see the other and step aside.
+    const u = await makeResident(db);
+    const [before, after] = ["2033-03-20", "2033-03-21"];
+    const results = await raceAt(client, "hunt_days", 2, [before, after].map((day) => () => todaysHunt(db, u, { now: at(day, day === before ? "23:59:59" : "00:00:00"), rand: always(0) })));
+    expect(results.every((r) => r.ok)).toBe(true);
+    const places = [await placeOn(before), await placeOn(after)];
+    expect(new Set(places).size).toBe(2);
+    expect(places).toContain(HUNT_PLACES[0]);
+  });
+
   it("over a month of real dice, no day repeats the one before", async () => {
     const u = await makeResident(db);
     const rand = seededRandomInt(2033);

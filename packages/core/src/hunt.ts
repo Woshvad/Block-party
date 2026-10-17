@@ -84,12 +84,13 @@ export const HUNT_TROPHIES: ReadonlyArray<{ finds: number; pieceId: string; name
   { finds: 7, pieceId: "magnifier_trophy", name: "the golden magnifier" },
 ];
 
-// The day's hiding place and clue: never yesterday's place, so the same
-// answer never runs two days. The server calls this with crypto randomness
-// the first time anyone asks for a day; tests pass a seeded generator.
-export function pickHuntDay(rand: RandomInt, yesterday: HuntPlace | null): { place: HuntPlace; clueIndex: number } {
+// The day's hiding place and clue, never one of `avoid` (the places of the
+// days either side), so the same answer never runs two days. The server
+// calls this with crypto randomness the first time anyone asks for a day;
+// tests pass a seeded generator.
+export function pickHuntDay(rand: RandomInt, avoid: readonly HuntPlace[] = []): { place: HuntPlace; clueIndex: number } {
   const place = pick(
-    HUNT_PLACES.filter((p) => p !== yesterday),
+    HUNT_PLACES.filter((p) => !avoid.includes(p)),
     rand,
   );
   return { place, clueIndex: rand(HUNT_CLUES[place].length) };
