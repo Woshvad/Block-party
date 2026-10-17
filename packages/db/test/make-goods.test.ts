@@ -78,7 +78,7 @@ describe("staff send a make-good", () => {
     const before = (await client`SELECT count(*)::int AS n FROM make_goods`)[0]!.n;
     const send = (input: { reason?: unknown; amount?: unknown }, blockedWords?: string[]) => code(createMakeGood(db, mod, input, { now: slot(0), ...(blockedWords ? { blockedWords } : {}) }));
     for (const amount of [0, -5, 201, 1.5, "100", null, undefined, NaN]) expect(await send({ reason: SORRY, amount }), String(amount)).toBe("INVALID_INPUT");
-    for (const reason of [undefined, 42, "", "   ", "oops", "x".repeat(MAKE_GOOD.reasonMaxChars + 1), "​​​​​​"]) expect(await send({ reason, amount: 100 })).toBe("INVALID_INPUT");
+    for (const reason of [undefined, 42, "", "   ", "oops", "x".repeat(MAKE_GOOD.reasonMaxChars + 1), "\u200b\u200b\u200b\u200b\u200b\u200b"]) expect(await send({ reason, amount: 100 })).toBe("INVALID_INPUT");
     expect(await send({ reason: `key: ${"ab".repeat(32)}`, amount: 100 })).toBe("MODERATED"); // a private key
     expect(await send({ reason: "Sorry! Connect your wallet to claim", amount: 100 })).toBe("MODERATED");
     expect(await send({ reason: "Sorry about the b4dw0rd outage", amount: 100 }, ["badword"])).toBe("MODERATED");
@@ -87,7 +87,7 @@ describe("staff send a make-good", () => {
 
   it("records who made it and when, cleans the reason, and queues it for the AI check", async () => {
     const mod = await staffer();
-    const m = await createMakeGood(db, mod, { reason: "  The city's​ sorry\n about the outage.  ", amount: 120 }, { now: slot(1) });
+    const m = await createMakeGood(db, mod, { reason: "  The city's\u200b sorry\n about the outage.  ", amount: 120 }, { now: slot(1) });
     expect(m).toMatchObject({ reason: SORRY, amount: 120, createdBy: mod, createdAt: slot(1), closesAt: new Date(slot(1).getTime() + 14 * DAY), collected: 0, paid: 0 });
     const [row] = await client`SELECT created_by, created_at FROM make_goods WHERE id = ${m.id}`;
     expect([row!.created_by, new Date(row!.created_at).getTime()]).toEqual([mod, slot(1).getTime()]);
