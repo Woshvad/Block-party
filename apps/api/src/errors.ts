@@ -156,6 +156,8 @@ const CHAT: Record<ChatErrorCode, number> = {
   FOLLOW_LIMIT: 409,
   NOT_TOGETHER: 409,
   NO_SUCH_THREAD: 404,
+  NO_SUCH_MESSAGE: 404,
+  PIN_LIMIT: 409,
 };
 
 const RIDE: Record<RideError["code"], number> = { INVALID_INPUT: 400, NO_RESIDENT: 404, ALREADY_THERE: 409, IDEMPOTENCY_KEY_REQUIRED: 400 };
