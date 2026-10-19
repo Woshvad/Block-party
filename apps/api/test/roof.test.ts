@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CAST, type FeedMarket, type OddsProvider } from "@bp/core";
+import { CAST, type FeedMarket, type OddsProvider, seasonOf } from "@bp/core";
 import { makeCall, pollOdds } from "@bp/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { call, client, close, db, makeApp, ready, resident } from "./harness";
@@ -11,9 +11,12 @@ const MIN = 60_000;
 const H = 60 * MIN;
 const D = 24 * H;
 const BOT = CAST.nothing_9000.id;
-// Tomorrow at 09:00 UTC: a day of its own, well inside the sessions' 30 days.
-const t = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1, 9);
 const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+// Tomorrow at 09:00 UTC: a day of its own, well inside the sessions' 30 days.
+// The boards are read at the next bell, and the Right List counts only its
+// own season: when tomorrow is a season's last day, the day after it instead.
+const tomorrow = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1, 9);
+const t = seasonOf(dayOf(tomorrow)) === seasonOf(dayOf(tomorrow + D)) ? tomorrow : tomorrow + D;
 // The bell after the day's markets settle.
 const afterBell = makeApp({ now: () => new Date(t + D) });
 
