@@ -88,7 +88,7 @@ describe("staff rename a handle", () => {
     const old = uniq();
     const u = await residentAs(old);
     const at = new Date(Date.now() - 1000);
-    const r = await renameHandle(db, mod, u.toUpperCase(), { reason: `  ${REASON}\u200b ` }, { now: at });
+    const r = await renameHandle(db, mod, u.toUpperCase(), { reason: `  ${REASON}\u200b `, from: old }, { now: at });
     expect(r.to).toMatch(/^neighbour_\d{5}$/);
     expect(r).toMatchObject({ userId: u, from: old, reason: REASON, at, heldUntil: new Date(at.getTime() + HANDLE_RENAME.holdDays * DAY), reportId: null });
     expect(await handleOf(u)).toBe(r.to);
@@ -106,10 +106,10 @@ describe("staff rename a handle", () => {
     const taken = `neighbour_${picks[0]}`;
     if (await isHandleAvailable(db, taken)) await residentAs(taken);
     const restingOwner = await residentAs(`neighbour_${picks[1]}`);
-    await renameHandle(db, mod, restingOwner, { reason: REASON, newHandle: uniq() });
+    await renameHandle(db, mod, restingOwner, { reason: REASON, from: `neighbour_${picks[1]}`, newHandle: uniq() });
     let k = 0;
     const u = await residentAs();
-    const r = await renameHandle(db, mod, u, { reason: REASON }, { rand: () => picks[Math.min(k++, picks.length - 1)]! });
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: await handleOf(u) }, { rand: () => picks[Math.min(k++, picks.length - 1)]! });
     expect(r.to).toBe(`neighbour_${picks[2]}`);
   });
 
@@ -119,7 +119,7 @@ describe("staff rename a handle", () => {
     const u = await residentAs(old);
     const other = uniq();
     await residentAs(other);
-    const send = (newHandle: unknown, blockedWords?: string[]) => code(renameHandle(db, mod, u, { reason: REASON, newHandle }, blockedWords ? { blockedWords } : {}));
+    const send = (newHandle: unknown, blockedWords?: string[]) => code(renameHandle(db, mod, u, { reason: REASON, from: old, newHandle }, blockedWords ? { blockedWords } : {}));
     for (const bad of ["ab", "a".repeat(16), "a b", "roof-rat", "x__y", "12345", "admin", "Faucet_Fren", "r\u043e\u043ef_rat", 42, {}, [], ""]) expect(await send(bad), String(bad)).toBe("INVALID_INPUT");
     expect(await send(other.toUpperCase())).toBe("HANDLE_TAKEN");
     expect(await send(old.toUpperCase())).toBe("INVALID_INPUT"); // already theirs
@@ -127,22 +127,24 @@ describe("staff rename a handle", () => {
     expect(await handleOf(u)).toBe(old);
     expect(await renamesOf(u)).toEqual([]);
     const fresh = `New_${uniq().slice(1, 9)}`;
-    const r = await renameHandle(db, mod, u, { reason: REASON, newHandle: ` @${fresh} ` });
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old, newHandle: ` @${fresh} ` });
     expect([r.from, r.to, await handleOf(u)]).toEqual([old, fresh, fresh]);
   });
 
   it("staff's blocked words apply to a typed handle", async () => {
     const mod = await staffer();
     const u = await residentAs();
-    expect(await code(renameHandle(db, mod, u, { reason: REASON, newHandle: "b4d_w0rd" }, { blockedWords: ["badword"] }))).toBe("MODERATED");
-    expect(await code(renameHandle(db, mod, u, { reason: REASON, newHandle: "bad_words" }, { blockedWords: ["badword"] }))).toBe("OK");
+    const from = await handleOf(u);
+    expect(await code(renameHandle(db, mod, u, { reason: REASON, from, newHandle: "b4d_w0rd" }, { blockedWords: ["badword"] }))).toBe("MODERATED");
+    expect(await code(renameHandle(db, mod, u, { reason: REASON, from, newHandle: "bad_words" }, { blockedWords: ["badword"] }))).toBe("OK");
   });
 
   it("the reason is required, readable and short", async () => {
     const mod = await staffer();
     const u = await residentAs();
+    const from = await handleOf(u);
     for (const reason of [undefined, null, 7, "", "too short", "x".repeat(HANDLE_RENAME.reasonMaxChars + 1), "\u200b".repeat(30)]) {
-      expect(await code(renameHandle(db, mod, u, { reason })), String(reason).slice(0, 12)).toBe("INVALID_INPUT");
+      expect(await code(renameHandle(db, mod, u, { reason, from })), String(reason).slice(0, 12)).toBe("INVALID_INPUT");
     }
     for (const input of [undefined, null, "x", [], 5]) expect(await code(renameHandle(db, mod, u, input as never))).toBe("INVALID_INPUT");
     expect(await renamesOf(u)).toEqual([]);
@@ -150,23 +152,25 @@ describe("staff rename a handle", () => {
 
   it("staff can't rename themselves or another staff member", async () => {
     const [mod, other] = [await staffer(), await staffer()];
-    expect(await code(renameHandle(db, mod, mod, { reason: REASON }))).toBe("NOT_SELF");
-    expect(await code(renameHandle(db, mod, other, { reason: REASON }))).toBe("STAFF_HANDLE");
+    expect(await code(renameHandle(db, mod, mod, { reason: REASON, from: await handleOf(mod) }))).toBe("NOT_SELF");
+    expect(await code(renameHandle(db, mod, other, { reason: REASON, from: await handleOf(other) }))).toBe("STAFF_HANDLE");
     expect(await client`SELECT 1 FROM handle_renames WHERE user_id IN (${mod}, ${other})`).toHaveLength(0);
   });
 
   it("only residents: not a guest, a claimed account that hasn't moved in, or junk", async () => {
     const mod = await staffer();
     const guest = (await createGuest(db, { ageAck: true })).userId;
-    for (const t of [guest, await claimed(), randomUUID(), "not-a-uuid", undefined, 5]) expect(await code(renameHandle(db, mod, t, { reason: REASON }))).toBe("NO_RESIDENT");
+    for (const t of [guest, await claimed(), randomUUID(), "not-a-uuid", undefined, 5]) expect(await code(renameHandle(db, mod, t, { reason: REASON, from: "someone" }))).toBe("NO_RESIDENT");
   });
 
-  it("a stale view changes nothing: `from` must still be their handle (any case, with or without @)", async () => {
+  it("a stale view changes nothing: `from` is required and must still be their handle (any case, with or without @)", async () => {
     const mod = await staffer();
     const old = uniq();
     const u = await residentAs(old);
     expect(await code(renameHandle(db, mod, u, { reason: REASON, from: "someone_else" }))).toBe("HANDLE_CHANGED");
-    for (const from of [5, {}, "x".repeat(41)]) expect(await code(renameHandle(db, mod, u, { reason: REASON, from }))).toBe("INVALID_INPUT");
+    // Without it, a second staff member renaming at once would rename them again.
+    expect(await code(renameHandle(db, mod, u, { reason: REASON }))).toBe("INVALID_INPUT");
+    for (const from of [undefined, null, "", "  ", "@", 5, {}, "x".repeat(41)]) expect(await code(renameHandle(db, mod, u, { reason: REASON, from }))).toBe("INVALID_INPUT");
     expect(await handleOf(u)).toBe(old);
     expect(await code(renameHandle(db, mod, u, { reason: REASON, from: `@${old.toUpperCase()}` }))).toBe("OK");
   });
@@ -178,15 +182,15 @@ describe("staff rename a handle", () => {
     const bystander = await residentAs();
     const rep = await fileReport(db, reporter, { target: u, reason: "impersonation", note: "pretends to be the mayor" });
     const aside = await fileReport(db, reporter, { target: bystander, reason: "impersonation" });
-    expect(await code(renameHandle(db, mod, u, { reason: REASON, reportId: aside.id }))).toBe("NO_SUCH_REPORT");
-    expect(await code(renameHandle(db, mod, u, { reason: REASON, reportId: "nope" }))).toBe("NO_SUCH_REPORT");
+    expect(await code(renameHandle(db, mod, u, { reason: REASON, from: old, reportId: aside.id }))).toBe("NO_SUCH_REPORT");
+    expect(await code(renameHandle(db, mod, u, { reason: REASON, from: old, reportId: "nope" }))).toBe("NO_SUCH_REPORT");
     expect(await handleOf(u)).toBe(old);
-    const r = await renameHandle(db, mod, u, { reason: REASON, reportId: rep.id.toUpperCase() });
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old, reportId: rep.id.toUpperCase() });
     expect(r.reportId).toBe(rep.id);
     const [closed] = await client`SELECT status, resolved_by, resolution FROM reports WHERE id = ${rep.id}`;
     expect(closed).toEqual({ status: "actioned", resolved_by: mod, resolution: `Renamed @${old} to @${r.to}: ${REASON}` });
     expect((await renamesOf(u))[0]!.report_id).toBe(rep.id);
-    expect(await code(renameHandle(db, mod, u, { reason: REASON, reportId: rep.id }))).toBe("NO_SUCH_REPORT");
+    expect(await code(renameHandle(db, mod, u, { reason: REASON, from: r.to, reportId: rep.id }))).toBe("NO_SUCH_REPORT");
   });
 });
 
@@ -195,21 +199,21 @@ describe("the old handle rests", () => {
     const mod = await staffer();
     const old = uniq();
     const u = await residentAs(old);
-    await renameHandle(db, mod, u, { reason: REASON });
+    const away = await renameHandle(db, mod, u, { reason: REASON, from: old });
     expect(await isHandleAvailable(db, old.toUpperCase())).toBe(false);
     expect(await code(createResident(db, await claimed(), { ...pickForMe(seededRandomInt(seed++)), handle: old.toUpperCase(), name: "Copycat" }))).toBe("HANDLE_TAKEN");
     const someoneElse = await residentAs();
-    expect(await code(renameHandle(db, mod, someoneElse, { reason: REASON, newHandle: old }))).toBe("HANDLE_TAKEN");
+    expect(await code(renameHandle(db, mod, someoneElse, { reason: REASON, from: await handleOf(someoneElse), newHandle: old }))).toBe("HANDLE_TAKEN");
     // Undoing a mistake: the resident it was taken from may have it back.
-    expect(await code(renameHandle(db, mod, u, { reason: "Renamed by mistake, so it's yours again.", newHandle: old }))).toBe("OK");
+    expect(await code(renameHandle(db, mod, u, { reason: "Renamed by mistake, so it's yours again.", from: away.to, newHandle: old }))).toBe("OK");
     expect(await handleOf(u)).toBe(old);
   });
 
   it("and is free again once the 30 days are up", async () => {
     const mod = await staffer();
     const [expired, resting] = [uniq(), uniq()];
-    await renameHandle(db, mod, await residentAs(expired), { reason: REASON }, { now: new Date(Date.now() - 30 * DAY - 60_000) });
-    await renameHandle(db, mod, await residentAs(resting), { reason: REASON }, { now: new Date(Date.now() - 29 * DAY) });
+    await renameHandle(db, mod, await residentAs(expired), { reason: REASON, from: expired }, { now: new Date(Date.now() - 30 * DAY - 60_000) });
+    await renameHandle(db, mod, await residentAs(resting), { reason: REASON, from: resting }, { now: new Date(Date.now() - 29 * DAY) });
     expect(await isHandleAvailable(db, expired)).toBe(true);
     expect(await isHandleAvailable(db, resting)).toBe(false);
     expect(await code(createResident(db, await claimed(), { ...pickForMe(seededRandomInt(seed++)), handle: expired, name: "Newcomer" }))).toBe("OK");
@@ -223,10 +227,10 @@ describe("the resident's notice", () => {
     const old = uniq();
     const u = await residentAs(old);
     expect(await handleNotice(db, u)).toBeNull();
-    const first = await renameHandle(db, mod, u, { reason: REASON });
+    const first = await renameHandle(db, mod, u, { reason: REASON, from: old });
     expect(await handleNotice(db, u)).toEqual({ id: first.id, from: old, to: first.to, reason: REASON, at: first.at });
     // A second rename before they look: they last knew the first old handle.
-    const second = await renameHandle(db, mod, u, { reason: "Another flag, so a fresh neutral handle." });
+    const second = await renameHandle(db, mod, u, { reason: "Another flag, so a fresh neutral handle.", from: first.to });
     expect(await handleNotice(db, u)).toMatchObject({ id: second.id, from: old, to: second.to });
     // OK on the first notice (seen on another device) leaves the newer one up.
     expect(await code(seeHandleNotice(db, u, first.id))).toBe("NO_SUCH_NOTICE");
@@ -235,14 +239,14 @@ describe("the resident's notice", () => {
     expect(await seeHandleNotice(db, u, second.id)).toEqual({ ok: true }); // a second OK is fine
     expect(await handleNotice(db, u)).toBeNull();
     // After seeing one, the next rename starts from the handle they saw.
-    const third = await renameHandle(db, mod, u, { reason: REASON });
+    const third = await renameHandle(db, mod, u, { reason: REASON, from: second.to });
     expect(await handleNotice(db, u)).toMatchObject({ id: third.id, from: second.to, to: third.to });
   });
 
   it("is theirs alone", async () => {
     const mod = await staffer();
     const [u, other] = [await residentAs(), await residentAs()];
-    const r = await renameHandle(db, mod, u, { reason: REASON });
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: await handleOf(u) });
     for (const id of [r.id, "junk", undefined]) expect(await code(seeHandleNotice(db, other, id))).toBe("NO_SUCH_NOTICE");
     expect(await handleNotice(db, other)).toBeNull();
     expect(await handleNotice(db, u)).toMatchObject({ id: r.id });
@@ -260,7 +264,7 @@ describe("moderation around a rename", () => {
     const [clean] = await client`INSERT INTO moderation_items (kind, ref, author_id, text, status) VALUES ('resident_handle', ${u}, ${u}, ${old}, 'clean') RETURNING id`;
     expect((await moderationQueue(db, other)).map((i) => i.id)).toContain(flagged!.id);
     const fresh = `Fresh_${uniq().slice(1, 8)}`;
-    await renameHandle(db, mod, u, { reason: REASON, newHandle: fresh });
+    await renameHandle(db, mod, u, { reason: REASON, from: old, newHandle: fresh });
     expect((await moderationQueue(db, other)).map((i) => i.id)).not.toContain(flagged!.id);
     const items = await client`SELECT id, review, reviewed_by FROM moderation_items WHERE id IN (${flagged!.id}, ${pending!.id}, ${clean!.id}) ORDER BY id`;
     const byId = new Map(items.map((i) => [i.id, i]));
@@ -277,10 +281,10 @@ describe("moderation around a rename", () => {
     const u = await residentAs(old, "Rude Name");
     await takeDownFlagged(db, { kind: "resident_name", ref: u, text: "Rude Name" });
     expect((await getResident(db, u))!.name).toBe(old);
-    const r = await renameHandle(db, mod, u, { reason: REASON });
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old });
     expect((await getResident(db, u))!.name).toBe(r.to);
     const v = await residentAs(uniq(), "Kept Name");
-    await renameHandle(db, mod, v, { reason: REASON });
+    await renameHandle(db, mod, v, { reason: REASON, from: await handleOf(v) });
     expect((await getResident(db, v))!.name).toBe("Kept Name");
   });
 });
@@ -301,20 +305,18 @@ describe("races", () => {
     expect(await handleNotice(db, u)).toMatchObject({ id: won[0]!.v.id, from: old, to: won[0]!.v.to });
   });
 
-  it("without `from`, they apply one after the other and the record reads in order", async () => {
-    const [a, b] = [await staffer(), await staffer()];
+  it("each record comes after the rename it follows, even when its clock was read first", async () => {
+    const mod = await staffer();
     const old = uniq();
     const u = await residentAs(old);
-    const settled = await race("handle_renames", 2, [a, b].map((s) => () => renameHandle(db, s, u, { reason: REASON })));
-    expect(settled.every((r) => r.ok)).toBe(true);
-    // Read as a chain: each took the clock before it queued, so the times may tie.
-    const rows = [...(await client`SELECT old_handle, new_handle FROM handle_renames WHERE user_id = ${u}`)];
-    expect(rows).toHaveLength(2);
-    const first = rows.find((r) => r.old_handle === old);
-    const second = rows.find((r) => r !== first);
-    expect(second!.old_handle).toBe(first!.new_handle);
-    expect(await handleOf(u)).toBe(second!.new_handle);
-    expect(await handleNotice(db, u)).toMatchObject({ from: old, to: second!.new_handle });
+    const t = Date.now();
+    const first = await renameHandle(db, mod, u, { reason: REASON, from: old }, { now: new Date(t) });
+    // The next request read its clock before the first committed, then queued for the resident.
+    const second = await renameHandle(db, mod, u, { reason: REASON, from: first.to }, { now: new Date(t - 5_000) });
+    expect(second.at.getTime()).toBeGreaterThan(first.at.getTime());
+    expect(second.heldUntil.getTime()).toBe(second.at.getTime() + HANDLE_RENAME.holdDays * DAY);
+    const rows = [...(await client`SELECT old_handle, new_handle FROM handle_renames WHERE user_id = ${u} ORDER BY created_at`)];
+    expect(rows).toEqual([{ old_handle: old, new_handle: first.to }, { old_handle: first.to, new_handle: second.to }]);
   });
 
   it("two residents renamed to the same handle at once: one gets it, the other is left as it was", async () => {
@@ -322,7 +324,7 @@ describe("races", () => {
     const [x, y] = [await residentAs(), await residentAs()];
     const [hx, hy] = [await handleOf(x), await handleOf(y)];
     const wanted = uniq();
-    const settled = await race("handle_renames", 2, [[a, x], [b, y]].map(([s, t]) => () => code(renameHandle(db, s!, t!, { reason: REASON, newHandle: wanted }))));
+    const settled = await race("handle_renames", 2, [[a, x, hx], [b, y, hy]].map(([s, t, from]) => () => code(renameHandle(db, s!, t!, { reason: REASON, from, newHandle: wanted }))));
     expect(settled.map((r) => (r.ok ? r.v : "THREW")).sort()).toEqual(["HANDLE_TAKEN", "OK"]);
     const loser = (await handleOf(x)) === wanted ? y : x;
     expect(await handleOf(loser)).toBe(loser === x ? hx : hy);
@@ -339,7 +341,7 @@ describe("races", () => {
     // does the move-in try for the old handle.
     const lockWaiters = async () => (await client`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`)[0]!.n as number;
     const settled = await race("handle_notices", 2, [
-      () => code(renameHandle(db, mod, u, { reason: REASON })),
+      () => code(renameHandle(db, mod, u, { reason: REASON, from: old })),
       async () => {
         const deadline = Date.now() + 10_000;
         // loop-bound: the 10-second deadline.
@@ -427,7 +429,7 @@ describe("database guards (bypassing app code)", () => {
     const mod = await staffer();
     const old = uniq();
     const u = await residentAs(old);
-    await renameHandle(db, mod, u, { reason: REASON });
+    await renameHandle(db, mod, u, { reason: REASON, from: old });
     const v = await claimed();
     await expect(
       client`INSERT INTO residents (user_id, handle, name, look, traits, goal, backstory, starter_item, kit_style)
@@ -438,7 +440,7 @@ describe("database guards (bypassing app code)", () => {
   it("the record can't be edited or deleted", async () => {
     const mod = await staffer();
     const u = await residentAs();
-    const r = await renameHandle(db, mod, u, { reason: REASON });
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: await handleOf(u) });
     await expect(client`UPDATE handle_renames SET reason = 'nothing to see here, move along' WHERE id = ${r.id}`).rejects.toThrow(/append-only/);
     await expect(client`DELETE FROM handle_renames WHERE id = ${r.id}`).rejects.toThrow(/append-only|refused/);
     expect((await renamesOf(u))[0]!.reason).toBe(REASON);

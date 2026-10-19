@@ -64,17 +64,18 @@ describe("POST /v1/staff/residents/:id/handle", () => {
     };
     await expectErr(rename(mod.token, u.userId, { reason: "short" }), 400, "INVALID_INPUT", "reason");
     await expectErr(rename(mod.token, u.userId, { reason: REASON, newHandle: "admin" }), 400, "INVALID_INPUT", "newHandle");
-    await expectErr(rename(mod.token, u.userId, { reason: REASON, newHandle: taken.handle.toUpperCase() }), 409, "HANDLE_TAKEN", "newHandle");
+    await expectErr(rename(mod.token, u.userId, { reason: REASON, from: u.handle, newHandle: taken.handle.toUpperCase() }), 409, "HANDLE_TAKEN", "newHandle");
     await expectErr(rename(mod.token, u.userId, { reason: REASON, newHandle: "b4d_w0rd" }, makeApp({ blockedWords: ["badword"] })), 422, "MODERATED", "newHandle");
     await expectErr(rename(mod.token, u.userId, { reason: REASON, from: "someone_else" }), 409, "HANDLE_CHANGED");
-    await expectErr(rename(mod.token, mod.userId, { reason: REASON }), 400, "NOT_SELF");
-    await expectErr(rename(mod.token, otherMod.userId, { reason: REASON }), 403, "STAFF_HANDLE");
-    await expectErr(rename(mod.token, crypto.randomUUID(), { reason: REASON }), 404, "NO_RESIDENT");
-    await expectErr(rename(mod.token, (await signedIn()).userId, { reason: REASON }), 404, "NO_RESIDENT");
-    await expectErr(rename(mod.token, u.userId, { reason: REASON, reportId: crypto.randomUUID() }), 404, "NO_SUCH_REPORT");
-    await expectErr(rename(mod.token, "not-a-uuid", { reason: REASON }), 404, "NOT_FOUND");
+    await expectErr(rename(mod.token, u.userId, { reason: REASON }), 400, "INVALID_INPUT", "from");
+    await expectErr(rename(mod.token, mod.userId, { reason: REASON, from: mod.handle }), 400, "NOT_SELF");
+    await expectErr(rename(mod.token, otherMod.userId, { reason: REASON, from: otherMod.handle }), 403, "STAFF_HANDLE");
+    await expectErr(rename(mod.token, crypto.randomUUID(), { reason: REASON, from: u.handle }), 404, "NO_RESIDENT");
+    await expectErr(rename(mod.token, (await signedIn()).userId, { reason: REASON, from: u.handle }), 404, "NO_RESIDENT");
+    await expectErr(rename(mod.token, u.userId, { reason: REASON, from: u.handle, reportId: crypto.randomUUID() }), 404, "NO_SUCH_REPORT");
+    await expectErr(rename(mod.token, "not-a-uuid", { reason: REASON, from: u.handle }), 404, "NOT_FOUND");
     expect(await client`SELECT 1 FROM handle_renames WHERE user_id = ${u.userId}`).toHaveLength(0);
-    const named = await rename(mod.token, u.userId, { reason: REASON, newHandle: `Named_${uniq().slice(1, 8)}` });
+    const named = await rename(mod.token, u.userId, { reason: REASON, from: u.handle, newHandle: `Named_${uniq().slice(1, 8)}` });
     expect(named.status).toBe(200);
     expect((await call("GET", "/v1/me", { token: u.token })).body.resident.handle).toBe(named.body.to);
   });
@@ -94,12 +95,17 @@ describe("POST /v1/staff/residents/:id/handle", () => {
     const nasty: unknown[] = ["", "\u0000", "a\u0000b", "' OR '1'='1", "<script>", "\u202eevil", "x".repeat(5000), "00000000-0000-0000-0000-000000000000", 0, -1, 1e308, NaN, true, null, [], {}, { __proto__: { admin: true } }, [[["deep"]]]];
     const failures: string[] = [];
     let renamed = 0;
+    let from = u.handle;
     for (const v of nasty) {
-      for (const body of [{ reason: v }, { reason: REASON, newHandle: v }, { reason: REASON, from: v }, { reason: REASON, reportId: v }, v]) {
-        const r = await rename(mod.token, u.userId, body);
-        // These go through, with a neutral handle: null means "not given" (NaN
-        // too, as JSON sends it as null), and the 36-character id is a long enough reason.
-        if (r.status === 200) renamed++;
+      for (const body of [() => ({ reason: v, from }), () => ({ reason: REASON, from, newHandle: v }), () => ({ reason: REASON, from: v }), () => ({ reason: REASON, from, reportId: v }), () => v]) {
+        const r = await rename(mod.token, u.userId, body());
+        // These go through, with a neutral handle: null means "not given" for a
+        // new handle or a report (NaN too, as JSON sends it as null), though never
+        // for `from`, and the 36-character id is a long enough reason.
+        if (r.status === 200) {
+          renamed++;
+          from = r.body.to;
+        }
         else if (r.status >= 500 || !r.body?.error?.code) failures.push(`${r.status} ${JSON.stringify(body)?.slice(0, 60)}`);
       }
       const path = await call("POST", `/v1/staff/residents/${encodeURIComponent(typeof v === "string" ? v : JSON.stringify(v) ?? "null")}/handle`, { token: mod.token, body: { reason: REASON } });
@@ -107,7 +113,7 @@ describe("POST /v1/staff/residents/:id/handle", () => {
     }
     expect(failures).toEqual([]);
     expect(logs.filter((l) => l.msg === "input reached the database unvalidated")).toEqual([]);
-    expect(renamed).toBe(7);
+    expect(renamed).toBe(5);
     expect(await client`SELECT 1 FROM handle_renames WHERE user_id = ${u.userId}`).toHaveLength(renamed);
   });
 });
@@ -115,7 +121,7 @@ describe("POST /v1/staff/residents/:id/handle", () => {
 describe("moving in after a rename", () => {
   it("the old handle reads as taken and can't be moved into; staff's blocked words apply to handles too", async () => {
     const [mod, u] = [await staffer(), await resident()];
-    await rename(mod.token, u.userId, { reason: REASON });
+    await rename(mod.token, u.userId, { reason: REASON, from: u.handle });
     const newcomer = await signedIn();
     expect((await call("GET", `/v1/handles/${u.handle.toUpperCase()}/available`, { token: newcomer.token })).body).toEqual({ available: false });
     const pick = pickForMe(seededRandomInt(77));
@@ -136,7 +142,7 @@ describe("a suspended resident", () => {
     const [mod, u] = [await staffer(), await resident()];
     const restricted = await call("POST", "/v1/staff/restrictions", { token: mod.token, body: { userId: u.userId, kind: "suspended", reason: "Asked residents for seed phrases in DMs." } });
     expect(restricted.status).toBe(201);
-    const r = await rename(mod.token, u.userId, { reason: REASON });
+    const r = await rename(mod.token, u.userId, { reason: REASON, from: u.handle });
     expect(r.status).toBe(200);
     expect((await call("POST", "/v1/gm", { token: u.token })).body.error.code).toBe("RESTRICTED");
     expect((await call("GET", "/v1/me", { token: u.token })).body.handleNotice.id).toBe(r.body.id);

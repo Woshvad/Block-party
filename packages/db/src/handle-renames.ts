@@ -1,5 +1,5 @@
 import { HANDLE_RENAME, type RandomInt, ResidentInputError, containsBlockedWord, cryptoRandomInt, handleHeldUntil, neutralHandle, renameReason, validateHandle } from "@bp/core";
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, isNull, max, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { enqueueModeration, isStaff } from "./safety";
 import { handleNotices, handleRenames, moderationItems, reports, residents } from "./schema";
@@ -51,9 +51,10 @@ async function takenByOthers(tx: Db, handle: string, userId: string, now: Date) 
 // rules, free ignoring case, and staff's blocked words. The reason is the
 // resident's to read, the next time they open the app.
 //
-// `from` is the handle staff were looking at: if the resident has been renamed
-// since (another staff member got there first), nothing happens. `reportId`
-// closes that report as actioned.
+// `from` is the handle staff were looking at, and it's required: if the
+// resident has been renamed since (another staff member got there first),
+// nothing happens, so two staff renaming at once make one rename, never two
+// in a row. `reportId` closes that report as actioned.
 //
 // Staff can't rename themselves or another staff member. The old handle rests
 // for 30 days: nobody else can take it, though staff can give it back to the
@@ -85,11 +86,8 @@ export async function renameHandle(
     }
     if (containsBlockedWord(given, opts.blockedWords)) throw new HandleRenameError("MODERATED", "that word isn't allowed here", "newHandle");
   }
-  let from: string | null = null;
-  if (i.from !== undefined && i.from !== null) {
-    if (typeof i.from !== "string" || i.from.length > 40) throw new HandleRenameError("INVALID_INPUT", "from is the handle you're renaming", "from");
-    from = i.from.trim().replace(/^@/, "").toLowerCase();
-  }
+  const from = typeof i.from === "string" && i.from.length <= 40 ? i.from.trim().replace(/^@/, "").toLowerCase() : "";
+  if (!from) throw new HandleRenameError("INVALID_INPUT", "from is the handle you're renaming", "from");
   let reportId: string | null = null;
   if (i.reportId !== undefined && i.reportId !== null) {
     if (typeof i.reportId !== "string" || !UUID.test(i.reportId)) throw new HandleRenameError("NO_SUCH_REPORT", "no such report");
@@ -104,7 +102,7 @@ export async function renameHandle(
       // queue here, and the second sees the first's new handle.
       const [r] = await tx.select({ handle: residents.handle }).from(residents).where(eq(residents.userId, userId)).for("no key update");
       if (!r) throw new HandleRenameError("NO_RESIDENT", "no such resident");
-      if (from !== null && from !== r.handle.toLowerCase()) throw new HandleRenameError("HANDLE_CHANGED", `they've been renamed already: they're @${r.handle} now`);
+      if (from !== r.handle.toLowerCase()) throw new HandleRenameError("HANDLE_CHANGED", `they've been renamed already: they're @${r.handle} now`);
       if (reportId) {
         const [rep] = await tx.select({ status: reports.status, target: reports.targetUserId }).from(reports).where(eq(reports.id, reportId)).for("no key update");
         if (!rep || rep.status !== "open" || rep.target !== userId) throw new HandleRenameError("NO_SUCH_REPORT", "no open report about them");
@@ -124,10 +122,14 @@ export async function renameHandle(
         if (handle === null) throw new HandleRenameError("HANDLE_TAKEN", "couldn't find a free neutral handle; give one instead", "newHandle");
       }
 
+      // The clock was read before this queued for the resident, so the record
+      // moves just past the rename it follows if need be: it reads in order.
+      const [last] = await tx.select({ at: max(handleRenames.createdAt) }).from(handleRenames).where(eq(handleRenames.userId, userId));
+      const at = last?.at && last.at.getTime() >= now.getTime() ? new Date(last.at.getTime() + 1) : now;
       // The record first: the handle trigger lets the rename through only once it's there.
       const [row] = await tx
         .insert(handleRenames)
-        .values({ userId, oldHandle: r.handle, newHandle: handle, staffId: me, reason, reportId, createdAt: now, heldUntil: handleHeldUntil(now) })
+        .values({ userId, oldHandle: r.handle, newHandle: handle, staffId: me, reason, reportId, createdAt: at, heldUntil: handleHeldUntil(at) })
         .returning();
       await tx.execute(sql`SELECT set_config('bp.handle_rename', ${me}, true)`);
       // A display name taken down to the old handle shows the new one instead.
