@@ -7,8 +7,10 @@ loadEnv();
 export default defineConfig({
   test: {
     globalSetup: ["./test/global-setup.ts"],
+    setupFiles: ["./test/worker-db.ts"],
     env: { TEST_DATABASE_URL: apiTestDatabaseUrl() },
-    fileParallelism: false,
+    // Files run in parallel, each worker on its own copy of the database.
+    maxWorkers: 4,
     testTimeout: 30_000,
   },
 });
