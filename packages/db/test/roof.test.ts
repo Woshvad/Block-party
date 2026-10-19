@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { CAST, type FeedMarket, type OddsProvider, addDays } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ROOF_ROWS, TowerError, blockUser, createCityMarket, createCrew, createDb, ensureSystemAccounts, makeCall, muteUser, pollOdds, resolveCityMarket, roofBoards, settleCityMarkets, stakeCity } from "../src";
+import { ROOF_ROWS, TowerError, blockUser, createCityMarket, createCrew, createDb, ensureSystemAccounts, makeCall, muteUser, pollOdds, resolveCityMarket, roofBoards, seasonStack, settleCityMarkets, stakeCity } from "../src";
 import { makeResident } from "./helpers";
 
 const { db, client, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 10 });
@@ -121,12 +121,13 @@ describe("the Roof's boards", () => {
     expect(mine.rightList.bot!.perCall).toBeLessThan(0);
   });
 
-  it("the Season Stack: GM won and lost on City markets, by handle, without the reader's hidden", async () => {
+  it("the Season Stack: GM won and lost on City markets, by handle, neighbours only, without the reader's hidden", async () => {
     const t = fresh();
-    const [reader, other, staff, a, b, e] = await Promise.all(Array.from({ length: 6 }, () => makeResident(db)));
+    const [reader, other, staff, a, b, e, n] = await Promise.all(Array.from({ length: 7 }, () => makeResident(db)));
+    await pon([a!, b!, e!]); // n hasn't passed Proof of Neighbour
     await client`INSERT INTO staff (user_id, role) VALUES (${staff!}, 'moderator')`;
     const m = await createCityMarket(db, staff!, { question: "Will the Roof stay up?", kind: "manual", bellDay: dayOf(t) }, { now: new Date(t) });
-    for (const [u, side, stake] of [[a!, "yes", 100], [b!, "yes", 50], [e!, "no", 90]] as const) {
+    for (const [u, side, stake] of [[a!, "yes", 100], [n!, "yes", 80], [b!, "yes", 50], [e!, "no", 90]] as const) {
       await topUp(u, t);
       await stakeCity(db, u, { marketId: m.id, side, stake }, { now: new Date(t + H) });
     }
@@ -140,6 +141,10 @@ describe("the Roof's boards", () => {
     expect(everyone.map((r) => r.rank)).toEqual([1, 2, 3]);
     expect(everyone[0]!.profit).toBeGreaterThan(everyone[1]!.profit);
     expect(everyone[2]).toEqual({ rank: 3, handle: await handle(e!), profit: -90 });
+    // n won and was paid like anyone, but only neighbours are ranked, in
+    // Games too: the plan keeps leaderboards to Proof of Neighbour accounts.
+    expect((await client`SELECT payout FROM city_positions WHERE market_id = ${m.id} AND user_id = ${n!}`)[0]!.payout).toBeGreaterThan(80);
+    expect((await seasonStack(db, { now: new Date(t + D + MIN) })).rows.map((r) => r.userId)).not.toContain(n!);
     const mine = (await roofBoards(db, reader!, { now: new Date(t + D + MIN) })).seasonStack.rows;
     expect(mine.map((r) => [r.rank, r.handle])).toEqual([[1, await handle(a!)], [3, await handle(e!)]]);
   });

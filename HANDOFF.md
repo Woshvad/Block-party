@@ -107,7 +107,7 @@ Still open:
 - [ ] **Copium Pharmacy** opens first as a counter in the Gwei Diner (Launch). Hackerspace runs as "Builder Night" in the Bot Café (Launch), so it has no building of its own on purpose.
 - [ ] **Launch places have no interiors yet:** Club Liquidity, Touch Grass Park, the Blockspace Canvas game and the Bot Café.
 - [x] **The Roof's leaderboards:** three screens (the Right List with NOTHING-9000's line, the Season Stack, the crews') from `GET /v1/roof`, and the Watch Party's screen shows the Hall's own City markets. In-play calls stay out on purpose: the plan freezes sports at kickoff.
-- [ ] **The Season Stack still ranks residents without Proof of Neighbour,** on the Roof and in Games. The plan's risks table keeps leaderboards to Proof of Neighbour accounts, as the Right List already is.
+- [x] **The Season Stack ranks Proof of Neighbour residents only,** on the Roof and in Games, as the plan's risks table has it for every leaderboard and as the Right List already did.
 
 ### 3. Waiting on the owner (see PARKED.md)
 
