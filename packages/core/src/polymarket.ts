@@ -29,6 +29,8 @@ export type GammaMarket = {
   closed?: boolean;
   acceptingOrders?: boolean;
   umaResolutionStatus?: string; // "proposed", "disputed", "resolved"
+  slug?: string; // the warm-up's 15-minute windows are found by slug ("btc-updown-15m-<start>")
+  eventStartTime?: string; // and say here when they open
 };
 export type GammaEvent = { slug: string; markets?: GammaMarket[] };
 
@@ -60,7 +62,16 @@ function readOutcomes(m: GammaMarket): { names: unknown[]; prices: number[] } | 
   }
 }
 
-const isYesNo = (names: unknown[]) => names.length === 2 && names[0] === "Yes" && names[1] === "No";
+// A two-outcome market whose outcomes are exactly these, in this order: YES/NO
+// for the Tower, Up/Down for the warm-up's Bitcoin windows.
+export type OutcomePair = readonly [string, string];
+const YES_NO: OutcomePair = ["Yes", "No"];
+const isPair = (names: unknown[], pair: OutcomePair) => names.length === 2 && names[0] === pair[0] && names[1] === pair[1];
+const isYesNo = (names: unknown[]) => isPair(names, YES_NO);
+export function outcomesAre(m: GammaMarket, pair: OutcomePair): boolean {
+  const o = readOutcomes(m);
+  return !!o && isPair(o.names, pair);
+}
 
 // One trading Gamma market as a FeedMarket, or null (counted in `skipped`)
 // when it's closed, not trading, already frozen, or priced at the extremes.
@@ -139,10 +150,12 @@ export function toFeedMarkets(
 // deliberately no timeout: how long a late result waits before its call is
 // carried or voided is the owner's decision (PARKED.md), not this mapper's.
 // null: still trading (nothing new to say), or not a YES/NO market we can read.
-export function closedOutcome(m: GammaMarket): Pick<FeedMarket, "resolved" | "voided" | "closed"> | null {
+// `pair` reads another two-outcome market by the same rules (resolved: true
+// is its first outcome), so the warm-up settles exactly as the Tower does.
+export function closedOutcome(m: GammaMarket, pair: OutcomePair = YES_NO): Pick<FeedMarket, "resolved" | "voided" | "closed"> | null {
   if (!m.closed) return null;
   const o = readOutcomes(m);
-  if (!o || !isYesNo(o.names)) return null;
+  if (!o || !isPair(o.names, pair)) return null;
   const [yes, no] = o.prices;
   if (m.umaResolutionStatus === "resolved") {
     if (yes === 1 && no === 0) return { resolved: true, voided: false, closed: true };

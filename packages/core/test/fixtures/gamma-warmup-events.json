@@ -1,0 +1,34 @@
+[
+  {
+    "slug": "btc-updown-15m-1792404000",
+    "markets": [
+      {
+        "id": "5868483",
+        "question": "Bitcoin Up or Down - October 19, 6:00AM-6:15AM ET",
+        "slug": "btc-updown-15m-1792404000",
+        "outcomes": "[\"Up\", \"Down\"]",
+        "outcomePrices": "[\"0.505\", \"0.495\"]",
+        "endDate": "2026-10-19T10:15:00Z",
+        "eventStartTime": "2026-10-19T10:00:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  },
+  {
+    "slug": "btc-updown-15m-1792404900",
+    "markets": [
+      {
+        "id": "5868628",
+        "question": "Bitcoin Up or Down - October 19, 6:15AM-6:30AM ET",
+        "slug": "btc-updown-15m-1792404900",
+        "outcomes": "[\"Up\", \"Down\"]",
+        "outcomePrices": "[\"0.505\", \"0.495\"]",
+        "endDate": "2026-10-19T10:30:00Z",
+        "eventStartTime": "2026-10-19T10:15:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  }
+]
