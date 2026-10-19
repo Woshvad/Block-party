@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { ALERT_KINDS, FAREWELL, NEVER_SAY, NOTIFY, TEMPLATES, afterQuietHours, chooseTemplate, fillable, inQuietHours, isTimeZone, localParts, render } from "../src";
+import { ALERT_KINDS, FAREWELL, NEVER_SAY, NOTIFY, TEMPLATES, WARMUP, afterQuietHours, chooseTemplate, fillable, inQuietHours, isTimeZone, localParts, render } from "../src";
 
 describe("templates", () => {
   it("10+ daily templates in the CT voice", () => {
@@ -28,6 +28,17 @@ describe("templates", () => {
     expect(fillable("{a} and {b}", { a: 1 })).toBe(false);
     expect(fillable("{a} and {b}", { a: 1, b: 0 })).toBe(true);
     expect(fillable("plain", {})).toBe(true);
+  });
+
+  it("a newcomer's warm-up pushes, one a day for 3 days, never repeat their wording", () => {
+    const first = Date.UTC(2026, 9, 19, 10);
+    const used = new Map<string, number>();
+    for (let day = 0; day < WARMUP.max; day++) {
+      const now = first + day * 86_400_000;
+      const t = chooseTemplate("warmup_settled", used, now, day * 7)!;
+      expect(used.has(t), t).toBe(false);
+      used.set(t, now);
+    }
   });
 
   it("never repeats wording within 5 days while fresh ones exist", () => {

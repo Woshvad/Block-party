@@ -42,7 +42,13 @@ export const TEMPLATES: Record<NotifyKind, readonly string[]> = {
   faded: ["@{handle} faded your call.", "Someone took the other side: @{handle}."],
   snap: ["@{handle} hit Snap on your duel.", "Snap from @{handle}. The pot just doubled."],
   syndicate_shake: ["Your crew wants a shake on a syndicate call.", "Syndicate call needs your shake."],
-  warmup_settled: ["Your warm-up settled. See your receipt.", "The 15-minute window closed. Your receipt is in."],
+  // One per warm-up, so a newcomer gets 3 at most: each in its own words.
+  warmup_settled: [
+    "Your warm-up settled. See your receipt.",
+    "The 15-minute window closed. Your receipt is in.",
+    "Bitcoin made its move. Your warm-up has its stamp.",
+    "CALLED IT or REKT? Your warm-up result is in, ser.",
+  ],
 };
 
 export const FAREWELL = "We'll stop pinging. The city's still here, ser.";
