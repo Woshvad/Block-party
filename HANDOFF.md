@@ -31,8 +31,9 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
 - **A staff rename for flagged @handles.** The handle trigger blocks it; staff restrict the resident instead.
 - **Promised but inert:** four alert toggles have no producer, and Contrarian Day and NOTHING Day have copy but no rules.
-- **An asset pipeline** (built 19 October, except compression). Unused models are gone and tangents stripped, so `public/assets` fell from 16.75 MB to 6.84 MB. The packs sit in content-hashed folders (`pnpm --filter @bp/city assets`), with immutable cache headers in `public/_headers` and `next.config.mjs` (README "Deploying").
+- **An asset pipeline** (built 19 October, except compression). Unused models are gone and tangents stripped, so `public/assets` fell from 16.75 MB to 6.84 MB. The packs sit in content-hashed folders (`pnpm --filter @bp/city assets`), with immutable cache headers in `public/_headers` and `next.config.mjs` (README "Deploying"). A page opened before a deploy that changed a pack offers Reload on the map.
   - **Still open:** meshopt needs glTF-Transform, a new dev dependency (the owner's call; PERFORMANCE_BASELINE.md has the commands), and the chosen host must compress `.glb`.
+  - **Still open:** that Reload is tested headless only. Try it in a browser: open the map, rename a pack folder and `/assets/kit-packs.json` to match, then retry.
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
 - **Profile the API suite.** It took 15 to 50 minutes on a dev machine; CI allows 90.
 
