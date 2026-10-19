@@ -10,6 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc -p . --noEmit",
     "icons": "node scripts/icons.mjs",
+    "assets": "node scripts/assets.mjs",
     "verify": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
