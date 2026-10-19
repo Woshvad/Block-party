@@ -37,4 +37,29 @@ describe("city model material preservation", () => {
   });
 
   it("ignores empty scenes", () => { expect(bake(new THREE.Group())).toBeNull(); });
+
+  it("bakes a compressed model's quantized attributes in floats, so the node's scale isn't squeezed back into their range", () => {
+    // How glTF-Transform's meshopt output arrives: positions as normalized
+    // int16 in [-1, 1] with the real size on the node, normals as int8, uvs as uint16.
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Int16Array([-32767, 0, 0, 32767, 0, 0, 0, 32767, 0]), 3, true));
+    geometry.setAttribute("normal", new THREE.BufferAttribute(new Int8Array([0, 0, 127, 0, 0, 127, 0, 0, 127]), 3, true));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(new Uint16Array([0, 0, 65535, 0, 0, 65535]), 2, true));
+    geometry.setIndex([0, 1, 2]);
+    const material = new THREE.MeshStandardMaterial();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.scale.set(4, 4, 4);
+    mesh.position.set(10, 0, 0);
+    const result = bake(mesh)!;
+    const position = result.geometry.getAttribute("position");
+    expect(position.array).toBeInstanceOf(Float32Array);
+    expect([0, 1, 2].map((i) => [position.getX(i), position.getY(i)])).toEqual([[6, 0], [14, 0], [10, 4]]);
+    const normal = result.geometry.getAttribute("normal");
+    expect([normal.getX(0), normal.getY(0), normal.getZ(0)]).toEqual([0, 0, 1]);
+    const uv = result.geometry.getAttribute("uv");
+    expect([uv.getX(1), uv.getY(2)]).toEqual([1, 1]);
+    // The cached source stays as it came.
+    expect(geometry.getAttribute("position").array).toBeInstanceOf(Int16Array);
+    result.geometry.dispose(); geometry.dispose(); material.dispose();
+  });
 });
