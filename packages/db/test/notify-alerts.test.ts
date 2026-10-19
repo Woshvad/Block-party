@@ -225,6 +225,34 @@ describe("an away shift is ready", () => {
     expect(await alerts(due, "away_shift_ready")).toHaveLength(1);
   });
 
+  it("not on the bell's own tick: whoever is watching the bell isn't told they were out", async () => {
+    const t = fresh(); // a bell, and the cron's tick at that very second
+    const [watching, out] = [await neighbour(), await neighbour()];
+    for (const u of [watching, out]) await gmAt(u, t - 9 * H); // 15:00 the day before
+    await touchActivity(db, watching, { now: new Date(t - 20_000) }); // in the city, last heard from at 23:59:40
+    expect(await queueAwayShiftPings(db, { now: new Date(t) })).toEqual({ checked: 0, queued: 0 });
+    for (const u of [watching, out]) expect(await alerts(u, "away_shift_ready")).toHaveLength(0);
+    await touchActivity(db, watching, { now: new Date(t + 40_000) }); // still there: the next write, a minute on
+    await queueAwayShiftPings(db, { now: new Date(t + NOTIFY.awayPingAfterMinutes * MIN) });
+    expect(await alerts(watching, "away_shift_ready")).toHaveLength(0);
+    expect(await alerts(out, "away_shift_ready")).toHaveLength(1);
+  });
+
+  it("dropped as it goes out if they've been in since the bell while quiet hours held it", async () => {
+    const t = fresh();
+    const lagos = { alerts: ["away_shift_ready"], timeZone: "Africa/Lagos" }; // UTC+1, quiet until 07:00 UTC
+    const [early, asleep] = [await neighbour(lagos), await neighbour(lagos)];
+    for (const u of [early, asleep]) await gmAt(u, t - 4 * H);
+    await queueAwayShiftPings(db, { now: new Date(t + 15 * MIN) }); // 01:15 there: held until 08:00
+    for (const u of [early, asleep]) expect(await alerts(u, "away_shift_ready")).toHaveLength(1);
+    await touchActivity(db, early, { now: new Date(t + 6 * H) }); // opened the city at 07:00 there, didn't collect
+    const { sender, to } = recorder();
+    await run(sender, t + 7 * H);
+    expect(to(early)).toEqual([]);
+    expect((await alerts(early, "away_shift_ready"))[0]).toMatchObject({ status: "suppressed", reason: "done" });
+    expect(to(asleep)).toHaveLength(1);
+  });
+
   it("never sent once it's taken or out of reach, and not queued if quiet hours outlast it", async () => {
     const t = fresh();
     const [taker, lapsed, early] = [await neighbour(), await neighbour(), await neighbour()];

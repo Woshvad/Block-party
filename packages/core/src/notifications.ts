@@ -13,6 +13,7 @@ export const NOTIFY = {
   bellPingMinutes: 120, // "Bell in 2h" is queued two hours before the bell...
   bellPingLateMinutes: 30, // ...and dropped if it can't go out within half an hour, when "2h" would be wrong
   shiftPingWithinMinutes: 60, // a Mod Shift that ended longer ago than this without its ping gets none
+  awayPingAfterMinutes: 15, // "away shift ready" waits this long after the bell, so whoever watched it has been seen
 } as const;
 
 export const ALERT_KINDS = ["shift_done", "nap_done", "away_shift_ready", "faded", "snap", "syndicate_shake", "warmup_settled"] as const;

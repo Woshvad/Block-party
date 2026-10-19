@@ -122,16 +122,32 @@ export async function notify(
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// The bell that started today's city day.
+const lastBell = (now: Date) => new Date(nextBell(now).getTime() - 86_400_000);
+
+// Whether they've been in the city (a session, or a heartbeat in one) since then.
+async function seenSince(tx: Db, userId: string, at: Date): Promise<boolean> {
+  const [s] = await tx
+    .select({ id: playSessions.id })
+    .from(playSessions)
+    .where(and(eq(playSessions.userId, userId), gte(playSessions.lastSeenAt, at)))
+    .limit(1);
+  return !!s;
+}
+
 // Whether a queued alert is still news as it's about to go out: a Mod Shift
 // nobody has collected yet, or an away shift that's still theirs to take
-// today. Everything else stays due until it's sent.
+// today and that they haven't been in to see since the bell. Everything else
+// stays due until it's sent.
 async function stillDue(tx: Db, n: typeof notifications.$inferSelect, now: Date): Promise<boolean> {
   if (n.kind === "shift_done" && n.ref !== null) {
     if (!UUID.test(n.ref)) return false;
     const [s] = await tx.select({ collectedTx: shifts.collectedTx }).from(shifts).where(and(eq(shifts.id, n.ref), eq(shifts.userId, n.userId)));
     return !!s && !s.collectedTx;
   }
-  if (n.kind === "away_shift_ready" && n.ref !== null) return n.ref === cityDay(now) && (await awayShiftReady(tx, n.userId, { now }));
+  if (n.kind === "away_shift_ready" && n.ref !== null) {
+    return n.ref === cityDay(now) && !(await seenSince(tx, n.userId, lastBell(now))) && (await awayShiftReady(tx, n.userId, { now }));
+  }
   return true;
 }
 
@@ -188,8 +204,8 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
         await tx.update(notifications).set({ scheduledFor: afterQuietHours(now, p.timeZone, p.quietStart, p.quietEnd) }).where(eq(notifications.id, n.id));
         return "deferred" as const;
       }
-      // Never about something they've already done (the shift collected
-      // before the push could go out).
+      // Never about something they've already done or seen (the shift
+      // collected, or the city opened, before the push could go out).
       if (!(await stillDue(tx, n, now))) return suppress("done");
       const localDay = local.day;
 
@@ -403,15 +419,19 @@ export async function queueShiftPings(db: Db, opts: { now?: Date; batch?: number
 // "Your away shift is ready": a proven neighbour's away shift comes up at the
 // bell while their last gm is under a day old, and stays theirs to take until
 // that day runs out. Every 15 minutes, for residents who switched the alert on
-// and haven't been in the city since the bell (they'd have seen it there). The
-// city day is the ref, so it's queued once a day however the crons overlap. It
-// isn't queued if quiet hours would hold it past the gm's 24 hours, and it's
-// dropped at send time once taken or out of reach. Paged by id.
+// and haven't been in the city since the bell (they'd have seen it there). Not
+// on the bell's own tick: whoever is watching it hasn't been seen since yet
+// (activity is written at most once a minute), so it starts a quarter of an
+// hour later, and the visit is checked again as it goes out. The city day is
+// the ref, so it's queued once a day however the crons overlap. It isn't
+// queued if quiet hours would hold it past the gm's 24 hours, and it's dropped
+// at send time once taken, seen or out of reach. Paged by id.
 export async function queueAwayShiftPings(db: Db, opts: { now?: Date; pageSize?: number } = {}) {
   const now = clockOf(opts);
   const pageSize = sizeOf(opts?.pageSize, 500);
   const day = cityDay(now);
-  const bell = new Date(nextBell(now).getTime() - 86_400_000); // the one that started today
+  const bell = lastBell(now);
+  if (now.getTime() < bell.getTime() + NOTIFY.awayPingAfterMinutes * 60_000) return { checked: 0, queued: 0 };
   let after = "00000000-0000-0000-0000-000000000000";
   let queued = 0;
   let checked = 0;
