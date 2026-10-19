@@ -36,7 +36,7 @@ const takenConstraint = (e: unknown) => {
 };
 
 // Whether someone other than `userId` has this handle, or had it renamed away
-// from them and it's still resting.
+// from them and it's still resting: for picking a neutral handle that's free.
 async function takenByOthers(tx: Db, handle: string, userId: string, now: Date) {
   const [row] = await tx.execute<{ taken: boolean }>(sql`
     SELECT EXISTS (SELECT 1 FROM residents WHERE lower(handle) = lower(${handle}) AND user_id <> ${userId})
@@ -113,7 +113,8 @@ export async function renameHandle(
       let handle: string | null = null;
       if (given !== null) {
         if (given.toLowerCase() === r.handle.toLowerCase()) throw new HandleRenameError("INVALID_INPUT", "that's already their handle", "newHandle");
-        if (await takenByOthers(tx, given, userId, now)) throw new HandleRenameError("HANDLE_TAKEN", "that handle is taken", "newHandle");
+        // Whether it's free is the database's answer (the unique index, and the
+        // trigger for a resting handle), turned into HANDLE_TAKEN below.
         handle = given;
       } else {
         for (let n = 0; n < NEUTRAL_TRIES && handle === null; n++) {
