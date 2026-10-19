@@ -11,7 +11,7 @@ import { citySurface } from "./citySurface";
 import { cityDetails } from "./cityDetails";
 import { CITY_SIZE, GRID, LANDMARKS, type Lot, SOON, SQUARE, blockRect, districtOf, fillCity, roads, zoneOf } from "./citygen";
 import Kit, { useBaked } from "./Kit";
-import { KIT, cityPlacements } from "./kitcity";
+import { CAR_MODELS, KIT, cityPlacements } from "./kitcity";
 import { due } from "./clock";
 import { type Car, type Lane, type Light, carPose, lightFor, makeTraffic, stepTraffic } from "./traffic";
 import { type Part, ball, box, colored, cyl, darker, prism } from "./geo";
@@ -360,10 +360,9 @@ const LIGHT_HEX: Record<Light, string> = { green: "#3ddc6e", amber: "#ffb020", r
 
 // Cars in lanes, following each other and stopping for red lights (traffic.ts),
 // drawn with Kenney's Car Kit: one instanced mesh per model.
-const CAR_MODELS = ["sedan", "taxi", "suv", "van", "police", "truck", "delivery", "hatchback-sports", "suv-luxury", "sedan-sports", "ambulance", "garbage-truck"];
 const CAR_SCALE = 0.34;
 
-function CarModel({ model, cars, lanes, brakes }: { model: string; cars: Car[]; lanes: Lane[]; brakes: React.MutableRefObject<THREE.InstancedMesh | null>; }) {
+function CarModel({ model, cars, lanes, brakes }: { model: (typeof CAR_MODELS)[number]; cars: Car[]; lanes: Lane[]; brakes: React.MutableRefObject<THREE.InstancedMesh | null>; }) {
   const baked = useBaked(KIT.cars(model));
   const ref = useRef<THREE.InstancedMesh>(null);
   const o = useMemo(() => new THREE.Object3D(), []);

@@ -3,6 +3,8 @@
 // lots (houses, shops, offices, parks). Pure and seeded: the same city on
 // every phone, and testable without a GPU.
 
+import { type KitModel, SHEDS } from "./kitModels";
+
 // Wide avenues and a green setback round every block: buildings get air, roads read clearly.
 export const GRID = { blocks: 6, block: 10, road: 3, setback: 1 } as const;
 export const CITY_SIZE = GRID.blocks * GRID.block + (GRID.blocks + 1) * GRID.road; // 81
@@ -101,7 +103,7 @@ export type Lot =
   | { kind: "tree"; x: number; z: number; s: number }
   | { kind: "parking"; x: number; z: number; w: number; d: number }
   | { kind: "pool"; x: number; z: number; w: number; d: number }
-  | { kind: "factory"; x: number; z: number; model: string; yaw: number; scale: number };
+  | { kind: "factory"; x: number; z: number; model: KitModel<"industrial">; yaw: number; scale: number };
 
 // mulberry32
 // Blocks touching Genesis Square (sharing an edge with it).
@@ -192,11 +194,10 @@ export function fillBlock(bx: number, bz: number, seed = 7): Lot[] {
   } else if (zone === "industrial") {
     // Factories on the four quarters, yard kit (chimneys, tanks, containers, a water tower) between.
     const half = (GRID.block - 2 * GRID.setback) / 2;
-    const sheds = ["building-a", "building-b", "building-c", "building-d", "building-e", "building-f", "building-g", "building-h", "building-i", "building-j"];
     for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
       const x = b.x - half / 2 + i * half;
       const z = b.z - half / 2 + j * half;
-      out.push({ kind: "factory", x, z: z - 0.5, model: pick(r, sheds), yaw: j === 1 ? 0 : Math.PI, scale: 1.7 });
+      out.push({ kind: "factory", x, z: z - 0.5, model: pick(r, SHEDS), yaw: j === 1 ? 0 : Math.PI, scale: 1.7 });
     }
     out.push({ kind: "factory", x: b.x, z: b.z, model: "water-tower", yaw: 0, scale: 1.6 });
     out.push({ kind: "factory", x: b.x + 2.9, z: b.z + 0.6, model: "chimney-large", yaw: 0, scale: 1.8 });
