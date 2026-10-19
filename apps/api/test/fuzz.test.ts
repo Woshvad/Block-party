@@ -15,6 +15,12 @@ const routes = [
   ).values(),
 ];
 
+// The config runs this file as several projects, each in its own worker:
+// shard k of n fuzzes every nth route, starting at the kth. Each route test
+// below runs in exactly one shard; the checks at the end run in every one.
+const [shard, shards] = (process.env.FUZZ_SHARD ?? "1/1").split("/").map(Number) as [number, number];
+const mine = <T>(list: T[]) => list.filter((_, i) => i % shards === shard - 1);
+
 beforeAll(ready);
 afterAll(close);
 
@@ -22,9 +28,11 @@ describe("route table", () => {
   it("has the routes we expect, and none for server-only actions", () => {
     expect(routes.length).toBeGreaterThan(45);
     expect(routes.filter((r) => FORBIDDEN.test(r.path)).map((r) => r.path)).toEqual([]);
+    // A shard with nothing to do would pass by testing nothing.
+    expect(mine(routes).length).toBeGreaterThan(0);
   });
 
-  it.each(routes.filter((r) => !PUBLIC.has(`${r.method} ${r.path}`)))("$method $path refuses callers without a session or secret", async (r) => {
+  it.concurrent.for(mine(routes.filter((r) => !PUBLIC.has(`${r.method} ${r.path}`))))("$method $path refuses callers without a session or secret", async (r, { expect }) => {
     const path = r.path.replace(/:[a-zA-Z]+/g, "00000000-0000-4000-8000-000000000000");
     const res = await call(r.method, path, r.method === "GET" ? {} : { body: {} });
     expect(res.status).toBe(r.path.startsWith("/internal/") ? 404 : 401);
@@ -85,7 +93,8 @@ describe("fuzzing every route with a real session", () => {
 
   // A fresh crew for every route: fuzzing logout, leave or dissolve must not
   // wreck the session the other routes are fuzzed with. (It once did, and the
-  // fuzzer quietly tested nothing but 401s.)
+  // fuzzer quietly tested nothing but 401s.) Routes run several at a time
+  // (maxConcurrency in the config), so this also keeps them apart.
   async function world(): Promise<World> {
     const lead = await resident();
     const member = await resident();
@@ -101,7 +110,7 @@ describe("fuzzing every route with a real session", () => {
   // its session and stopped reaching the handler.
   const unauthenticated = (res: { body: { error?: { code?: string } } }) => res.body?.error?.code === "UNAUTHENTICATED";
 
-  it.each(routes.filter((r) => !r.path.startsWith("/internal/")))("$method $path never 500s on hostile input", async (r) => {
+  it.concurrent.for(mine(routes.filter((r) => !r.path.startsWith("/internal/"))))("$method $path never 500s on hostile input", async (r, { expect }) => {
     const { lead, member, realIds } = await world();
     const rand = seededRandomInt([...`${r.method}${r.path}`].reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0);
     const failures: string[] = [];
@@ -129,7 +138,7 @@ describe("fuzzing every route with a real session", () => {
 
   // Random sampling missed a null byte once. Sweep every hostile value through
   // every path parameter of every route, deterministically.
-  it.each(routes.filter((r) => !r.path.startsWith("/internal/") && r.path.includes(":")))("$method $path: every hostile path value", async (r) => {
+  it.concurrent.for(mine(routes.filter((r) => !r.path.startsWith("/internal/") && r.path.includes(":"))))("$method $path: every hostile path value", async (r, { expect }) => {
     const { lead, realIds } = await world();
     const failures: string[] = [];
     for (const v of [...NASTY, ...realIds]) {
@@ -141,8 +150,9 @@ describe("fuzzing every route with a real session", () => {
     expect(failures).toEqual([]);
   });
 
-  // And every hostile value through every body field of every write route.
-  it.each(routes.filter((r) => !r.path.startsWith("/internal/") && r.method !== "GET" && !/logout/.test(r.path)))("$method $path: every hostile body value", async (r) => {
+  // And every hostile value through every body field of every write route:
+  // 1,452 requests, sharing the worker with the routes fuzzed alongside.
+  it.concurrent.for(mine(routes.filter((r) => !r.path.startsWith("/internal/") && r.method !== "GET" && !/logout/.test(r.path))))("$method $path: every hostile body value", { timeout: 300_000 }, async (r, { expect }) => {
     const { member, realIds } = await world();
     const failures: string[] = [];
     const path = r.path.replace(/:[a-zA-Z]+/g, () => realIds[0]!);
@@ -154,7 +164,7 @@ describe("fuzzing every route with a real session", () => {
       }
     }
     expect(failures).toEqual([]);
-  }, 120_000);
+  });
 
   it("no hostile input reached the database unvalidated (the backstop never fired)", () => {
     const hits = logs.filter((l) => l.msg === "input reached the database unvalidated").map((l) => `${l.extra.path}: ${String(l.extra.error).slice(0, 80)}`);

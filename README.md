@@ -30,7 +30,7 @@ The API refuses to run without a real-looking `TELEGRAM_BOT_TOKEN` (`<bot id>:<3
 
 Every package's scripts, the dev server and the test suites read this root `.env`, after a `.env` in their own package if there is one; a variable already set in the environment (as in CI) always wins.
 
-Tests drop and recreate their databases on every run: the db suite uses `TEST_DATABASE_URL`'s (`blockparty_test`; the name must end in `_test`), and the API suite one named after it (`blockparty_api_test`).
+Tests drop and recreate their databases on every run: the db suite uses `TEST_DATABASE_URL`'s (`blockparty_test`; the name must end in `_test`), and the API suite one named after it (`blockparty_api_test`). Each suite migrates its database once and gives every test worker a copy (`blockparty_w1_test`, `blockparty_api_w1_test` and so on, with `synchronous_commit` off since the data is thrown away), so test files run in parallel.
 
 A database migrated on a branch whose migrations were later renumbered (the safety lane's `0043_moderation_review`, now `0047`) can't move forward: drizzle applies only migrations newer than the last one it recorded, so it would skip `0043_market_feed` and then fail at `0047`. Drop and recreate it (`dropdb blockparty && createdb blockparty && pnpm db:migrate`).
 
@@ -252,6 +252,8 @@ A database migrated on a branch whose migrations were later renumbered (the safe
 - Row locks are `FOR NO KEY UPDATE`, never plain `FOR UPDATE` (it blocks foreign-key checks and deadlocked twice); `locks.test.ts` enforces it. Read a balance you are about to post against through `lockAccounts`.
 - A fuzzer must prove it reaches the handlers: ours once logged itself out and tested nothing but 401s.
 - Lock order everywhere: resident, then request/invite, then crew, then ledger accounts.
-- Shared helpers live in `packages/db/test/helpers.ts`. Test files share one database, so assertions must be scoped to their own rows.
+- Shared helpers live in `packages/db/test/helpers.ts`. Test files run in parallel, each worker on its own copy of the database (`packages/db/test/test-db.ts`); the files in one worker share it, so assertions must still be scoped to their own rows.
+- The fuzzer runs as three shards of `apps/api/test/fuzz.test.ts` (projects in `apps/api/vitest.config.ts`), each fuzzing every third route, 8 routes at a time. `npx vitest run test/fuzz.test.ts -t ...` still runs every shard.
+- Test speed on the Windows dev machine (19 October): the API suite went from 48 minutes (47 of them the fuzzer) to under 5, and the db suite from 6 minutes to 1.5. At its peak a suite holds about 75 Postgres connections, of the 100 Postgres allows; with several checkouts on one Postgres, run them with `VITEST_MAX_WORKERS=2`.
 
 See [PARKED.md](PARKED.md) for work waiting on the owner.

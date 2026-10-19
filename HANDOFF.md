@@ -33,7 +33,8 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Promised but inert:** four alert toggles have no producer, and Contrarian Day and NOTHING Day have copy but no rules.
 - **An asset pipeline** (compressed GLBs, unused models removed, immutable cache headers once the city has hosting).
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
-- **Profile the API suite.** It took 15 to 50 minutes on a dev machine; CI allows 90.
+- **Profile the API suite** (done, 19 October). It took 48 minutes on the Windows dev machine, 47 of them the fuzzer: about 180,000 requests one after another, each mostly waiting on Postgres (a round trip to Postgres in Docker is about 1.2 ms there). Test files now run in parallel, each worker on its own copy of the database, and the fuzzer runs as three shards, 8 routes at a time, with every test and assertion kept. The API suite takes under 5 minutes, the db suite 1.5 (was 6), and CI allows 30 minutes for the whole job.
+- **Still open from it:** a suite can hold about 75 of Postgres's 100 connections at its peak, so several checkouts testing on one Postgres should set `VITEST_MAX_WORKERS=2`.
 
 ## Ideas from Lagos Life (17 October 2026)
 

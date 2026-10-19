@@ -8,8 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # The API suite (fuzzer + workerd) took 15-50 min locally; profile before lowering.
-    timeout-minutes: 90
+    # The whole job takes about 10 min locally (the API suite under 5, the
+    # rooms 2.5, the db suite 1.5; nearly an hour before the suites ran their
+    # files in parallel). 30 leaves room for a slower runner.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:15
