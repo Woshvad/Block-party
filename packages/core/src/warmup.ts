@@ -168,9 +168,14 @@ export function polymarketWarmupFeed(opts: { fetch?: Fetch; baseUrl?: string; ti
     async fetch(now: Date, pending: readonly string[] = []) {
       const slugs = [windowStart(now), nextWindowAt(now)].map(warmupSlug);
       const ids = pending.filter((id) => id.startsWith("pm:")).slice(0, WARMUP.lookupsPerPoll).map((id) => id.slice(3));
+      // Gamma's answers are cached for 5 minutes by their whole address
+      // (Cache-Control: max-age=300), and a poll asks the same thing minute
+      // after minute: without the poll's own time in the address, a result
+      // in 1 to 3 minutes waits out a cached "not yet" for up to 5 more.
+      const fresh = `poll=${now.getTime()}`;
       const [listed, closed] = await Promise.all([
-        getJson(`${base}/events?${slugs.map((s) => `slug=${s}`).join("&")}`),
-        ids.length ? getJson(`${base}/markets?closed=true&limit=${WARMUP.lookupsPerPoll}&${ids.map((id) => `id=${encodeURIComponent(id)}`).join("&")}`) : Promise.resolve([]),
+        getJson(`${base}/events?${slugs.map((s) => `slug=${s}`).join("&")}&${fresh}`),
+        ids.length ? getJson(`${base}/markets?closed=true&limit=${WARMUP.lookupsPerPoll}&${ids.map((id) => `id=${encodeURIComponent(id)}`).join("&")}&${fresh}`) : Promise.resolve([]),
       ]);
       if (!Array.isArray(closed)) log(`polymarket warm-up: looking up ${ids.length} ended windows failed`);
       const results = Array.isArray(closed) ? (closed as GammaMarket[]).flatMap((m) => warmupResultOf(m) ?? []) : [];

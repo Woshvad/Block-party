@@ -213,6 +213,23 @@ describe("the live warm-up feed", () => {
     expect(lookup!.searchParams.getAll("id")).toEqual(["5866083", "5866801", "5867770"]);
   });
 
+  it("asks at an address of the poll's own, so Gamma's 5-minute cache can't hold a result back", async () => {
+    // Seen 19 October: Gamma answers with Cache-Control: public, max-age=300.
+    // Asked the same address every 10 seconds, the 15:00 window's result
+    // (resolved at 15:01:20) came back at 15:05:03. For the 15:15 window, a
+    // fresh address had it at 15:17:34, while the same one still said "not
+    // yet" from a cache 159 seconds old.
+    const pending = ["pm:5866083", "pm:5866801"];
+    const first: string[] = [];
+    const next: string[] = [];
+    await polymarketWarmupFeed({ fetch: gamma({ urls: first }) }).fetch(recordedAt, pending);
+    await polymarketWarmupFeed({ fetch: gamma({ urls: next }) }).fetch(new Date(recordedAt.getTime() + MIN), pending);
+    expect(first.map((u) => new URL(u).searchParams.get("poll"))).toEqual([String(recordedAt.getTime()), String(recordedAt.getTime())]);
+    expect(next.filter((u) => first.includes(u))).toEqual([]);
+    // The same two questions all the same.
+    expect(next.map((u) => new URL(u).searchParams.getAll("slug").concat(new URL(u).searchParams.getAll("id")))).toEqual(first.map((u) => new URL(u).searchParams.getAll("slug").concat(new URL(u).searchParams.getAll("id"))));
+  });
+
   it("nothing pending: no lookup at all", async () => {
     const urls: string[] = [];
     await polymarketWarmupFeed({ fetch: gamma({ urls }) }).fetch(recordedAt);

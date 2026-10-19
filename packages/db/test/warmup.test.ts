@@ -62,10 +62,12 @@ async function newcomer(arrivedAt: number, opts: { guest?: boolean } = {}) {
 
 // A feed the test drives by hand: it lists this window and the next, and
 // answers for the ended windows it's asked about with whatever results the
-// test has set (plus `early`, results nobody asked for).
+// test has set, each from the time Gamma would first show it (plus `early`,
+// results nobody asked for).
 function scripted() {
   const source = `warmup-test-${randomUUID().slice(0, 8)}`;
   const results = new Map<string, WarmupResult>();
+  const shownFrom = new Map<string, number>();
   const s = {
     source,
     results,
@@ -78,9 +80,10 @@ function scripted() {
     window(start: Date): WarmupWindow {
       return { externalId: s.idOf(start.getTime()), question: "Bitcoin Up or Down?", startsAt: start, endsAt: new Date(start.getTime() + 15 * MIN), open: s.trading };
     },
-    result(start: number, r: "up" | "down" | "void" | "waiting") {
+    result(start: number, r: "up" | "down" | "void" | "waiting", from = 0) {
       const externalId = s.idOf(start);
       results.set(externalId, { externalId, outcome: r === "up" || r === "down" ? r : null, voided: r === "void" });
+      shownFrom.set(externalId, from);
     },
     feed: null as unknown as WarmupFeed,
   };
@@ -91,7 +94,7 @@ function scripted() {
       if (s.fail) throw new Error("gamma is down");
       return {
         windows: s.listing ? [s.window(windowStart(now)), s.window(nextWindowAt(now))] : [],
-        results: [...pending.flatMap((id) => (results.has(id) ? [results.get(id)!] : [])), ...s.early],
+        results: [...pending.flatMap((id) => (results.has(id) && now.getTime() >= shownFrom.get(id)! ? [results.get(id)!] : [])), ...s.early],
       };
     },
   };
@@ -412,6 +415,29 @@ describe("settling and voids", () => {
     // Settled is settled: another poll changes nothing.
     expect(await pollWarmup(db, s.feed, { now: at(t + 18 * MIN) })).toMatchObject({ resolved: 0, settled: 0 });
     expect((await moodState(db, c, { now: at(t + 18 * MIN) })).copium.free).toBe(1);
+  });
+
+  it("within the plan's 5 to 20 minutes, from a window's first second to its last, at Gamma's slowest", async () => {
+    // On 19 October Gamma marked 40 windows resolved 53 to 152 seconds after
+    // they ended, and asked afresh had one 2 minutes 34 after. The feed asks
+    // afresh each minute, never from Gamma's 5-minute cache
+    // (polymarketWarmupFeed). Here it shows 3 minutes after, to spare.
+    const slowest = 3 * MIN;
+    const t = fresh();
+    const s = scripted();
+    const [first, last] = [await newcomer(t - 30 * MIN), await newcomer(t - 30 * MIN)];
+    await pollWarmup(db, s.feed, { now: at(t) });
+    const calls = [await makeWarmup(db, first, { side: "up" }, opts(s, t)), await makeWarmup(db, last, { side: "down" }, opts(s, t + 2 * MIN - 1))];
+    s.result(t, "up", t + 15 * MIN + slowest);
+    for (let m = 1; m <= 20; m++) await pollWarmup(db, s.feed, { now: at(t + m * MIN) }); // the minute cron
+    const [a, b] = await Promise.all(calls.map((c) => callOf(c.id)));
+    // The first poll that sees the result stamps both.
+    expect([Date.parse(a!.settled_at), Date.parse(b!.settled_at)]).toEqual([t + 18 * MIN, t + 18 * MIN]);
+    for (const x of [a!, b!]) {
+      const took = Date.parse(x.settled_at) - Date.parse(x.created_at);
+      expect(took).toBeGreaterThanOrEqual(5 * MIN);
+      expect(took).toBeLessThanOrEqual(20 * MIN);
+    }
   });
 
   it("a 50/50 void stamps VOID: no mood, no Copium, still the push", async () => {
