@@ -5,7 +5,9 @@ import { configProblems } from "../src/config-check";
 
 // The check both entrypoints run before serving anyone (the Worker's side is
 // in worker-runtime.test.ts).
-const BOT = "1234567890:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw";
+// Shaped like a bot token, but not like a real one, so secret scanners
+// (GitHub's flags Telegram's documentation example) leave it alone.
+const BOT = "424242:CONFIG_CHECK_TEST_TOKEN_not_a_real_bot";
 const SECRET = "k".repeat(32);
 const ok = { TELEGRAM_BOT_TOKEN: BOT, INTERNAL_SECRET: SECRET };
 
