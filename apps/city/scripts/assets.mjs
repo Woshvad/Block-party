@@ -1,16 +1,22 @@
-// Tidies the city's kit models in public/assets/kenney, in place. Run it
-// after adding, replacing or compressing a model:
+// Tidies the city's kit models in public/assets/kenney, in place, then
+// names each pack's folder after its contents. Run it after adding,
+// replacing or compressing a model:
 //   pnpm --filter @bp/city assets
 // Each GLB loses the vertex data nothing draws: tangents, when no material in
 // it has a normal map (the kit's have none, and Kit.tsx keeps only position,
 // normal and uv anyway). A pack palette packed inside a model (glTF-Transform
 // writes GLBs that way) goes back to being the pack's shared
-// Textures/colormap.png, which kitTextures.ts uploads once per pack. Running
-// it twice changes nothing. No dependencies: a GLB is a JSON chunk and a
-// binary chunk, rewritten here by hand.
+// Textures/colormap.png, which kitTextures.ts uploads once per pack.
+// Then each pack's folder becomes <pack>-<hash of its files> and
+// src/kitPacks.ts is rewritten to match, so a changed file always gets a new
+// address and every address under /assets/kenney/ can be cached for good
+// (public/_headers, next.config.mjs). Running it twice changes nothing. No
+// dependencies: a GLB is a JSON chunk and a binary chunk, rewritten here by
+// hand.
 
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const MAGIC = 0x46546c67; // "glTF"
@@ -162,15 +168,43 @@ export function tidyGlb(buf, palette) {
   return writeGlb(json, out);
 }
 
-// The folder each pack lives in: public/assets/kenney/<pack>.
+// Where the packs live (public/assets/kenney/<pack>-<hash>), and the file
+// that tells the city their folder names.
 export const KENNEY = fileURLToPath(new URL("../public/assets/kenney/", import.meta.url));
+const PACKS_FILE = fileURLToPath(new URL("../src/kitPacks.ts", import.meta.url));
+
+// A pack folder's version: the start of a SHA-256 over every file in it,
+// path and bytes, in a fixed order. Any change to any file changes it.
+export function packHash(dir) {
+  const files = [];
+  const walk = (d) => {
+    for (const name of readdirSync(d)) {
+      const path = join(d, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else files.push(relative(dir, path).split(sep).join("/"));
+    }
+  };
+  walk(dir);
+  const hash = createHash("sha256");
+  for (const file of files.sort()) {
+    const bytes = readFileSync(join(dir, ...file.split("/")));
+    hash.update(`${file}\0${bytes.length}\0`).update(bytes);
+  }
+  return hash.digest("hex").slice(0, 8);
+}
+
+// "roads-1a2b3c4d" -> "roads"; an unversioned "roads" stays "roads".
+export const packName = (folder) => folder.replace(/-[0-9a-f]{8}$/, "");
 
 function main() {
   let before = 0;
   let after = 0;
-  for (const pack of readdirSync(KENNEY).sort()) {
-    const dir = join(KENNEY, pack);
-    if (!statSync(dir).isDirectory()) continue;
+  const folders = readdirSync(KENNEY).filter((name) => statSync(join(KENNEY, name)).isDirectory()).sort();
+  const twice = folders.map(packName).filter((name, i, all) => all.indexOf(name) !== i);
+  if (twice.length) throw new Error(`more than one folder for ${twice.join(", ")}: keep one`);
+  const packs = {};
+  for (const folder of folders) {
+    const dir = join(KENNEY, folder);
     const palette = readFileSync(join(dir, PALETTE));
     for (const name of readdirSync(dir).sort()) {
       if (!name.endsWith(".glb")) continue;
@@ -181,8 +215,25 @@ function main() {
       after += tidy.length;
       if (tidy !== buf) writeFileSync(path, tidy);
     }
+    const versioned = `${packName(folder)}-${packHash(dir)}`;
+    if (versioned !== folder) renameSync(dir, join(KENNEY, versioned));
+    packs[packName(folder)] = versioned;
   }
+  writeFileSync(PACKS_FILE, packsModule(packs));
   console.log(`kit models: ${(before / 1e6).toFixed(2)} MB -> ${(after / 1e6).toFixed(2)} MB`);
+  for (const [pack, folder] of Object.entries(packs)) console.log(`  ${pack}: /assets/kenney/${folder}/`);
+}
+
+export function packsModule(packs) {
+  const lines = Object.entries(packs).map(([pack, folder]) => `  ${pack}: "${folder}",`);
+  return `// Written by scripts/assets.mjs (pnpm --filter @bp/city assets): don't edit.
+// Each kit pack's folder under public/assets/kenney, named after a hash of
+// its files, so a changed file gets a new address and the old one can be
+// cached for good.
+export const KIT_PACKS = {
+${lines.join("\n")}
+} as const;
+`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

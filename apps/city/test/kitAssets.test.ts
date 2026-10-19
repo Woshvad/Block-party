@@ -1,10 +1,12 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { cityPlacements, lotPlacements } from "../src/kitcity";
 import { fillCity } from "../src/citygen";
-import { CAR_MODELS, KIT, KIT_PACK_NAMES, kitDir, kitUrls } from "../src/kitModels";
+import { CAR_MODELS, KIT, KIT_PACK_NAMES, kitDir, kitPackOf, kitUrls } from "../src/kitModels";
+import { KIT_PACKS } from "../src/kitPacks";
 
 // The kit's files on disk, as the addresses the city asks for them by.
 const PUBLIC = fileURLToPath(new URL("../public", import.meta.url));
@@ -43,7 +45,7 @@ describe("the kit's files", () => {
 
   it("KIT takes only listed names (typecheck fails otherwise)", () => {
     // @ts-expect-error: not a model the city ships
-    expect(KIT.roads("road-bend")).toBe("/assets/kenney/roads/road-bend.glb");
+    expect(KIT.roads("road-bend")).toBe(`${kitDir("roads")}road-bend.glb`);
   });
 
   it("ships no model nothing asks for", () => {
@@ -106,7 +108,13 @@ type Gltf = {
   extensionsUsed?: string[];
   [k: string]: unknown;
 };
-type AssetTools = { readGlb: (b: Buffer) => { json: Gltf; bin: Buffer }; writeGlb: (json: Gltf, bin: Buffer) => Buffer; tidyGlb: (b: Buffer, palette?: Buffer) => Buffer };
+type AssetTools = {
+  readGlb: (b: Buffer) => { json: Gltf; bin: Buffer };
+  writeGlb: (json: Gltf, bin: Buffer) => Buffer;
+  tidyGlb: (b: Buffer, palette?: Buffer) => Buffer;
+  packHash: (dir: string) => string;
+  packsModule: (packs: Record<string, string>) => string;
+};
 const assetTools = async () => (await import(/* @vite-ignore */ new URL("../scripts/assets.mjs", import.meta.url).href)) as AssetTools;
 const SIZE: Record<number, number> = { 5121: 1, 5123: 2, 5125: 4, 5126: 4 };
 const NUM: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
@@ -223,5 +231,99 @@ describe("tidying a kit model", () => {
     const { writeGlb, tidyGlb } = await assetTools();
     const { json, bin } = triangle();
     expect(() => tidyGlb(writeGlb({ ...json, extensionsUsed: ["KHR_draco_mesh_compression"] }, bin))).toThrow("unknown extension KHR_draco_mesh_compression");
+  });
+});
+
+// public/_headers, as rules: a path pattern and its headers.
+function headerRules(): { path: string; headers: string[] }[] {
+  const rules: { path: string; headers: string[] }[] = [];
+  for (const line of readFileSync(join(PUBLIC, "_headers"), "utf8").split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    if (!/^\s/.test(line)) rules.push({ path: line.trim(), headers: [] });
+    else rules.at(-1)!.headers.push(line.trim());
+  }
+  return rules;
+}
+// A _headers pattern, segment by segment: a final * matches the rest, :name
+// any one segment.
+function matches(pattern: string, url: string): boolean {
+  const want = pattern.split("/");
+  const got = url.split("/");
+  for (let i = 0; i < want.length; i++) {
+    if (want[i] === "*") return i < got.length;
+    if (i >= got.length || (!want[i]!.startsWith(":") && want[i] !== got[i])) return false;
+  }
+  return want.length === got.length;
+}
+const IMMUTABLE = "Cache-Control: public, max-age=31536000, immutable";
+
+describe("caching the kit for good", () => {
+  it("each pack's folder is named after a hash of its files, and is the folder the city asks for", async () => {
+    const { packHash, packsModule } = await assetTools();
+    expect(Object.keys(KIT_PACKS).sort()).toEqual([...KIT_PACK_NAMES].sort());
+    for (const pack of KIT_PACK_NAMES) {
+      const folder = KIT_PACKS[pack];
+      expect(folder, `${pack}'s files changed: run pnpm --filter @bp/city assets`).toBe(`${pack}-${packHash(join(KENNEY, folder))}`);
+    }
+    // Nothing else under /assets/kenney/, which is all cached for good.
+    expect(readdirSync(KENNEY).sort()).toEqual(Object.values(KIT_PACKS).sort());
+    // kitPacks.ts is exactly what the script writes.
+    const written = readFileSync(new URL("../src/kitPacks.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    expect(written).toBe(packsModule(Object.fromEntries(Object.entries(KIT_PACKS).sort())));
+  });
+
+  it("any change to a pack's files changes its hash", async () => {
+    const { packHash } = await assetTools();
+    const dir = mkdtempSync(join(tmpdir(), "kit-pack-"));
+    try {
+      mkdirSync(join(dir, "Textures"));
+      writeFileSync(join(dir, "a.glb"), "model a");
+      writeFileSync(join(dir, "Textures", "colormap.png"), "palette");
+      const seen = new Set([packHash(dir)]);
+      expect(packHash(dir)).toBe([...seen][0]);
+      expect([...seen][0]).toMatch(/^[0-9a-f]{8}$/);
+      writeFileSync(join(dir, "a.glb"), "model b"); // same length, new bytes
+      seen.add(packHash(dir));
+      renameSync(join(dir, "a.glb"), join(dir, "b.glb"));
+      seen.add(packHash(dir));
+      writeFileSync(join(dir, "c.glb"), "");
+      seen.add(packHash(dir));
+      expect(seen.size).toBe(4);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("knows a kit model's pack, and only at the current version", () => {
+    expect(kitPackOf(KIT.roads("road-straight"))).toBe("roads");
+    expect(kitPackOf(KIT.cars("taxi"))).toBe("cars");
+    expect(kitPackOf("/assets/kenney/roads/road-straight.glb")).toBeNull();
+    expect(kitPackOf("/assets/kenney/roads-00000000/road-straight.glb")).toBeNull();
+    expect(kitPackOf("/icons/icon-192.png")).toBeNull();
+  });
+
+  it("public/_headers makes only content-versioned addresses immutable", () => {
+    const rules = headerRules();
+    const immutable = rules.filter((r) => r.headers.some((h) => /immutable/i.test(h)));
+    // Next's own build files carry a hash in their names; the kit's carry it in their folder.
+    expect(immutable.map((r) => r.path).sort()).toEqual(["/_next/static/*", "/assets/kenney/*"]);
+    for (const r of immutable) expect(r.headers).toEqual([IMMUTABLE]);
+    const versioned = Object.values(KIT_PACKS).map((folder) => `/assets/kenney/${folder}/`);
+    const files = walk(PUBLIC).map(urlOf);
+    expect(files.some((u) => matches("/assets/kenney/*", u))).toBe(true);
+    for (const r of immutable)
+      for (const url of files.filter((u) => matches(r.path, u))) expect(versioned.some((v) => url.startsWith(v)), `${url} is immutable but not versioned`).toBe(true);
+    // Never the page, the manifest, the icons or the headers themselves.
+    for (const url of ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/_headers", "/assets/kenney"]) expect(immutable.some((r) => matches(r.path, url)), url).toBe(false);
+  });
+
+  it("next.config.mjs sends the same when Next serves the city", async () => {
+    const load = (await import(/* @vite-ignore */ new URL("../next.config.mjs", import.meta.url).href)) as { default: (phase: string) => { headers: () => Promise<{ source: string; headers: { key: string; value: string }[] }[]> } };
+    const rules = await load.default("phase-development-server").headers();
+    const immutable = rules.filter((r) => r.headers.some((h) => /immutable/i.test(h.value)));
+    // Next sends /_next/static as immutable itself.
+    const fromHeaders = headerRules().filter((r) => r.headers.includes(IMMUTABLE) && r.path !== "/_next/static/*").map((r) => r.path);
+    expect(immutable.map((r) => r.source.replace(/:path\*$/, "*"))).toEqual(fromHeaders);
+    for (const r of immutable) expect(r.headers).toEqual([{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }]);
   });
 });

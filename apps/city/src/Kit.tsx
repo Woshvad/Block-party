@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { bake } from "./kitGeometry";
 export { bake } from "./kitGeometry";
 import type { Placement } from "./kitcity";
+import { kitPackOf } from "./kitModels";
 import { failedAsset, noteModelAsked, noteModelLoaded, takeFailedModels } from "./sceneHealth";
 import { type LoadedGltf, glowFor, shareModelImages } from "./kitTextures";
 
@@ -77,11 +78,11 @@ function KitModel({ url, items, shadows, night }: { url: string; items: Placemen
     const source = Array.isArray(baked0.material) ? baked0.material : [baked0.material];
     const materials = source.map((original) => {
       const m = (original as THREE.MeshStandardMaterial).clone();
-      const paletteKit = url.startsWith("/assets/kenney/");
-      const glow = paletteKit && !/\/(roads|cars)\//.test(url) ? windowGlow(m.map) : null;
+      const pack = kitPackOf(url);
+      const glow = pack && pack !== "roads" && pack !== "cars" ? windowGlow(m.map) : null;
       if (glow) { m.emissiveMap = glow; m.emissive = new THREE.Color("#ffffff"); m.userData.cityWindowGlow = true; }
-      if (paletteKit) {
-        m.roughness = /\/roads\//.test(url) ? 0.96 : 0.72;
+      if (pack) {
+        m.roughness = pack === "roads" ? 0.96 : 0.72;
         m.envMapIntensity = 0.45;
       }
       return m;

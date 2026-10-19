@@ -1,3 +1,5 @@
+import { KIT_PACKS } from "./kitPacks";
+
 // Every Kenney kit model the city can ask for, by pack. KIT only takes these
 // names, so a model the code asks for has to be on this list, and the kit
 // test checks each one is in public/assets and that nothing else ships there.
@@ -22,8 +24,16 @@ export type KitPack = keyof typeof KIT_MODELS;
 export type KitModel<P extends KitPack> = (typeof KIT_MODELS)[P][number];
 export const KIT_PACK_NAMES = Object.keys(KIT_MODELS) as KitPack[];
 
-// A pack's folder, with its palette (Textures/colormap.png) and licence.
-export const kitDir = (pack: KitPack) => `/assets/kenney/${pack}/`;
+// A pack's folder, with its palette (Textures/colormap.png) and licence. The
+// folder is named after a hash of its files (kitPacks.ts, written by
+// scripts/assets.mjs), so its addresses can be cached for good.
+export const kitDir = (pack: KitPack) => `/assets/kenney/${KIT_PACKS[pack]}/`;
+
+// The pack a kit model's address is in, or null for anything else.
+export function kitPackOf(url: string): KitPack | null {
+  return KIT_PACK_NAMES.find((pack) => url.startsWith(kitDir(pack))) ?? null;
+}
+
 const kit = <P extends KitPack>(pack: P) => (name: KitModel<P>) => `${kitDir(pack)}${name}.glb`;
 
 export const KIT = {
