@@ -89,7 +89,14 @@ describe("the kit's files", () => {
         const el = SIZE[a.componentType]! * NUM[a.type]!;
         expect((v.byteOffset ?? 0) % 4, url).toBe(0);
         expect((a.byteOffset ?? 0) + (a.count - 1) * (v.byteStride ?? el) + el, url).toBeLessThanOrEqual(v.byteLength);
-        expect((v.byteOffset ?? 0) + v.byteLength, url).toBeLessThanOrEqual(bin.length);
+        // Plain bytes sit in the binary chunk; a meshopt view's compressed
+        // bytes do, at its extension's offset, and the view itself sits in a
+        // fallback buffer that's never downloaded.
+        const meshopt = v.extensions?.EXT_meshopt_compression;
+        const stored = meshopt ?? v;
+        if (meshopt) expect(json.buffers![v.buffer]!.extensions, url).toEqual({ EXT_meshopt_compression: { fallback: true } });
+        expect(stored.buffer, url).toBe(0);
+        expect((stored.byteOffset ?? 0) + stored.byteLength, url).toBeLessThanOrEqual(bin.length);
       }
     }
   });
@@ -116,7 +123,7 @@ type AssetTools = {
   packsModule: (packs: Record<string, string>) => string;
 };
 const assetTools = async () => (await import(/* @vite-ignore */ new URL("../scripts/assets.mjs", import.meta.url).href)) as AssetTools;
-const SIZE: Record<number, number> = { 5121: 1, 5123: 2, 5125: 4, 5126: 4 };
+const SIZE: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
 const NUM: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
 
 // One triangle, the way the kit's GLBs lay it out: position, normal, tangent
