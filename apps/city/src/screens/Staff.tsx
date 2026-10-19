@@ -4,11 +4,11 @@ import { useState } from "react";
 import type { Api } from "../api";
 import { makeGoodConfirm, makeGoodProblem } from "../makeGoods";
 import { label } from "../palette";
-import { RESTRICT_FOR, itemPlace, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
+import { RESTRICT_FOR, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
-import { handleOf, renamedTo, useWho, who } from "../who";
+import { handleOf, lookUpAgain, renamedTo, useWho, who } from "../who";
 
 // The staff console. The role is granted in the database only, and the API
 // checks it on every call; for anyone else each panel just says "staff only".
@@ -161,28 +161,43 @@ function Flagged({ api, act }: { api: Api; act: Act }) {
               </button>
             ))}
           </div>
-          {renameTarget(item) && <Rename api={api} act={act} userId={renameTarget(item)!} onDone={() => void items.reload()} />}
+          {renameTarget(item) && <Rename api={api} act={act} userId={renameTarget(item)!} from={itemRenameFrom(item, loadedHandle(renameTarget(item)!))} onDone={() => void items.reload()} />}
         </section>
       ))}
     </>
   );
 }
 
+// Their handle as the console loaded it, or null until it has.
+function loadedHandle(userId: string): string | null {
+  const w = who(userId);
+  return w && !w.npc ? w.handle : null;
+}
+
 // Rename a resident's @handle: empty for a neutral one, a reason they read,
-// then a confirm. The handle shown here goes along as `from`, so if another
-// staff member renamed them a moment ago nothing happens twice. A rename
-// clears the old handle's flags, and closes the report it was made from.
-function Rename({ api, act, userId, reportId, onDone }: { api: Api; act: Act; userId: string; reportId?: string; onDone: () => void }) {
+// then a confirm. The handle shown here goes along as `from` (the API needs
+// it), so if another staff member renamed them a moment ago nothing happens
+// twice; until it's known there's nothing to rename from, so the button asks
+// for it again. A rename clears the old handle's flags, and closes the report
+// it was made from.
+function Rename({ api, act, userId, from: given, reportId, onDone }: { api: Api; act: Act; userId: string; from?: string | null; reportId?: string; onDone: () => void }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ newHandle: "", reason: "" });
-  const w = who(userId);
-  const from = w && !w.npc ? w.handle : null;
+  const from = given === undefined ? loadedHandle(userId) : given;
   const problem = renameProblem(f);
+  if (!from)
+    return (
+      <div className="btnrow">
+        <button className="btn light" onClick={() => void lookUpAgain(api, [userId])}>
+          Rename: load their handle
+        </button>
+      </div>
+    );
   if (!open)
     return (
       <div className="btnrow">
         <button className="btn light" onClick={() => setOpen(true)}>
-          Rename {from ? `@${from}` : "handle"}…
+          Rename @{from}…
         </button>
       </div>
     );

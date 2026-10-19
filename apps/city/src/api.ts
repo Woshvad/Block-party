@@ -330,8 +330,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     altFlags: () => request<Record<string, unknown>[]>("GET", "/v1/staff/alt-flags"),
     staffModeration: () => request<Array<{ id: string; kind: string; ref: string; authorId: string | null; text: string; status: string; categories: string[]; createdAt: string }>>("GET", "/v1/staff/moderation"),
     reviewModeration: (id: string, verdict: "restore" | "remove") => request<Record<string, unknown>>("POST", `/v1/staff/moderation/${encodeURIComponent(id)}/review`, { verdict }),
-    // Rename a resident's @handle: a neutral one unless newHandle is given; from is the handle staff saw.
-    renameHandle: (userId: string, b: { newHandle?: string; reason: string; from?: string; reportId?: string }) =>
+    // Rename a resident's @handle: a neutral one unless newHandle is given; from (required) is the handle staff saw.
+    renameHandle: (userId: string, b: { newHandle?: string; reason: string; from: string; reportId?: string }) =>
       request<HandleRename>("POST", `/v1/staff/residents/${encodeURIComponent(userId)}/handle`, b),
     staffMakeGoods: () => request<StaffMakeGood[]>("GET", "/v1/staff/make-goods"),
     createMakeGood: (b: { reason: string; amount: number }) => request<StaffMakeGood>("POST", "/v1/staff/make-goods", b),

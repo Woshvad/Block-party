@@ -70,6 +70,14 @@ export function renameTarget(item: Pick<ModerationItem, "kind" | "ref">): string
 }
 export const reportRenames = (r: { reason?: unknown }) => r.reason === "impersonation";
 
+// The handle a Rename on a queued item goes from (the API needs it): a
+// flagged handle's own text, as that's what staff are judging, so if they've
+// been renamed since nothing happens; for a flagged name, their handle as the
+// console loaded it (null until it has).
+export function itemRenameFrom(item: Pick<ModerationItem, "kind" | "text">, loaded: string | null): string | null {
+  return item.kind === "resident_handle" ? item.text : loaded;
+}
+
 // What a rename still needs before the API will take it, in words, or null
 // when it's ready. An empty handle means a neutral one. The same rules the
 // API checks (core's handle rules, the reason's limits); it also checks the
@@ -88,15 +96,15 @@ export function renameProblem(f: { newHandle: string; reason: string }): string 
 }
 
 // The confirm before renaming. Telegram's own dialog takes up to 256 characters.
-export function renameConfirm(f: { from: string | null; newHandle: string }): string {
+export function renameConfirm(f: { from: string; newHandle: string }): string {
   const h = f.newHandle.trim().replace(/^@/, "");
-  return `Rename ${f.from ? `@${f.from}` : "them"} to ${h ? `@${h}` : "a neutral handle"}? They see your reason next time they open the app. Their old profile link stops working, and no one else can take the old handle for ${HANDLE_RENAME.holdDays} days.`;
+  return `Rename @${f.from} to ${h ? `@${h}` : "a neutral handle"}? They see your reason next time they open the app. Their old profile link stops working, and no one else can take the old handle for ${HANDLE_RENAME.holdDays} days.`;
 }
 
-// The request: trimmed, and only what's filled in. `from` is the handle staff
-// were looking at, so a resident someone else renamed a moment ago isn't
-// renamed twice.
-export function renameBody(f: { newHandle: string; reason: string }, from: string | null, reportId?: string) {
+// The request: trimmed, and only what's filled in, but always `from`, the
+// handle staff were looking at: the API needs it, so a resident someone else
+// renamed a moment ago isn't renamed twice.
+export function renameBody(f: { newHandle: string; reason: string }, from: string, reportId?: string) {
   const h = f.newHandle.trim().replace(/^@/, "");
-  return { reason: f.reason.trim(), ...(h ? { newHandle: h } : {}), ...(from ? { from } : {}), ...(reportId ? { reportId } : {}) };
+  return { reason: f.reason.trim(), from, ...(h ? { newHandle: h } : {}), ...(reportId ? { reportId } : {}) };
 }

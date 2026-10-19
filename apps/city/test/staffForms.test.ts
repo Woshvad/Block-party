@@ -1,6 +1,6 @@
 import { HANDLE_RENAME, MODERATION } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { RESTRICT_FOR, itemPlace, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
+import { RESTRICT_FOR, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
 
 describe("closing a report from the staff console", () => {
   const note = "spam links ok"; // 13 characters: enough for a note, too short for a reason
@@ -67,6 +67,13 @@ describe("renaming a flagged @handle", () => {
     for (const r of ["scam", "harassment", "spam", "under_18", "unwanted_romance", "other", undefined]) expect(reportRenames({ reason: r }), String(r)).toBe(false);
   });
 
+  it("renames from the flagged handle itself, or from a flagged name's handle once it has loaded", () => {
+    expect(itemRenameFrom({ kind: "resident_handle", text: "rude_one" }, "newer_one")).toBe("rude_one"); // renamed since: the API says so
+    expect(itemRenameFrom({ kind: "resident_handle", text: "rude_one" }, null)).toBe("rude_one");
+    expect(itemRenameFrom({ kind: "resident_name", text: "Rude Name" }, "their_handle")).toBe("their_handle");
+    expect(itemRenameFrom({ kind: "resident_name", text: "Rude Name" }, null)).toBeNull(); // not loaded: no Rename yet
+  });
+
   it("needs a readable reason; an empty handle means a neutral one, a typed one follows the handle rules", () => {
     expect(renameProblem({ newHandle: "", reason })).toBeNull();
     expect(renameProblem({ newHandle: " @Fresh_Start ", reason })).toBeNull();
@@ -84,12 +91,12 @@ describe("renaming a flagged @handle", () => {
     expect(longest).toMatch(/old profile link stops working/);
     expect(longest).toMatch(new RegExp(`${HANDLE_RENAME.holdDays} days`));
     expect(longest.length).toBeLessThanOrEqual(256);
-    expect(renameConfirm({ from: null, newHandle: "  " })).toMatch(/^Rename them to a neutral handle\?/);
+    expect(renameConfirm({ from: "old", newHandle: "  " })).toMatch(/^Rename @old to a neutral handle\?/);
     expect(renameConfirm({ from: "old", newHandle: "@new_one" })).toMatch(/^Rename @old to @new_one\?/);
   });
 
-  it("sends only what's filled in, trimmed, with the handle staff saw", () => {
-    expect(renameBody({ newHandle: "  ", reason: `  ${reason} ` }, null)).toEqual({ reason });
+  it("sends only what's filled in, trimmed, and always the handle staff saw", () => {
+    expect(renameBody({ newHandle: "  ", reason: `  ${reason} ` }, "old_one")).toEqual({ reason, from: "old_one" });
     expect(renameBody({ newHandle: " @Fresh ", reason }, "old_one", "r1")).toEqual({ reason, newHandle: "Fresh", from: "old_one", reportId: "r1" });
   });
 });

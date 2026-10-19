@@ -43,6 +43,13 @@ export function useWho(api: Pick<Api, "who">, ids: readonly string[]) {
   }, [api, key]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
+// Asks again for ids remembered as unknown (a lookup that failed, offline say,
+// is remembered that way for the visit). Known ids aren't asked again.
+export async function lookUpAgain(api: Pick<Api, "who">, ids: readonly string[]): Promise<void> {
+  for (const id of ids) if (cache.get(id) === null) cache.delete(id);
+  await lookUp(api, ids);
+}
+
 // A rename staff just made: the cached handle follows it at once.
 export function renamedTo(id: string, handle: string) {
   const w = cache.get(id);
