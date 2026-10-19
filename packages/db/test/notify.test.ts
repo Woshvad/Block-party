@@ -508,10 +508,13 @@ describe("the daily ping scheduler", () => {
   it("pages through everyone, however small the page", async () => {
     const t = fresh() + 6 * H;
     const us = await Promise.all(Array.from({ length: 5 }, () => streaker(t)));
-    for (const pageSize of [1, 2, 3]) {
-      // Each resident is looked at exactly once per run, whatever the page size.
-      expect((await queueDailyPings(db, { now: new Date(t), pageSize })).checked).toBe(5);
-    }
+    // Each resident is looked at exactly once per run, whatever the page size.
+    // Other files' residents with later sessions are looked at too (the
+    // database is shared, and a session after `now` is recent enough), so
+    // every page size must agree with one big page.
+    const all = (await queueDailyPings(db, { now: new Date(t), pageSize: 5000 })).checked;
+    expect(all).toBeGreaterThanOrEqual(5);
+    for (const pageSize of [1, 2, 3]) expect((await queueDailyPings(db, { now: new Date(t), pageSize })).checked).toBe(all);
     for (const u of us) expect(await pinged(u)).toBe(1);
   });
 });
