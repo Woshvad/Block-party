@@ -42,11 +42,12 @@ async function slateDay(modifier: Modifier) {
     call: (u: string, i: number, side: "yes" | "no", chance: number) => makeCall(db, u, { marketId: ids[i], side, chance, seenPrice: PRICES[i]! }, { now: at(9) }),
     lock: () => pollOdds(db, provider, { now: at(9 + 1 / 60) }),
     // Every card settles YES, then the bell's Tower and modifier steps run.
-    settleAndRing: async () => {
+    settleAndRing: async (only: Array<"tower" | "modifier"> = ["tower", "modifier"]) => {
       for (const m of ms) m.resolved = true;
       await pollOdds(db, provider, { now: at(21) });
-      return runBell(db, { now: new Date(d0 + D + 5 * MIN), only: ["tower", "modifier"] });
+      return runBell(db, { now: new Date(d0 + D + 5 * MIN), only });
     },
+    ring: (only: Array<"tower" | "modifier">) => runBell(db, { now: new Date(d0 + D + 5 * MIN), only }),
     during: makeApp({ now: () => at(9.5) }),
     after: makeApp({ now: () => new Date(d0 + D + 10 * MIN) }),
   };
@@ -67,7 +68,12 @@ describe("Contrarian Day over HTTP", () => {
     expect([sealed.status, sealed.body.sealed]).toEqual([200, true]);
     expect(JSON.stringify(sealed.body)).not.toMatch(/contrarian/);
 
-    expect((await s.settleAndRing()).ran.modifier).toMatchObject({ modifier: "contrarian_day", majorities: 1 });
+    // Open at midnight, but until the bell's modifier step has run the borders aren't counted: null, not all false.
+    await s.settleAndRing(["tower"]);
+    const early = await call("GET", `/v1/slate/${s.day}/grid`, { token: me.token, via: s.after });
+    expect(early.body).toMatchObject({ sealed: false, modifier: "contrarian_day", contrarian: null });
+
+    expect((await s.ring(["modifier"])).ran.modifier).toMatchObject({ modifier: "contrarian_day", majorities: 1 });
     const want = [false, false, false, false, false, false];
     want[await s.slot(1)] = true;
     const grid = await call("GET", `/v1/slate/${s.day}/grid`, { token: me.token, via: s.after });
@@ -98,7 +104,7 @@ describe("NOTHING Day over HTTP", () => {
     expect((await s.settleAndRing()).ran.modifier).toMatchObject({ modifier: "nothing_day", winners: 1, tiles: 1 });
 
     const won = await call("GET", `/v1/slate/${s.day}/grid`, { token: winner.token, via: s.after });
-    expect(won.body).toMatchObject({ modifier: "nothing_day", contrarian: null, nothing: { beat: true, tile: true } });
+    expect(won.body).toMatchObject({ modifier: "nothing_day", contrarian: null, nothing: { beat: true, tile: true, atBell: { mine: 9 } } });
     expect(won.body.nothing.squares).toHaveLength(6);
     expect((await call("GET", `/v1/slate/${s.day}/grid`, { token: loser.token, via: s.after })).body.nothing).toMatchObject({ beat: false, tile: false });
 
