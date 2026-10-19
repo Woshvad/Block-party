@@ -429,10 +429,9 @@ describe("database guards (bypassing app code)", () => {
     const u = await residentAs(old);
     await renameHandle(db, mod, u, { reason: REASON });
     const v = await claimed();
-    const base = pickForMe(seededRandomInt(seed++));
     await expect(
       client`INSERT INTO residents (user_id, handle, name, look, traits, goal, backstory, starter_item, kit_style)
-             VALUES (${v}, ${old.toUpperCase()}, 'x', ${base.look as never}::jsonb, ${base.traits}::text[], 'oracle', 'og_kid', 'cap_og_kid', 'neon')`,
+             VALUES (${v}, ${old.toUpperCase()}, 'x', '{}'::jsonb, '{ape,builder,lurker}'::text[], 'oracle', 'og_kid', 'cap_og_kid', 'neon')`,
     ).rejects.toThrow(/resting/);
   });
 
