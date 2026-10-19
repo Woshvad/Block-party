@@ -459,7 +459,8 @@ export type CityMarket = { id: string; question: string; kind: string; place: st
 
 // The Roof's screens, as GET /v1/roof gives them: handles, crew names and
 // scores only, less anyone this resident has blocked, is blocked by or has
-// muted. Ranks are the city's. bellAt is the bell the boards count up to.
+// muted. Ranks are the city's. bellAt is the bell the boards count up to:
+// the last one whose steps the server has run, so it can lag the clock.
 export type RoofRightRow = { rank: number; handle: string; npc: string | null; perCall: number; spread: number; rusty: boolean };
 export type Roof = {
   bellAt: string;

@@ -134,10 +134,15 @@ export type RoofFeed = { roof: Roof | null; failed: boolean };
 
 const DAY_MS = 86_400_000;
 const lastBell = (now: number) => nextBell(new Date(now)).getTime() - DAY_MS;
+// From before the last bell: fetched before it rang, or the server's bell
+// runner hasn't finished it yet (bellAt is the last bell whose steps have run).
+const beforeBell = (roof: Roof, now: number) => Date.parse(roof.bellAt) < lastBell(now);
 
 // When to fetch them again: every 5 minutes, and a minute and a half after
 // the bell, once its steps (scores, City markets, the League) have run.
-export function roofRefreshIn(now: number): number {
+// Boards still from before the last bell are asked for every minute.
+export function roofRefreshIn(now: number, roof: Roof | null = null): number {
+  if (roof && beforeBell(roof, now)) return 60_000;
   return Math.min(5 * 60_000, nextBell(new Date(now)).getTime() + 90_000 - now);
 }
 
@@ -150,7 +155,7 @@ function roofWaiting(failed: boolean, title: string): Board {
 
 // Boards from before the last bell are out of date: dimmed, and the foot says so.
 function roofFoot(roof: Roof, now: number, foot: string): Pick<Board, "foot" | "dim"> {
-  return Date.parse(roof.bellAt) < lastBell(now) ? { foot: "From before the last bell. Refreshing…", dim: true } : { foot };
+  return beforeBell(roof, now) ? { foot: "From before the last bell. Refreshing…", dim: true } : { foot };
 }
 
 // "+6.2", "−1.4", "0.0": Aura per call, as the plan writes it.

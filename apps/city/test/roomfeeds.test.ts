@@ -226,9 +226,20 @@ describe("the Roof's boards", () => {
 
   it("fetches again every 5 minutes, and a minute and a half after each bell", () => {
     expect(roofRefreshIn(now)).toBe(5 * 60_000);
+    expect(roofRefreshIn(now, roof())).toBe(5 * 60_000);
     const bell = Date.parse("2026-10-11T00:00:00Z");
-    expect(roofRefreshIn(bell - 60_000)).toBe(150_000);
+    expect(roofRefreshIn(bell - 60_000, roof())).toBe(150_000);
     expect(roofRefreshIn(bell + 30_000)).toBe(5 * 60_000);
+  });
+
+  it("boards the server still has from before the last bell (its runner isn't done) are asked for every minute", () => {
+    const old = roof({ bellAt: "2026-10-09T00:00:00.000Z" });
+    expect(roofRefreshIn(now, old)).toBe(60_000);
+    for (const b of Object.values(roofBoards(got(old), now))) expect([b.dim, b.foot]).toEqual([true, "From before the last bell. Refreshing…"]);
+    // Once the answer is tonight's, back to every 5 minutes.
+    const bell = Date.parse("2026-10-11T00:00:00Z");
+    expect(roofRefreshIn(bell + 120_000, roof())).toBe(60_000);
+    expect(roofRefreshIn(bell + 120_000, roof({ bellAt: "2026-10-11T00:00:00.000Z" }))).toBe(5 * 60_000);
   });
 });
 

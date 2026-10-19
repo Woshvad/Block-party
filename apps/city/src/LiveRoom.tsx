@@ -5,7 +5,7 @@ import { type TowerMoment, hasScreen } from "@bp/core";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
-import { ApiError, type Api, type CityHall, type CityMarket, type Home, type Look, type MarketRow } from "./api";
+import { ApiError, type Api, type CityHall, type CityMarket, type Home, type Look, type MarketRow, type Roof } from "./api";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import Interior from "./Interior";
 import { layoutFor, planFor } from "./interiors";
@@ -164,12 +164,20 @@ function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment 
     if (place !== "roof") return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let latest: Roof | null = null;
+    // The next fetch is timed from the answer: sooner while it's still from
+    // before the last bell (requests time out, so this always comes round).
     const load = () => {
       void api
         .roof()
-        .then((r) => live && setRoof({ roof: r, failed: false }))
-        .catch(() => live && setRoof((f) => ({ ...f, failed: true })));
-      timer = setTimeout(load, roofRefreshIn(Date.now()));
+        .then((r) => {
+          latest = r;
+          if (live) setRoof({ roof: r, failed: false });
+        })
+        .catch(() => live && setRoof((f) => ({ ...f, failed: true })))
+        .finally(() => {
+          if (live) timer = setTimeout(load, roofRefreshIn(Date.now(), latest));
+        });
     };
     load();
     return () => {
