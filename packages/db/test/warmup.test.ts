@@ -323,7 +323,9 @@ describe("3 per resident, first 3 days only", () => {
     // A fourth, on day 3, in the first minute of a real window.
     await pollWarmup(db, s.feed, { now: at(t + 3 * DAY) });
     expect(await refused(insert(3, t + 3 * DAY + MIN, (await windowRow(s, t + 3 * DAY))!.id))).toBe("23514");
-    expect(await refused(insert(1, t + 3 * MIN))).toBe("23000"); // not the day it was taken on
+    // Not the day it was taken on: someone with no call in this window, inside its 2 minutes.
+    const v = await newcomer(t - 30 * MIN);
+    expect(await refused(client`INSERT INTO warmup_calls (user_id, window_id, side, account_day, created_at) VALUES (${v}, ${w}, 'up', 1, ${iso(t + MIN)}::timestamptz)`)).toBe("23000");
     expect(await refused(insert(1, t + DAY + 3 * MIN))).toBe("23000"); // outside the window's first 2 minutes
     expect(await refused(client`INSERT INTO warmup_calls (user_id, window_id, side, account_day, created_at, stamp, settled_at) VALUES (${u}, ${w}, 'up', 0, ${iso(t + MIN)}::timestamptz, 'called_it', ${iso(t + MIN)}::timestamptz)`)).toBe("23000");
     expect(await refused(client`UPDATE warmup_calls SET side = 'down' WHERE id = ${c.id}`)).toBe("23000");
@@ -337,6 +339,8 @@ describe("3 per resident, first 3 days only", () => {
     expect(await refused(client`UPDATE warmup_calls SET stamp = 'called_it', settled_at = now() WHERE id = ${c.id}`)).toBe("23000");
     expect(await refused(client`UPDATE warmup_calls SET stamp = 'rekt', settled_at = now() WHERE id = ${c.id}`)).toBe("OK");
     expect(await refused(client`UPDATE warmup_calls SET stamp = 'void' WHERE id = ${c.id}`)).toBe("23000");
+    // Settled once, even with the same stamp.
+    expect(await refused(client`UPDATE warmup_calls SET settled_at = now() WHERE id = ${c.id}`)).toBe("23000");
   });
 });
 
