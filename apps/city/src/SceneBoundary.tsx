@@ -1,6 +1,6 @@
 "use client";
 import { Component, Fragment, type ReactNode } from "react";
-import { webglSupported } from "./sceneHealth";
+import { type SceneFallbackCopy, sceneFallback, webglSupported } from "./sceneHealth";
 
 // Wraps a 3D view (a Canvas). If the device can't do WebGL, or something in
 // the scene throws (most often a model that failed to download on a flaky
@@ -39,23 +39,21 @@ export default class SceneBoundary extends Component<Props, State> {
   };
 
   render() {
-    const { what, note } = this.props;
-    if (!webglSupported()) return <SceneFallback title={`This device can't show ${what} in 3D.`} detail={note} />;
-    if (this.state.error && this.state.outdated) return <SceneFallback title="Block Party has been updated." detail={[`Reload to see ${what}.`, note].filter(Boolean).join(" ")} action={["Reload", () => location.reload()]} />;
-    if (this.state.error) return <SceneFallback title={`Couldn't draw ${what}.`} detail={["A download failed or the 3D view stopped.", note].filter(Boolean).join(" ")} action={["Try again", this.retry]} />;
-    return <Fragment key={this.state.attempt}>{this.props.children}</Fragment>;
+    const shown = sceneFallback(this.props.what, this.props.note, { webgl: webglSupported(), failed: !!this.state.error, outdated: this.state.outdated });
+    if (!shown) return <Fragment key={this.state.attempt}>{this.props.children}</Fragment>;
+    return <SceneFallback {...shown} onAction={shown.action === "reload" ? () => location.reload() : this.retry} />;
   }
 }
 
-function SceneFallback({ title, detail, action }: { title: string; detail?: string; action?: [label: string, run: () => void] }) {
+function SceneFallback({ title, detail, action, onAction }: SceneFallbackCopy & { onAction: () => void }) {
   return (
     <div className="scene-fallback" role="alert">
       <div>
         <b>{title}</b>
         {detail && <p>{detail}</p>}
         {action && (
-          <button className="btn" onClick={action[1]}>
-            {action[0]}
+          <button className="btn" onClick={onAction}>
+            {action === "reload" ? "Reload" : "Try again"}
           </button>
         )}
       </div>

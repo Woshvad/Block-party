@@ -50,12 +50,13 @@ export async function kitReplaced(error: unknown, live: () => Promise<unknown>):
   const url = failedAsset(error);
   const pack = url ? kitPackOf(url) : null;
   if (!pack) return false;
+  let now: unknown;
   try {
-    const now = await live();
-    return typeof now === "object" && now !== null && !Array.isArray(now) && (now as Record<string, unknown>)[pack] !== KIT_PACKS[pack];
+    now = await live();
   } catch {
     return false;
   }
+  return typeof now === "object" && now !== null && !Array.isArray(now) && (now as Record<string, unknown>)[pack] !== KIT_PACKS[pack];
 }
 
 const kit = <P extends KitPack>(pack: P) => (name: KitModel<P>) => `${kitDir(pack)}${name}.glb`;
