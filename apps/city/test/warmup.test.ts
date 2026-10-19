@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Warmup, WarmupEntry } from "../src/api";
 import { CONTRARIAN, CONTRARIAN_LINE, calledLine, newcomersLine, nextRefresh, reelLines, warmupView } from "../src/warmup";
@@ -112,6 +113,15 @@ describe("the Contrarian at the Tower door", () => {
     const settled = entry({ stamp: "called_it", settledAt: iso(t0 - 60 * MIN), reel: reel("up") });
     expect(warmupView(card({ mine: [settled], left: 2, day: 1 }), t0 + 30_000)).toMatchObject({ call: { left: 2 }, reel: expect.arrayContaining([{ text: "You called UP. CALLED IT.", tone: "good" }]) });
     expect(warmupView(card({ eligible: false, reason: "not_new", left: 0, mine: [settled] }), t0)!.note).toBe("Warm-ups are for your first 3 days. The Slate's yours now.");
+  });
+
+  it("no ticking countdown sits in a live region, so a screen reader isn't read a number a second", () => {
+    // Each element that is a live region, and what it holds.
+    const live = (src: string) => [...src.matchAll(/<(\w+)\b[^>]*\b(?:role="(?:status|alert|log|timer)"|aria-live="(?:polite|assertive)")[^>]*>([\s\S]*?)<\/\1>/g)].map((m) => m[2]!);
+    const ticking = /settles|closesIn|\.next\b/;
+    // The check finds one when there is one.
+    expect(live(`<div className="warmup-receipt" role="status">\n  <b>You called</b>\n  <span>{v.waiting.settles}</span>\n</div>`).filter((x) => ticking.test(x))).toHaveLength(1);
+    for (const inner of live(readFileSync(new URL("../src/WarmupCard.tsx", import.meta.url), "utf8"))) expect(inner).not.toMatch(ticking);
   });
 
   it("the Rookie Bell and the call's own answer", () => {

@@ -81,8 +81,11 @@ export function WarmupCardView({ view: v, pending, feedback, onCall }: WarmupCar
           </p>
         </>
       )}
+      {/* Not a live region: its countdown ticks every second in the last
+          minute, and a screen reader would read out each one. The call's own
+          answer (feedback, below) is what's announced. */}
       {v.waiting && (
-        <div className="warmup-receipt" role="status">
+        <div className="warmup-receipt">
           <b>You called {v.waiting.side}</b>
           <span>{v.waiting.settles}</span>
           <span>{v.waiting.newcomers}</span>
