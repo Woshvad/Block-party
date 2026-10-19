@@ -89,6 +89,12 @@ export const FAQ: readonly Faq[] = [
     answer: `Every city day something is hidden at one place, and Today has the clue. Ride there and search: one search a day, and the answer shows after the bell. Your first find brings ${HUNT_TROPHIES[0]!.name} for your home, and ${HUNT_TROPHIES[1]!.finds} finds bring ${HUNT_TROPHIES[1]!.name}. Trophies only, never GM.`,
   },
   {
+    id: "modifier",
+    keywords: ["bell modifier", "modifier", "contrarian day", "nothing day", "blind slate", "gold border", "banner tile"],
+    answer:
+      "Each Slate draws a Bell Modifier. Contrarian Day: a call against the city majority, counted when its card freezes, gets a gold border at the bell. NOTHING Day: beat NOTHING-9000's grid and its banner tile goes in your home. Blind Slate: even your crew's sides stay hidden until the bell. Modifiers never touch Aura or GM.",
+  },
+  {
     id: "pings",
     keywords: ["notification", "notifications", "push", "ping", "pings", "quiet hours", "too many"],
     answer: `${NOTIFY.dailyCap} pings a day at most, never in your quiet hours (23:00 to 08:00 by default). Alerts are opt-in, and you can switch pings off any time in settings.`,

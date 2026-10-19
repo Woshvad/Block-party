@@ -36,6 +36,9 @@ describe("Faucet Fren", () => {
       ["how do I add frens", "frens"],
       ["where is today's clue hidden?", "hunt"],
       ["how does the daily clue hunt work", "hunt"],
+      ["what's NOTHING Day?", "modifier"],
+      ["how do I get a gold border on Contrarian Day", "modifier"],
+      ["why can't I see my crew, is it a Blind Slate", "modifier"],
     ];
     for (const [q, id] of cases) expect(faucetFrenAnswer(q).id, q).toBe(id);
   });
