@@ -85,7 +85,7 @@ Still open:
   - **Launch places:** Club Liquidity, Touch Grass Park, the Blockspace Canvas, the Bot Café, Block 5 and the Rollup are built and show locked pins.
   - **Lagoon:** chart billboards and "pending" Mempool Plots.
   - **Labels:** district badges and named pins that change with the zoom.
-  - **Rooms:** an interior for every public place (`interiors.ts`). The **live screens** are the Tower's Odds Wall and the Watch Party screen (both on real odds), City Hall's noticeboard, and Hash Brown's chalkboard in the Diner (`roomfeeds.ts`).
+  - **Rooms:** an interior for every public place (`interiors.ts`). The **live screens** are the Tower's Odds Wall and the Watch Party screen (both on real odds; the Watch Party's also carries the Hall's City markets), City Hall's noticeboard, Hash Brown's chalkboard in the Diner, and the Roof's three leaderboards (`roomfeeds.ts`).
   - **Screens:** chibi residents, a character sheet, and screens for every area of the app.
 
 ## What's left
@@ -103,14 +103,16 @@ Done since this file was first written:
 Still open:
 
 - [ ] **Performance on a real mid-range phone inside Telegram.** This hasn't been measured; PERFORMANCE_BASELINE.md says how to do it. Desktop is already near the top of the budget, so check before adding more geometry.
-- [ ] **Not yet checked:** map labels at full zoom-in and at night, and the Watch Party and Diner screens in the browser.
+- [ ] **Not yet checked:** map labels at full zoom-in and at night, and the Watch Party, Diner and Roof screens in the browser (`/room-social-preview` has samples of the Roof's and the Watch Party's).
 
 ### 2. From the plan, not started
 
 - [ ] **The BTC 15-minute windows** in the odds feed. The plan's odds worker wants these alongside the curated markets.
 - [ ] **Copium Pharmacy** opens first as a counter in the Gwei Diner (Launch). Hackerspace runs as "Builder Night" in the Bot Café (Launch), so it has no building of its own on purpose.
 - [ ] **Launch places have no interiors yet:** Club Liquidity, Touch Grass Park, the Blockspace Canvas game and the Bot Café.
-- [ ] **The Roof** has the bell but not the leaderboards. Watch Party City markets and in-play calls aren't on its screen yet.
+- [x] **The Roof's leaderboards:** three screens (the Right List with NOTHING-9000's line, the Season Stack, the crews') from `GET /v1/roof`, and the Watch Party's screen shows the Hall's own City markets.
+- [ ] **Free in-play calls in the Watch Party Hall** (MVP in the plan, on the big screen beside the room-only City markets). In the Hall, a free call on a match can be made after kickoff: it locks at the first tick at least 2 minutes after you confirm, for half the Aura. Backing for real still closes at kickoff. Not built: sports markets freeze at kickoff everywhere, so the Hall's screen shows only pre-kickoff odds and its City markets.
+- [x] **The Season Stack ranks Proof of Neighbour residents only,** on the Roof and in Games, as the plan's risks table has it for every leaderboard and as the Right List already did.
 
 ### 3. Waiting on the owner (see PARKED.md)
 

@@ -79,15 +79,22 @@ export const LAYOUTS: Record<string, Layout> = {
     decor: [
       { kind: "string_lights", x: 0, y: 0, w: 20, color: "#fac775" },
       { kind: "railing", x: 0, y: 0, w: 20, color: "#2c2c2a" },
-      { kind: "bell", x: 9, y: 2, w: 2, d: 2, color: "#d4a017" },
+      // The leaderboards along the parapet: the Right List in the middle, the
+      // Season Stack beside it (as the plan has them), the crews' on the left.
+      { kind: "screen", x: 0, y: 0, w: 6, label: "CREWS", color: "#ef9f27", feed: "crews" },
+      { kind: "screen", x: 7, y: 0, w: 6, label: "THE RIGHT LIST", color: "#d4a017", feed: "right_list" },
+      { kind: "screen", x: 14, y: 0, w: 6, label: "SEASON STACK", color: "#1d9e75", feed: "stack" },
+      // The bell stands out front, far enough forward never to hide a screen.
+      { kind: "bell", x: 9, y: 4, w: 2, d: 2, color: "#d4a017" },
       ...benchRow(7, [5, 7, 12, 14], "front", N, "#8a5a2b"),
       ...benchRow(10, [4, 7, 12, 15], "back", N, "#8a5a2b"),
       { kind: "plant", x: 0, y: 3 },
       { kind: "plant", x: 19, y: 3 },
       { kind: "plant", x: 0, y: 12 },
       { kind: "plant", x: 19, y: 12 },
-      { kind: "lamp", x: 3, y: 2 },
-      { kind: "lamp", x: 16, y: 2 },
+      // Lamps at the sides, out of the screens' way.
+      { kind: "lamp", x: 0, y: 8 },
+      { kind: "lamp", x: 19, y: 8 },
     ],
   },
   city_hall: {

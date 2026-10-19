@@ -196,7 +196,9 @@ export async function openCityMarkets(db: Db, opts: { now?: Date } = {}) {
 // --- The Season Stack ----------------------------------------------------------------
 
 // GM profit on City markets and Fade Duels this season. Real-money profit is
-// never ranked anywhere.
+// never ranked anywhere. Only Proof of Neighbour residents are ranked, as on
+// the Right List: anyone can win a capped stake before it, and an alt feeding
+// a main is exactly that.
 export async function seasonStack(db: Db, opts: { now?: Date; season?: number; limit?: number } = {}) {
   const now = opts.now ?? new Date();
   const season = opts.season ?? seasonOf(cityDay(now));
@@ -222,7 +224,9 @@ export async function seasonStack(db: Db, opts: { now?: Date; season?: number; l
       SELECT CASE WHEN d.retreated_by = d.challenger_id THEN d.opponent_id ELSE d.challenger_id END, 10
       FROM duels d WHERE d.status = 'retreated' AND d.ended_at >= ${from}::timestamptz AND d.ended_at < ${to}::timestamptz
     )
-    SELECT f.user_id, SUM(f.profit)::int AS profit FROM flows f GROUP BY f.user_id
+    SELECT f.user_id, SUM(f.profit)::int AS profit
+    FROM flows f JOIN users u ON u.id = f.user_id AND u.proof_of_neighbour_at IS NOT NULL
+    GROUP BY f.user_id
     ORDER BY profit DESC, f.user_id LIMIT ${Math.min(Math.max(opts.limit ?? 100, 1), 500)}`);
   const ids = [...rows].map((r) => r.user_id);
   const handles = new Map(ids.length ? (await db.select({ id: residents.userId, handle: residents.handle }).from(residents).where(inArray(residents.userId, ids))).map((h) => [h.id, h.handle]) : []);

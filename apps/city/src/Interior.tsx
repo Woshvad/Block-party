@@ -16,8 +16,10 @@ const WOOD = "#8a5a2b";
 const METAL = "#5f6670";
 const LEAF = "#3b8a3e";
 
-// One piece of decor, in world units (the room centred on the origin).
-function piece(d: Decor, W: number, H: number): Part[] {
+// One piece of decor, in world units (the room centred on the origin). `low`
+// is an open-air room (the Roof): its parapet is lower than a screen, so
+// screens stand on posts there.
+function piece(d: Decor, W: number, H: number, low = false): Part[] {
   const w = d.w ?? 1;
   const dd = d.d ?? 1;
   const x = d.x + w / 2 - W / 2;
@@ -39,12 +41,17 @@ function piece(d: Decor, W: number, H: number): Part[] {
       return [cyl(x, 0.37, z, 0.06, 0.12, 0.74, METAL, 6), box(x, 0.76, z, 0.85, 0.05, 0.9, c), cyl(x + 0.2, 0.8, z + 0.18, 0.12, 0.12, 0.025, "#eee4d3", 10), cyl(x + 0.2, 0.88, z + 0.18, 0.07, 0.06, 0.14, "#f8f3e8", 10), cyl(x + 0.2, 0.952, z + 0.18, 0.052, 0.052, 0.005, "#4b2f21", 10)];
     case "round_table":
       return [cyl(x, 0.37, z, 0.06, 0.15, 0.74, METAL, 6), cyl(x, 0.76, z, 0.45, 0.45, 0.05, c, 14)];
-    case "screen":
-      return [box(x, 1.55, back + 0.06, w - 0.1, 1.9, 0.1, "#14161f")];
+    case "screen": {
+      const frame = box(x, 1.55, back + 0.06, w - 0.1, 1.9, 0.1, "#14161f");
+      if (!low) return [frame];
+      const post = (px: number) => box(px, 0.3, back + 0.06, 0.12, 0.6, 0.12, "#2c2c2a");
+      return [frame, post(x - w / 2 + 0.35), post(x + w / 2 - 0.35)];
+    }
     case "sign":
     case "mural":
     case "string_lights":
-      return d.kind === "string_lights" ? Array.from({ length: Math.max(2, Math.floor(w * 1.2)) }, (_, i) => ball(-W / 2 + 0.5 + i * (W - 1) / Math.max(1, Math.floor(w * 1.2) - 1), 2.35 - Math.sin((i / Math.floor(w * 1.2)) * Math.PI * 6) * 0.06, back + 0.1, 0.07, c)) : [];
+      // The Roof's lights hang above its screens.
+      return d.kind === "string_lights" ? Array.from({ length: Math.max(2, Math.floor(w * 1.2)) }, (_, i) => ball(-W / 2 + 0.5 + i * (W - 1) / Math.max(1, Math.floor(w * 1.2) - 1), 2.85 - Math.sin((i / Math.floor(w * 1.2)) * Math.PI * 6) * 0.06, back + 0.1, 0.07, c)) : [];
     case "plant":
       return [cyl(x, 0.22, z, 0.22, 0.17, 0.44, "#c46a3a", 10), ball(x, 0.75, z, 0.38, LEAF, 1.15), ball(x + 0.12, 1.02, z - 0.05, 0.22, darker(LEAF, 1.15))];
     case "podium":
@@ -126,7 +133,8 @@ function useLabel(text: string, color: string, kind: Decor["kind"]) {
 
 // A live board: title, rows (green up, red down, grey plain) and a credit line,
 // repainted when the data changes. A dim board (stale data) fades its title
-// bar and rows, and its foot (which says why) shows in amber.
+// bar and rows, and its foot (which says why) shows in amber. A row with a
+// rule gets a line across the board above it.
 function useBoard(board: Board, color: string, w: number) {
   const key = JSON.stringify(board);
   const tex = useMemo(() => {
@@ -151,6 +159,10 @@ function useBoard(board: Board, color: string, w: number) {
       if (i % 2) {
         g.fillStyle = "rgba(255,255,255,0.04)";
         g.fillRect(0, y - rowH / 2, c.width, rowH);
+      }
+      if (r.rule) {
+        g.fillStyle = "#f2c94c";
+        g.fillRect(14, y - rowH / 2 - 1, c.width - 28, 3);
       }
       g.fillStyle = "#e6edf5";
       g.textAlign = "left";
@@ -248,12 +260,12 @@ export default function Interior({ layout, w, h, low = false, onFloor, feeds = {
       box(-w / 2 + 0.005, 0.45, 0, 0.02, 0.9, h, look.wall2),
       box(0, 0.12, h / 2 + 0.08, w + 0.32, 0.24, 0.16, look.wall2),
       box(w / 2 + 0.08, 0.12, 0, 0.16, 0.24, h, look.wall2),
-      ...decor.flatMap((d) => piece(d, w, h)),
+      ...decor.flatMap((d) => piece(d, w, h, low)),
     ];
     const merged = mergeGeometries(parts, false)!;
     parts.forEach((p) => p.dispose());
     return merged;
-  }, [decor, look, w, h, wallH]);
+  }, [decor, look, w, h, wallH, low]);
   const mat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.03 }), []);
   const ink = useMemo(() => outlineMaterial(0.005), []);
   const floor = useMemo(() => checker(look.floor, look.floor2, w, h), [look.floor, look.floor2, w, h]);
