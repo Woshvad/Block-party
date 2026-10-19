@@ -9,11 +9,12 @@ beforeAll(ready);
 afterAll(close);
 
 const MIN = 60_000;
-// Days of their own, from ten o'clock: a quarter hour for the warm-up's
-// windows to start on, and a minute past it for the cron, clear of the
-// sweeps and the daily pings.
-let base = Date.UTC(2063, 0, 1 + Math.floor(Math.random() * 3000), 10, 0);
-const fresh = () => (base += 6 * 24 * 60 * MIN);
+// Each test has a feed (and so windows) of its own. Its clock starts on a
+// quarter hour some hours back, never ahead: sessions are checked against
+// it, and a clock days ahead would find every one expired. The cron runs a
+// minute past, clear of the sweeps and the daily pings.
+let base = Math.floor((Date.now() - 6 * 60 * MIN) / (15 * MIN)) * 15 * MIN;
+const fresh = () => (base -= 12 * 60 * MIN);
 
 // A feed the test drives: this window and the next, and the results it's given.
 function feed() {
