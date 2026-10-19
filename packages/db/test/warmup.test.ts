@@ -32,6 +32,8 @@ const DAY = 86_400_000;
 let base = Date.UTC(2044, 0, 1 + Math.floor(Math.random() * 2000), 10, 0);
 const fresh = () => (base += 6 * DAY);
 const at = (ms: number) => new Date(ms);
+// For raw SQL: postgres.js binds a timestamp here as text.
+const iso = (ms: number) => new Date(ms).toISOString();
 
 async function code(p: Promise<unknown>) {
   try {
@@ -54,7 +56,7 @@ async function refused(q: Promise<unknown>) {
 // A moved-in resident (or a guest) who arrived at `arrivedAt`.
 async function newcomer(arrivedAt: number, opts: { guest?: boolean } = {}) {
   const id = opts.guest ? (await createGuest(db, { ageAck: true })).userId : await makeResident(db);
-  await client`UPDATE users SET created_at = ${at(arrivedAt)} WHERE id = ${id}`;
+  await client`UPDATE users SET created_at = ${iso(arrivedAt)}::timestamptz WHERE id = ${id}`;
   return id;
 }
 
@@ -98,7 +100,7 @@ function scripted() {
 
 const opts = (s: { source: string }, now: number) => ({ now: at(now), source: s.source });
 const windowRow = async (s: { source: string }, start: number) =>
-  (await client`SELECT id, status, outcome, trading FROM warmup_windows WHERE source = ${s.source} AND starts_at = ${at(start)}`)[0];
+  (await client`SELECT id, status, outcome, trading FROM warmup_windows WHERE source = ${s.source} AND starts_at = ${iso(start)}::timestamptz`)[0];
 const callOf = async (id: string) => (await client`SELECT * FROM warmup_calls WHERE id = ${id}`)[0]!;
 
 describe("the warm-up feed", () => {
@@ -109,7 +111,7 @@ describe("the warm-up feed", () => {
     expect(await pollWarmup(db, s.feed, { now: at(t + 5 * MIN) })).toMatchObject({ ok: true, skipped: false, windows: 2, resolved: 0, voided: 0, bad: 0, settled: 0 });
     expect(await pollWarmup(db, s.feed, { now: at(t + 6 * MIN) })).toMatchObject({ ok: true, windows: 2 });
     const rows = await client`SELECT starts_at, ends_at, status, trading FROM warmup_windows WHERE source = ${s.source} ORDER BY starts_at`;
-    expect(rows.map((r) => [r.starts_at.getTime(), r.ends_at.getTime(), r.status, r.trading])).toEqual([
+    expect(rows.map((r) => [Date.parse(r.starts_at), Date.parse(r.ends_at), r.status, r.trading])).toEqual([
       [t, t + 15 * MIN, "open", true],
       [t + 15 * MIN, t + 30 * MIN, "open", true],
     ]);
@@ -316,13 +318,13 @@ describe("3 per resident, first 3 days only", () => {
     const u = await newcomer(t - 30 * MIN);
     const c = await callAt(s, u, t);
     const w = (await windowRow(s, t))!.id;
-    const insert = (day: number, createdAt: number, window = w) => client`INSERT INTO warmup_calls (user_id, window_id, side, account_day, created_at) VALUES (${u}, ${window}, 'up', ${day}, ${at(createdAt)})`;
+    const insert = (day: number, createdAt: number, window = w) => client`INSERT INTO warmup_calls (user_id, window_id, side, account_day, created_at) VALUES (${u}, ${window}, 'up', ${day}, ${iso(createdAt)}::timestamptz)`;
     // A fourth, on day 3, in the first minute of a real window.
     await pollWarmup(db, s.feed, { now: at(t + 3 * DAY) });
     expect(await refused(insert(3, t + 3 * DAY + MIN, (await windowRow(s, t + 3 * DAY))!.id))).toBe("23514");
     expect(await refused(insert(1, t + 3 * MIN))).toBe("23000"); // not the day it was taken on
     expect(await refused(insert(1, t + DAY + 3 * MIN))).toBe("23000"); // outside the window's first 2 minutes
-    expect(await refused(client`INSERT INTO warmup_calls (user_id, window_id, side, account_day, created_at, stamp, settled_at) VALUES (${u}, ${w}, 'up', 0, ${at(t + MIN)}, 'called_it', ${at(t + MIN)})`)).toBe("23000");
+    expect(await refused(client`INSERT INTO warmup_calls (user_id, window_id, side, account_day, created_at, stamp, settled_at) VALUES (${u}, ${w}, 'up', 0, ${iso(t + MIN)}::timestamptz, 'called_it', ${iso(t + MIN)}::timestamptz)`)).toBe("23000");
     expect(await refused(client`UPDATE warmup_calls SET side = 'down' WHERE id = ${c.id}`)).toBe("23000");
     expect(await refused(client`UPDATE warmup_calls SET stamp = 'called_it', settled_at = now() WHERE id = ${c.id}`)).toBe("23000"); // the window hasn't resolved
     expect(await refused(client`DELETE FROM warmup_calls WHERE id = ${c.id}`)).toBe("23000");
@@ -363,7 +365,7 @@ describe("settling and voids", () => {
     const [ca, cb, cc] = await Promise.all(calls.map((x) => callOf(x.id)));
     expect([ca!.stamp, cb!.stamp, cc!.stamp]).toEqual(["called_it", "called_it", "rekt"]);
     for (const x of [ca!, cb!, cc!]) {
-      const took = x.settled_at.getTime() - x.created_at.getTime();
+      const took = Date.parse(x.settled_at) - Date.parse(x.created_at);
       expect(took).toBeGreaterThanOrEqual(5 * MIN);
       expect(took).toBeLessThanOrEqual(20 * MIN);
     }
@@ -429,7 +431,7 @@ describe("settling and voids", () => {
     await pollWarmup(db, s.feed, { now: at(t) });
     const c = await makeWarmup(db, u, { side: "up" }, opts(s, t + MIN));
     // Resolved without the poll's own settling, so two settlers can race for it.
-    await client`UPDATE warmup_windows SET status = 'resolved', outcome = 'down', resolved_at = ${at(t + 16 * MIN)} WHERE source = ${s.source} AND starts_at = ${at(t)}`;
+    await client`UPDATE warmup_windows SET status = 'resolved', outcome = 'down', resolved_at = ${iso(t + 16 * MIN)}::timestamptz WHERE source = ${s.source} AND starts_at = ${iso(t)}::timestamptz`;
     const results = await raceAt(client, "warmup_calls", 2, [() => settleWarmups(db, { now: at(t + 16 * MIN) }), () => settleWarmups(db, { now: at(t + 16 * MIN) })]);
     expect(results.every((r) => r.ok)).toBe(true);
     expect(results.map((r) => (r.ok ? r.v.settled : -1)).sort()).toEqual([0, 1]);

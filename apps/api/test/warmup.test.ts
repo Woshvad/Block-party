@@ -38,7 +38,7 @@ function world(over: { features?: Record<string, boolean>; warmup?: WarmupFeed |
   const poll = () => call("POST", "/internal/warmup/poll", { via: app, headers: { "x-internal-secret": SECRET } });
   return { f, clock, app, poll };
 }
-const arrived = (userId: string, at: number) => client`UPDATE users SET created_at = ${new Date(at)} WHERE id = ${userId}`;
+const arrived = (userId: string, at: number) => client`UPDATE users SET created_at = ${new Date(at).toISOString()}::timestamptz WHERE id = ${userId}`;
 const job = (results: CronResult[], name: string) => results.find((r) => r.job === name);
 
 describe("the warm-up switched off (FEATURE_WARMUP, off by default)", () => {
