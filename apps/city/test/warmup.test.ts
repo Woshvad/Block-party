@@ -40,6 +40,11 @@ describe("the Contrarian at the Tower door", () => {
   it("shows UP and DOWN only while the window takes calls, with the countdown to its 2 minutes", () => {
     expect(warmupView(card(), t0 + 30_000)).toMatchObject({ call: { closesIn: "1m", left: 3 }, waiting: null, reel: null, next: null, fallback: null, note: null, credit: "Window from Polymarket · Not affiliated" });
     expect(warmupView(card(), t0 + 2 * MIN - 5_000)!.call).toEqual({ closesIn: "5s", left: 3 });
+    // Already had today's: the window's open, but no buttons, and no City market pushed instead.
+    const usedToday = warmupView(card({ eligible: false, reason: "used_today", left: 2, mine: [entry({ startsAt: iso(t0 - 24 * 60 * MIN), endsAt: iso(t0 - 23 * 60 * MIN - 45 * MIN), stamp: "rekt", settledAt: iso(t0 - 60 * MIN), reel: reel("down") })] }), t0 + 30_000);
+    expect(usedToday).toMatchObject({ call: null, next: null, fallback: null, note: "Your next warm-up opens tomorrow." });
+    // With a window to call, the fallback waits.
+    expect(warmupView(card({ fallback: { id: "m", question: "Q?", locksAt: iso(t0) } }), t0 + 30_000)!.fallback).toBeNull();
     // The 2 minutes run out on the phone before the card reloads: no buttons.
     const late = warmupView(card({ fallback: { id: "m", question: "20+ on the Roof at the bell?", locksAt: iso(t0 + 9 * 3600_000) } }), t0 + 2 * MIN);
     expect(late).toMatchObject({ call: null, next: "Next window opens in 13m. Calls are taken in its first 2 minutes.", fallback: { id: "m", question: "20+ on the Roof at the bell?" } });
@@ -87,6 +92,8 @@ describe("the Contrarian at the Tower door", () => {
     ]);
     expect(reelLines(entry({ stamp: "called_it", reel: reel("up", { newcomers: 1, up: 1, down: 0, calledIt: 1 }) }))![2]!.text).toBe("Just you in this window.");
     expect(reelLines(entry())).toBeNull();
+    // A reel with no stamp yet is still sealed.
+    expect(reelLines(entry({ reel: reel("up") }))).toBeNull();
     // On the card for a day after it settles, next to the next call if there is one.
     const settled = entry({ stamp: "called_it", settledAt: iso(t0 - 60 * MIN), reel: reel("up") });
     expect(warmupView(card({ mine: [settled], left: 2, day: 1 }), t0 + 30_000)).toMatchObject({ call: { left: 2 }, reel: expect.arrayContaining([{ text: "You called UP. CALLED IT.", tone: "good" }]) });
