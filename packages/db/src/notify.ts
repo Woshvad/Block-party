@@ -1,24 +1,32 @@
 import {
   ALERT_KINDS,
+  addDays,
   cityDay,
+  nextBell,
   streakView,
   type AlertKind,
   CREW_POST_KINDS,
   type CrewPostKind,
+  type DailyTopic,
   FAREWELL,
   NEVER_SAY,
   NOTIFY,
   type NotifyKind,
+  TEMPLATES,
   afterQuietHours,
+  chooseDailyTemplate,
   chooseTemplate,
+  fillable,
   inQuietHours,
   isTimeZone,
   localParts,
   render,
 } from "@bp/core";
-import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { crewBotMutes, crewBotPosts, crewMembers, identities, notificationPrefs, notifications, playSessions, streaks } from "./schema";
+import { awayShiftReady } from "./economy";
+import { myMakeGoods } from "./make-goods";
+import { crewBotMutes, crewBotPosts, crewMembers, identities, notificationPrefs, notifications, playSessions, residents, shifts, streaks } from "./schema";
 
 export class NotifyError extends Error {
   constructor(
@@ -81,19 +89,82 @@ export async function setPrefs(db: Db, userId: string, input: Record<string, unk
   return next;
 }
 
+// The opt-in kinds (every alert, and "Bell in 2h") need switching on; the
+// daily ping doesn't.
+function switchedOn(p: Prefs, kind: string): boolean {
+  if ((ALERT_KINDS as readonly string[]).includes(kind)) return p.alerts.includes(kind as AlertKind);
+  if (kind === "bell_2h") return p.bell2h;
+  return true;
+}
+
 // Queue a ping. Opt-in kinds go nowhere unless switched on; anything due in
-// quiet hours waits until they end.
-export async function notify(db: Db, userId: string, kind: NotifyKind, values: Record<string, string | number> = {}, opts: { now?: Date } = {}) {
+// quiet hours waits until they end. With a ref, it's queued once per resident,
+// kind and ref, whoever asks how often (null for the repeats). With expiresAt,
+// it's never sent after then, and not queued at all if quiet hours would hold
+// it that long.
+export async function notify(
+  db: Db,
+  userId: string,
+  kind: NotifyKind,
+  values: Record<string, string | number> = {},
+  opts: { now?: Date; ref?: string; expiresAt?: Date } = {},
+) {
   const now = opts.now ?? new Date();
   const p = await getPrefs(db, userId);
-  if (p.pushOff) return null;
-  if ((ALERT_KINDS as readonly string[]).includes(kind) && !p.alerts.includes(kind as AlertKind)) return null;
-  if (kind === "bell_2h" && !p.bell2h) return null;
+  if (p.pushOff || !switchedOn(p, kind)) return null;
+  const scheduledFor = afterQuietHours(now, p.timeZone, p.quietStart, p.quietEnd);
+  if (opts.expiresAt && scheduledFor >= opts.expiresAt) return null;
   const [row] = await db
     .insert(notifications)
-    .values({ userId, kind, values, scheduledFor: afterQuietHours(now, p.timeZone, p.quietStart, p.quietEnd), createdAt: now })
+    .values({ userId, kind, values, scheduledFor, createdAt: now, ref: opts.ref ?? null, expiresAt: opts.expiresAt ?? null })
+    .onConflictDoNothing()
     .returning();
-  return row!;
+  return row ?? null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The bell that started today's city day.
+const lastBell = (now: Date) => new Date(nextBell(now).getTime() - 86_400_000);
+
+// Whether they've been in the city (a session, or a heartbeat in one) since then.
+async function seenSince(tx: Db, userId: string, at: Date): Promise<boolean> {
+  const [s] = await tx
+    .select({ id: playSessions.id })
+    .from(playSessions)
+    .where(and(eq(playSessions.userId, userId), gte(playSessions.lastSeenAt, at)))
+    .limit(1);
+  return !!s;
+}
+
+// Whether a queued alert is still news as it's about to go out: a Mod Shift
+// nobody has collected yet, or an away shift that's still theirs to take
+// today and that they haven't been in to see since the bell. Everything else
+// stays due until it's sent.
+async function stillDue(tx: Db, n: typeof notifications.$inferSelect, now: Date): Promise<boolean> {
+  if (n.kind === "shift_done" && n.ref !== null) {
+    if (!UUID.test(n.ref)) return false;
+    const [s] = await tx.select({ collectedTx: shifts.collectedTx }).from(shifts).where(and(eq(shifts.id, n.ref), eq(shifts.userId, n.userId)));
+    return !!s && !s.collectedTx;
+  }
+  if (n.kind === "away_shift_ready" && n.ref !== null) {
+    return n.ref === cityDay(now) && !(await seenSince(tx, n.userId, lastBell(now))) && (await awayShiftReady(tx, n.userId, { now }));
+  }
+  return true;
+}
+
+// What the daily ping can mention, worked out as it goes out so it never talks
+// about something already done: a make-good they can still collect, and
+// today's clue while they haven't searched for it.
+async function dailyTopics(tx: Db, userId: string, now: Date): Promise<DailyTopic[]> {
+  const topics: DailyTopic[] = [];
+  if ((await myMakeGoods(tx, userId, { now })).length) topics.push("make_good");
+  const [r] = await tx
+    .select({ searched: sql<boolean>`EXISTS (SELECT 1 FROM hunt_searches h WHERE h.user_id = ${userId} AND h.day = ${cityDay(now)})` })
+    .from(residents)
+    .where(eq(residents.userId, userId));
+  if (r && !r.searched) topics.push("clue");
+  return topics;
 }
 
 // Sends what's due, re-checking every limit at send time under a per-resident
@@ -105,16 +176,43 @@ export async function notify(db: Db, userId: string, kind: NotifyKind, values: R
 // send a push twice, and no lock is held while Telegram answers. A push whose
 // answer never comes back (the Worker died mid-send) keeps reason "sending":
 // it counts as sent for the limits and is never sent again.
-export async function runNotificationBatch(db: Db, sender: NotificationSender, opts: { now?: Date; batch?: number } = {}) {
-  const now = opts.now ?? new Date();
+//
+// What goes first is whatever stops being sendable soonest: "Bell in 2h"
+// within its half hour, ahead of pushes that have hours left before they go
+// stale. A big batch can have several pushes in flight (`concurrency`), paced
+// to at most `perSecond` sends (Telegram takes about 30 a second from a bot),
+// and stops taking new ones after `budgetMs`, so one minute's run is done
+// before the next starts.
+export async function runNotificationBatch(
+  db: Db,
+  sender: NotificationSender,
+  opts: { now?: Date; batch?: number; concurrency?: number; perSecond?: number; budgetMs?: number } = {},
+) {
+  const started = Date.now();
+  const now = clockOf(opts);
+  const batch = sizeOf(opts?.batch, 100);
+  const concurrency = boundedOf(opts?.concurrency, 1, 50) ?? 1;
+  const perSecond = boundedOf(opts?.perSecond, 1, 1000);
+  const budgetMs = boundedOf(opts?.budgetMs, 1, 10 * 60_000);
   const due = await db
     .select({ id: notifications.id })
     .from(notifications)
     .where(and(eq(notifications.status, "queued"), lte(notifications.scheduledFor, now)))
-    .orderBy(asc(notifications.scheduledFor))
-    .limit(opts.batch ?? 100);
+    .orderBy(sql`least(${notifications.expiresAt}, ${notifications.scheduledFor} + make_interval(hours => ${NOTIFY.staleAfterHours}))`, asc(notifications.id))
+    .limit(batch);
   const tally = { sent: 0, suppressed: 0, failed: 0, retry: 0, deferred: 0 };
-  for (const { id } of due) {
+
+  // The next moment a send may start, when paced.
+  let slot = started;
+  const paced = async () => {
+    if (!perSecond) return;
+    const at = Math.max(slot, Date.now());
+    slot = at + 1000 / perSecond;
+    const wait = at - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  };
+
+  const one = async (id: string) => {
     const claim = await db.transaction(async (tx) => {
       const [n] = await tx.select().from(notifications).where(and(eq(notifications.id, id), eq(notifications.status, "queued"))).for("no key update", { skipLocked: true });
       if (!n) return null;
@@ -125,14 +223,19 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
       };
       const p = await getPrefs(tx, n.userId);
       if (p.pushOff) return suppress("push_off");
+      if (!switchedOn(p, n.kind)) return suppress("switched_off"); // since it was queued
       // Stale counts from when it was due, so a long quiet window doesn't kill it.
       if (now.getTime() - n.scheduledFor.getTime() > NOTIFY.staleAfterHours * 3_600_000) return suppress("stale");
+      if (n.expiresAt && now >= n.expiresAt) return suppress("expired");
       const local = localParts(now, p.timeZone);
       // Prefs may have changed since it was queued: quiet hours are re-checked now.
       if (inQuietHours(local.hour, p.quietStart, p.quietEnd)) {
         await tx.update(notifications).set({ scheduledFor: afterQuietHours(now, p.timeZone, p.quietStart, p.quietEnd) }).where(eq(notifications.id, n.id));
         return "deferred" as const;
       }
+      // Never about something they've already done or seen (the shift
+      // collected, or the city opened, before the push could go out).
+      if (!(await stillDue(tx, n, now))) return suppress("done");
       const localDay = local.day;
 
       // "back": they were playing at some point in the few hours after it was
@@ -175,8 +278,11 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
 
       const used = new Map<string, number>();
       for (const s of sentRecent) if (s.template && !used.has(s.template)) used.set(s.template, s.sentAt!.getTime());
-      const template = chooseTemplate(n.kind as NotifyKind, used, now.getTime(), parseInt(n.id.slice(0, 8), 16), n.values);
-      if (!template) return suppress("missing_values"); // never "@ faded your call"
+      const seed = parseInt(n.id.slice(0, 8), 16);
+      const template =
+        n.kind === "daily" ? chooseDailyTemplate(await dailyTopics(tx, n.userId, now), used, now.getTime(), seed, n.values) : chooseTemplate(n.kind as NotifyKind, used, now.getTime(), seed, n.values);
+      // Never "@ faded your call", and never the same words twice in 5 days.
+      if (!template) return suppress(TEMPLATES[n.kind as NotifyKind].some((t) => fillable(t, n.values)) ? "repeat" : "missing_values");
       let text = render(template, n.values);
       if (farewell) text = `${text} ${FAREWELL}`;
       // Values (handles) can't smuggle in money talk, not even as buy_now or usdc-drop.
@@ -185,12 +291,13 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
       await tx.update(notifications).set({ status: "sent", reason: "sending", template, text, localDay, sentAt: now }).where(eq(notifications.id, n.id));
       return { userId: n.userId, text, attempts: n.attempts };
     });
-    if (!claim) continue;
+    if (!claim) return;
     if (typeof claim === "string") {
       tally[claim]++;
-      continue;
+      return;
     }
 
+    await paced();
     const result = await sender.send(claim.userId, claim.text, id);
     // Not sent after all: the claim is undone, so it no longer counts.
     const unsent = { sentAt: null, template: null, text: null, localDay: null };
@@ -214,8 +321,33 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
         .where(eq(notifications.id, id));
       tally[attempts >= 3 ? "failed" : "retry"]++;
     }
-  }
+  };
+
+  // Each lane takes the next push from the batch. A failure stops them all
+  // from taking more, and is thrown once those in flight have finished.
+  let next = 0;
+  let failed: { error: unknown } | null = null;
+  const lane = async () => {
+    // loop-bound: each pass takes a row from the batch, never one another lane took; it ends with the batch, the budget or a failure.
+    while (next < due.length && !failed && !(budgetMs && Date.now() - started >= budgetMs)) {
+      const { id } = due[next++]!;
+      try {
+        await one(id);
+      } catch (error) {
+        failed ??= { error };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, due.length) }, lane));
+  if (failed) throw (failed as { error: unknown }).error;
   return tally;
+}
+
+// An optional whole number from lo to hi; junk is refused.
+function boundedOf(n: unknown, lo: number, hi: number): number | undefined {
+  if (n === undefined) return undefined;
+  if (!Number.isInteger(n) || (n as number) < lo || (n as number) > hi) throw new NotifyError("INVALID_INPUT", `a whole number from ${lo} to ${hi}`);
+  return n as number;
 }
 
 export async function markOpened(db: Db, userId: string, id: unknown, opts: { now?: Date } = {}) {
@@ -288,6 +420,137 @@ export async function queueDailyPings(db: Db, opts: { now?: Date; pageSize?: num
       const v = streakView(s, day);
       if (v.streak === 0 || v.playedToday) continue; // a broken streak already reads 0
       if (await maybeQueueDaily(db, s.userId, { streakUnprotected: true, riding: false, streak: v.streak }, { now })) queued++;
+    }
+    if (page.length < pageSize) break;
+    after = page[page.length - 1]!.userId;
+  }
+  return { checked, queued };
+}
+
+// --- Alerts the cron raises ----------------------------------------------------------
+
+// A scheduler's clock and page size: what it was given, or the defaults; junk
+// is refused.
+function clockOf(opts: unknown): Date {
+  const now = (opts as { now?: unknown } | null | undefined)?.now ?? new Date();
+  if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new NotifyError("INVALID_INPUT", "bad time");
+  return now;
+}
+function sizeOf(n: unknown, fallback: number): number {
+  if (n === undefined) return fallback;
+  if (!Number.isInteger(n) || (n as number) < 1 || (n as number) > 5000) throw new NotifyError("INVALID_INPUT", "a page is 1 to 5000 rows");
+  return n as number;
+}
+
+// "Your Mod Shift is done", every minute: each Mod Shift whose time ran out in
+// the last hour and that nobody has collected, for residents who switched the
+// alert on. The shift's id is the push's ref, so overlapping crons queue it
+// once, and one collected before the push goes out is dropped at send time.
+export async function queueShiftPings(db: Db, opts: { now?: Date; batch?: number } = {}) {
+  const now = clockOf(opts);
+  const batch = sizeOf(opts?.batch, 500);
+  const due = await db
+    .select({ id: shifts.id, userId: shifts.userId })
+    .from(shifts)
+    .innerJoin(notificationPrefs, eq(notificationPrefs.userId, shifts.userId))
+    .where(
+      and(
+        eq(shifts.kind, "active"),
+        isNull(shifts.collectedTx),
+        lte(shifts.endsAt, now),
+        gt(shifts.endsAt, new Date(now.getTime() - NOTIFY.shiftPingWithinMinutes * 60_000)),
+        // notify() decides who gets it; this only skips who won't.
+        eq(notificationPrefs.pushOff, false),
+        sql`'shift_done' = ANY(${notificationPrefs.alerts})`,
+        sql`NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = shifts.user_id AND n.kind = 'shift_done' AND n.ref = shifts.id::text)`,
+      ),
+    )
+    .orderBy(asc(shifts.endsAt))
+    .limit(batch);
+  let queued = 0;
+  for (const s of due) if (await notify(db, s.userId, "shift_done", {}, { now, ref: s.id })) queued++;
+  return { checked: due.length, queued };
+}
+
+// "Your away shift is ready": a proven neighbour's away shift comes up at the
+// bell while their last gm is under a day old, and stays theirs to take until
+// that day runs out. Every 15 minutes, for residents who switched the alert on
+// and haven't been in the city since the bell (they'd have seen it there). Not
+// on the bell's own tick: whoever is watching it hasn't been seen since yet
+// (activity is written at most once a minute), so it starts a quarter of an
+// hour later, and the visit is checked again as it goes out. The city day is
+// the ref, so it's queued once a day however the crons overlap. It isn't
+// queued if quiet hours would hold it past the gm's 24 hours, and it's dropped
+// at send time once taken, seen or out of reach. Paged by id.
+export async function queueAwayShiftPings(db: Db, opts: { now?: Date; pageSize?: number } = {}) {
+  const now = clockOf(opts);
+  const pageSize = sizeOf(opts?.pageSize, 500);
+  const day = cityDay(now);
+  const bell = lastBell(now);
+  if (now.getTime() < bell.getTime() + NOTIFY.awayPingAfterMinutes * 60_000) return { checked: 0, queued: 0 };
+  let after = "00000000-0000-0000-0000-000000000000";
+  let queued = 0;
+  let checked = 0;
+  // loop-bound: each page moves strictly past the last id seen; an empty or short page ends it.
+  for (;;) {
+    const page = await db.execute<{ user_id: string; said_at: string | Date }>(sql`
+      SELECT p.user_id, g.said_at
+      FROM notification_prefs p
+      JOIN users u ON u.id = p.user_id
+      JOIN daily_gm g ON g.user_id = p.user_id AND g.city_day = ${addDays(day, -1)}
+      WHERE p.user_id > ${after}::uuid
+        AND NOT p.push_off AND 'away_shift_ready' = ANY(p.alerts)
+        AND u.proof_of_neighbour_at IS NOT NULL
+        AND g.said_at > ${new Date(now.getTime() - 86_400_000).toISOString()}::timestamptz
+        AND NOT EXISTS (SELECT 1 FROM play_sessions s WHERE s.user_id = p.user_id AND s.last_seen_at >= ${bell.toISOString()}::timestamptz)
+        AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = p.user_id AND n.kind = 'away_shift_ready' AND n.ref = ${day})
+      ORDER BY p.user_id
+      LIMIT ${pageSize}`);
+    for (const r of page) {
+      checked++;
+      if (!(await awayShiftReady(db, r.user_id, { now }))) continue;
+      const expiresAt = new Date(new Date(r.said_at).getTime() + 86_400_000);
+      if (await notify(db, r.user_id, "away_shift_ready", {}, { now, ref: day, expiresAt })) queued++;
+    }
+    if (page.length < pageSize) break;
+    after = page[page.length - 1]!.user_id;
+  }
+  return { checked, queued };
+}
+
+// "Bell in 2h", for the night owls who switched it on: queued from two hours
+// before the bell (the 15-minute cron), once per resident per bell (the city
+// day is the ref), and dropped if it can't go out within half an hour, when
+// it would say the wrong thing. Quiet hours that would hold it past then mean
+// it isn't queued at all. Any other time, this does nothing. Paged by id.
+export async function queueBellPings(db: Db, opts: { now?: Date; pageSize?: number } = {}) {
+  const now = clockOf(opts);
+  const pageSize = sizeOf(opts?.pageSize, 500);
+  const from = nextBell(now).getTime() - NOTIFY.bellPingMinutes * 60_000;
+  const expiresAt = new Date(from + NOTIFY.bellPingLateMinutes * 60_000);
+  if (now.getTime() < from || now >= expiresAt) return { checked: 0, queued: 0 };
+  const day = cityDay(now);
+  let after = "00000000-0000-0000-0000-000000000000";
+  let queued = 0;
+  let checked = 0;
+  // loop-bound: each page moves strictly past the last id seen; an empty or short page ends it.
+  for (;;) {
+    const page = await db
+      .select({ userId: notificationPrefs.userId })
+      .from(notificationPrefs)
+      .where(
+        and(
+          sql`${notificationPrefs.userId} > ${after}::uuid`,
+          eq(notificationPrefs.bell2h, true),
+          eq(notificationPrefs.pushOff, false),
+          sql`NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id = notification_prefs.user_id AND n.kind = 'bell_2h' AND n.ref = ${day})`,
+        ),
+      )
+      .orderBy(asc(notificationPrefs.userId))
+      .limit(pageSize);
+    for (const p of page) {
+      checked++;
+      if (await notify(db, p.userId, "bell_2h", {}, { now, ref: day, expiresAt })) queued++;
     }
     if (page.length < pageSize) break;
     after = page[page.length - 1]!.userId;

@@ -545,6 +545,8 @@ export const shifts = pgTable(
   (t) => [
     uniqueIndex("shifts_daily_cap").on(t.userId, t.cityDay, t.slot),
     uniqueIndex("shifts_one_away_a_day").on(t.userId, t.cityDay).where(sql`${t.kind} = 'away'`),
+    // Mod Shifts waiting to be collected, by when they end: the "shift done" ping's scan.
+    index("shifts_uncollected").on(t.endsAt).where(sql`${t.kind} = 'active' AND ${t.collectedTx} IS NULL`),
     check("shifts_slot", sql`${t.slot} BETWEEN 1 AND 2`),
     check("shifts_score", sql`${t.score} IS NULL OR ${t.score} BETWEEN 0 AND 10`),
     check("shifts_pay", sql`${t.pay} IS NULL OR ${t.pay} BETWEEN 5 AND 12`),
@@ -1157,10 +1159,17 @@ export const notifications = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     openedAt: timestamp("opened_at", { withTimezone: true }),
+    // What it's about, for the kinds that say (a shift's id, a city day): one
+    // push per resident, kind and ref, however many crons race to queue it.
+    ref: text("ref"),
+    // When it stops being true ("Bell in 2h" once the bell is nearer): it's
+    // never sent after this.
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
   },
   (t) => [
     index("notifications_due").on(t.scheduledFor).where(sql`${t.status} = 'queued'`),
     index("notifications_user").on(t.userId, t.createdAt),
+    uniqueIndex("notifications_once").on(t.userId, t.kind, t.ref).where(sql`${t.ref} IS NOT NULL`),
     check("notifications_sent", sql`(${t.status} = 'sent') = (${t.sentAt} IS NOT NULL)`),
   ],
 );

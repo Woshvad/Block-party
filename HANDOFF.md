@@ -30,7 +30,8 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Nothing has run inside Telegram or on a phone.** The BackButton, safe areas, start links and the low tier need a device check, and the frame-rate test is still to do. The `?perf` meter now counts every pass, shadows included, so its numbers are higher than the old 146 draw calls (main pass only).
 - **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
 - **A staff rename for flagged @handles.** The handle trigger blocks it; staff restrict the resident instead.
-- **Promised but inert:** four alert toggles have no producer, and Contrarian Day and NOTHING Day have copy but no rules.
+- **Promised but inert:** of the four alert toggles that had no producer, shift done, away shift ready and Bell in 2h now fire (19 October); warm-up settled waits for the warm-up. The crew bot's three posts (syndicate call, Bell in 15, the crew card) still can't go out: no crew is linked to a Telegram group, because the API takes no bot updates (no webhook, no `/crew`). Contrarian Day and NOTHING Day have copy but no rules.
+- **Pushes at launch scale.** The minute cron sends up to 600 pushes (kept under a Worker's 1,000 subrequests a run), so "Bell in 2h" reaches about 18,000 residents before it expires; a bigger city needs Telegram's paid broadcasts or a queue consumer. An event alert that fires more than once a day (a fade, a Snap, a nap) runs out of fresh lines within the week, and the extras are held back rather than repeat wording.
 - **An asset pipeline** (compressed GLBs, unused models removed, immutable cache headers once the city has hosting).
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
 - **Profile the API suite** (done, 19 October). It took 48 minutes on the Windows dev machine, 47 of them the fuzzer: about 180,000 requests one after another, each mostly waiting on Postgres (a round trip to Postgres in Docker is about 1.2 ms there). Test files now run in parallel, each worker on its own copy of the database, and the fuzzer runs as three shards, 8 routes at a time, with every test and assertion kept. The API suite takes under 5 minutes, the db suite 1.5 (was 6), and CI allows 30 minutes for the whole job.
@@ -67,7 +68,7 @@ Still open:
 - **Sharing an image to a Telegram story** needs hosted image storage (R2 or similar).
 - **No swings during a match.** Polymarket sports markets freeze at kickoff and the feed stops pricing them, so during a match the only moment is the result. Fixing that means changing how markets are ingested.
 - **Moments are best effort.** If the rooms refuse one, it's recorded as sent and never retried.
-- **No pushes yet** for a new make-good or the day's clue.
+- **Make-goods and the clue in pushes** (done 19 October, as wording): the daily ping mentions a make-good the resident can still collect, else today's clue. Its reasons don't change, so a resident with a broken streak and nothing riding gets no ping and hears about neither.
 - **Make-good limits are written twice.** The database checks hardcode 200 GM and 80 characters, so changing `MAKE_GOOD` in core needs a migration too.
 - **DMs with blocked people.** These threads still show in the list, as before, and can stay pinned. Hiding them would change existing behaviour.
 
