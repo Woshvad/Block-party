@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CAST, type FeedMarket, type OddsProvider, addDays } from "@bp/core";
+import { CAST, type FeedMarket, type OddsProvider, addDays, cityWeekday, seasonOf } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ROOF_ROWS, TowerError, blockUser, createCityMarket, createCrew, createDb, ensureSystemAccounts, makeCall, muteUser, pollOdds, resolveCityMarket, roofBoards, seasonStack, settleCityMarkets, stakeCity } from "../src";
 import { makeResident } from "./helpers";
@@ -15,6 +15,9 @@ const fresh = () => (base += 30 * D);
 const dayOf = (t: number) => new Date(t).toISOString().slice(0, 10);
 const BOT = CAST.nothing_9000.id;
 
+// The bell that closed this day has run its steps: the Tower's, and the
+// League's that Monday's bell runs (a record the bell would skip any other day).
+const rang = (day: string, steps = ["tower", "league"]) => client`INSERT INTO bell_steps ${client(steps.map((step) => ({ bell_day: day, step })))} ON CONFLICT DO NOTHING`;
 const pon = (ids: string[]) => client`UPDATE users SET proof_of_neighbour_at = now() WHERE id IN ${client(ids)}`;
 const topUp = (u: string, t: number) => client`INSERT INTO tickets (user_id, balance, as_of) VALUES (${u}, 9, ${dayOf(t)}) ON CONFLICT (user_id) DO UPDATE SET balance = 9, as_of = ${dayOf(t)}`;
 
@@ -63,6 +66,7 @@ describe("the Roof's boards", () => {
     await muteUser(db, reader!, d!); // muted for good
     await muteUser(db, reader!, e!, { hours: 1, now: new Date(t) }); // a mute that has run out
     const after = new Date(t + D); // the bell after they settled
+    await rang(dayOf(t));
     const handle = async (u: string) => (await client`SELECT handle FROM residents WHERE user_id = ${u}`)[0]!.handle as string;
 
     // Sealed until the bell, like everything on the Right List.
@@ -113,6 +117,7 @@ describe("the Roof's boards", () => {
     // across every test here).
     await settledSeason(t, [...top.map((id, i) => ({ id, side: "yes" as const, chance: 60 + i })), { id: BOT, side: "no", chance: 45 }]);
     for (const u of top.slice(-3)) await blockUser(db, reader, u); // the three best
+    await rang(dayOf(t));
     const mine = await roofBoards(db, reader, { now: new Date(t + D) });
     // Hiding doesn't cost the board a row: a full board from #4 down.
     expect(mine.rightList.rows.map((r) => r.rank)).toEqual(Array.from({ length: ROOF_ROWS }, (_, i) => i + 4));
@@ -133,6 +138,7 @@ describe("the Roof's boards", () => {
     }
     await resolveCityMarket(db, staff!, m.id, "yes");
     await settleCityMarkets(db, dayOf(t), new Date(t + D));
+    await rang(dayOf(t));
     await muteUser(db, reader!, b!);
     const handle = async (u: string) => (await client`SELECT handle FROM residents WHERE user_id = ${u}`)[0]!.handle as string;
 
@@ -163,6 +169,7 @@ describe("the Roof's boards", () => {
     await score(bellDay, crewIds[3]!, 3000);
     await score(addDays(bellDay, -1), crewIds[4]!, 99_000); // an older bell's
     const reader = await makeResident(db);
+    await rang(addDays(bellDay, -1));
     const before = await roofBoards(db, reader, { now: new Date(t + H) }); // the bell for that day hasn't rung
     expect(before.crews.bellScores.map((s) => s.name)).toEqual([names[4]]);
 
@@ -176,6 +183,7 @@ describe("the Roof's boards", () => {
     await row(week, crewIds[1]!, "small", false);
     await row(addDays(bellDay, 30), crewIds[4]!, "small", true); // a week that hasn't happened
 
+    await rang(bellDay);
     const after = await roofBoards(db, reader, { now: new Date(t + D) });
     expect(after.crews.bellDay).toBe(bellDay);
     expect(after.crews.bellScores).toEqual([
@@ -185,6 +193,34 @@ describe("the Roof's boards", () => {
     ]);
     expect(after.crews.league).toEqual({ week, champions: [{ sizeGroup: "small", name: names[3] }, { sizeGroup: "large", name: names[2] }] });
     expect(JSON.stringify(after.crews)).not.toMatch(/crewId|[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+
+  it("until the bell's steps have run, the boards stand as at the bell before, and bellAt says which bell that is", async () => {
+    // A Sunday, so its bell (Monday's) runs the League as well as the Tower
+    // step, and not a season's last day, so the read stays in its season.
+    let t = fresh();
+    t += ((7 - cityWeekday(dayOf(t))) % 7) * D;
+    if (seasonOf(dayOf(t)) !== seasonOf(dayOf(t + D))) t += 7 * D;
+    base = t; // the next test's season counts from here
+    const [sunday, saturday] = [dayOf(t), dayOf(t - D)];
+    const [reader, a, lead1, lead2] = await Promise.all(Array.from({ length: 4 }, () => makeResident(db)));
+    await pon([a!]);
+    await settledSeason(t, [{ id: a!, side: "yes", chance: 70 }]);
+    const [old, tonight] = [await createCrew(db, lead1!, { name: `Roof Crew ${randomUUID().slice(0, 4)}o` }), await createCrew(db, lead2!, { name: `Roof Crew ${randomUUID().slice(0, 4)}n` })];
+    await client`INSERT INTO crew_bell_scores (bell_day, crew_id, chips, long_shots, chain_days, score_milli) VALUES (${saturday}, ${old.id}, 1, 0, 0, 1500), (${sunday}, ${tonight.id}, 1, 0, 0, 2500)`;
+    await rang(saturday);
+    const handle = (await client`SELECT handle FROM residents WHERE user_id = ${a!}`)[0]!.handle as string;
+    // Monday 09:00: the bell rang at 00:00, but its runner hasn't got there.
+    const read = async () => {
+      const r = await roofBoards(db, reader!, { now: new Date(t + D) });
+      return { bellAt: r.bellAt.toISOString(), bellDay: r.crews.bellDay, scores: r.crews.bellScores.map((s) => s.score), onList: r.rightList.rows.some((x) => x.handle === handle) };
+    };
+    const before = { bellAt: `${sunday}T00:00:00.000Z`, bellDay: saturday, scores: [1.5], onList: false };
+    expect(await read()).toEqual(before);
+    await rang(sunday, ["tower"]);
+    expect(await read()).toEqual(before); // Monday's bell isn't done until the League is
+    await rang(sunday, ["league"]);
+    expect(await read()).toEqual({ bellAt: `${dayOf(t + D)}T00:00:00.000Z`, bellDay: sunday, scores: [2.5], onList: true });
   });
 
   it("asks who's looking, and refuses anything that isn't an id", async () => {

@@ -51,7 +51,8 @@ describe("GET /v1/roof", () => {
     const r = await call("GET", "/v1/roof", { token: me.token });
     expect(r.status).toBe(200);
     expect(Object.keys(r.body).sort()).toEqual(["bellAt", "crews", "rightList", "season", "seasonStack"]);
-    expect(r.body.bellAt).toBe(`${dayOf(Date.now())}T00:00:00.000Z`);
+    // Today's bell once its steps have run, the one before until then.
+    expect([dayOf(Date.now()), dayOf(Date.now() - D)].map((d) => `${d}T00:00:00.000Z`)).toContain(r.body.bellAt);
     expect(Object.keys(r.body.rightList).sort()).toEqual(["bot", "rows"]);
     expect(Object.keys(r.body.crews).sort()).toEqual(["bellDay", "bellScores", "league"]);
     expect(Array.isArray(r.body.seasonStack.rows)).toBe(true);
@@ -68,8 +69,17 @@ describe("GET /v1/roof", () => {
     expect((await call("POST", `/v1/blocks/${blocked.userId}`, { token: reader.token })).status).toBeLessThan(300);
     expect((await call("POST", `/v1/mutes/${muted.userId}`, { token: reader.token, body: {} })).status).toBeLessThan(300);
 
+    // The bell has rung by the clock, but its runner hasn't done the Tower
+    // step: the boards are the bell before's, and bellAt says so.
+    const early = await call("GET", "/v1/roof", { token: other.token, via: afterBell });
+    expect(early.body.bellAt).toBe(`${dayOf(t)}T00:00:00.000Z`);
+    expect((early.body.rightList.rows as Array<{ handle: string }>).map((r) => r.handle)).not.toContain(sharp.handle);
+    // Now it has (and the League's too, should that bell be Monday's).
+    await client`INSERT INTO bell_steps ${client(["tower", "league"].map((step) => ({ bell_day: dayOf(t), step })))} ON CONFLICT DO NOTHING`;
+
     const theirs = await call("GET", "/v1/roof", { token: other.token, via: afterBell });
     expect(theirs.status).toBe(200);
+    expect(theirs.body.bellAt).toBe(`${dayOf(t + D)}T00:00:00.000Z`);
     const rows = theirs.body.rightList.rows as Array<{ rank: number; handle: string; npc: string | null }>;
     const rankOf = (h: string) => rows.find((r) => r.handle === h)!.rank;
     // +6.4, +5.1 and +3.6 per call; the db tests pin the exact order around the bot.
