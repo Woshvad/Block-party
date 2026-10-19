@@ -215,6 +215,27 @@ describe("Contrarian Day: calls against the city majority get a gold border", ()
     expect((g as { contrarian: boolean[] }).contrarian[await s.slot(1)]).toBe(true);
   });
 
+  it("the grid opens at midnight, but says nothing about borders until the bell has counted them", async () => {
+    const s = await slateDay("contrarian_day");
+    const me = await makeResident(db);
+    const crowd = await people(10);
+    await pon([me, ...crowd]);
+    for (const u of crowd) await call(s, u, 1, "yes", 60);
+    await call(s, me, 1, "no", 40); // against the city
+    await s.poll(9 + 1 / 60);
+    await s.settle();
+
+    // The Tower step has run, the modifier step hasn't: not "no border", just not counted yet.
+    await s.ring(["tower"]);
+    expect(await opened(s, me)).toMatchObject({ modifier: "contrarian_day", contrarian: null });
+    expect((await reel(db, me, { now: s.afterBell, bellDay: s.day }))!.grid).toMatchObject({ contrarian: null });
+
+    await s.ring(["modifier"]);
+    const want = [false, false, false, false, false, false];
+    want[await s.slot(1)] = true;
+    expect((await opened(s, me)).contrarian).toEqual(want);
+  });
+
   it("a card still taking calls at the bell has no final count, so no row", async () => {
     const s = await slateDay("contrarian_day");
     const crowd = await people(10);

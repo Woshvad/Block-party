@@ -142,7 +142,8 @@ export async function myGrid(db: Db, userId: string, day: unknown, opts: { now?:
     aura: myTotal === undefined ? null : myTotal / 100,
     percentile,
     // Contrarian Day: which of your squares went against the city majority
-    // (the gold border), as the bell recorded it. Null on other days.
+    // (the gold border), as the bell recorded it. Null on other days, and
+    // until the bell has counted (never a false "no border").
     contrarian: s.modifier === "contrarian_day" ? await contrarianSquares(db, day, cards, mine) : null,
     // NOTHING Day: NOTHING-9000's grid under yours, and whether yours beat it
     // at the bell (null until the bell has settled it). Null on other days.
@@ -153,7 +154,18 @@ export async function myGrid(db: Db, userId: string, day: unknown, opts: { now?:
 type GridCard = { marketId: string; tier: string; outcome: boolean | null; status: string };
 type GridCall = { userId: string; marketId: string; side: "yes" | "no"; aura: number | null };
 
+// The grid opens by the clock at midnight, but the bell's modifier step runs
+// after the chains and the Tower step: until it has, the day isn't settled.
+async function modifierSettled(db: Db, day: string) {
+  const [step] = await db
+    .select({ day: bellSteps.bellDay })
+    .from(bellSteps)
+    .where(and(eq(bellSteps.bellDay, day), eq(bellSteps.step, "modifier")));
+  return !!step;
+}
+
 async function contrarianSquares(db: Db, day: string, cards: GridCard[], mine: GridCall[]) {
+  if (!(await modifierSettled(db, day))) return null;
   const recorded = await db.select({ marketId: contrarianCards.marketId, majority: contrarianCards.majority }).from(contrarianCards).where(eq(contrarianCards.cityDay, day));
   return cards.map((c) => {
     const m = mine.find((x) => x.marketId === c.marketId);
@@ -168,10 +180,7 @@ async function nothingDay(db: Db, userId: string, day: string, cards: GridCard[]
     const b = bot.find((x) => x.marketId === c.marketId);
     return square(b ? { side: b.side, auraCenti: b.aura } : null, c.tier as SlateTier, c.outcome, c.status === "void");
   });
-  const [settled] = await db
-    .select({ day: bellSteps.bellDay })
-    .from(bellSteps)
-    .where(and(eq(bellSteps.bellDay, day), eq(bellSteps.step, "modifier")));
+  const settled = await modifierSettled(db, day);
   const [win] = await db
     .select({ tile: nothingDayWins.tile })
     .from(nothingDayWins)

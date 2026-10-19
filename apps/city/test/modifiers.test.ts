@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenGrid } from "../src/api";
-import { CONTRARIAN_LINE, MODIFIER_NAMES, auraText, gridCells, lastBellDay, modifierResult } from "../src/modifiers";
+import { CONTRARIAN_LINE, MODIFIER_NAMES, auraText, gridCells, lastBellDay, modifierResult, stillSettling } from "../src/modifiers";
 
 const grid = (over: Partial<OpenGrid> = {}): OpenGrid => ({
   cityDay: "2026-10-18",
@@ -38,6 +38,18 @@ describe("what the modifier came to", () => {
     expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: [false, true, false, false, false, true] }))).toEqual({ title: "Contrarian Day", text: "2 calls went against the city majority and got a gold border." });
     expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: [true, false, false, false, false, false] }))!.text).toBe("1 call went against the city majority and got a gold border.");
     expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: [false, false, false, false, false, false] }))!.text).toBe("None of your calls went against the city majority.");
+  });
+
+  it("Contrarian Day before the bell has counted says so, never \"none of your calls\"", () => {
+    expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: null }))).toEqual({ title: "Contrarian Day", text: "The bell is still settling Contrarian Day." });
+  });
+
+  it("still settling: either modifier before the bell's step, never a Blind Slate or a settled day", () => {
+    expect(stillSettling(grid({ modifier: "contrarian_day", contrarian: null }))).toBe(true);
+    expect(stillSettling(grid({ modifier: "contrarian_day", contrarian: [false, false, false, false, false, false] }))).toBe(false);
+    expect(stillSettling(grid({ modifier: "nothing_day", nothing: nothing({ beat: null, tile: false }) }))).toBe(true);
+    expect(stillSettling(grid({ modifier: "nothing_day", nothing: nothing({ beat: false, tile: false }) }))).toBe(false);
+    expect(stillSettling(grid())).toBe(false);
   });
 
   it("NOTHING Day: beat it (tile or not), held, still settling, or no bot grid", () => {

@@ -380,7 +380,8 @@ export type OpenGrid = {
   share: string;
   aura: number | null;
   percentile: number | null;
-  // Contrarian Day: which squares went against the city majority (the gold border).
+  // Contrarian Day: which squares went against the city majority (the gold
+  // border); null on other days, and until the bell has counted.
   contrarian: boolean[] | null;
   // NOTHING Day: NOTHING-9000's grid under yours; beat is null until the bell settles it.
   nothing: { squares: GridSquare[]; aura: number | null; beat: boolean | null; tile: boolean } | null;

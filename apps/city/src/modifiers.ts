@@ -30,13 +30,19 @@ export function gridCells(squares: readonly GridSquare[], contrarian: readonly b
 
 export const auraText = (aura: number) => `${aura > 0 ? "+" : aura < 0 ? "−" : ""}${Math.abs(aura).toFixed(1)}`;
 
+// The grid opens at midnight, but the bell settles its modifier a few minutes
+// later: until then neither Contrarian Day nor NOTHING Day has a result.
+export const stillSettling = (g: OpenGrid) => (g.modifier === "contrarian_day" && g.contrarian === null) || (g.modifier === "nothing_day" && g.nothing?.beat === null);
+
 // What the day's modifier came to for you, or null when there's nothing to
 // say: a Blind Slate, or a day you made no call.
 export function modifierResult(g: OpenGrid): { title: string; text: string } | null {
   if (g.aura === null) return null;
-  if (g.modifier === "contrarian_day" && g.contrarian) {
+  if (g.modifier === "contrarian_day") {
+    const title = "Contrarian Day";
+    if (!g.contrarian) return { title, text: "The bell is still settling Contrarian Day." };
     const n = g.contrarian.filter(Boolean).length;
-    return { title: "Contrarian Day", text: n ? `${n === 1 ? "1 call" : `${n} calls`} went against the city majority and got a gold border.` : "None of your calls went against the city majority." };
+    return { title, text: n ? `${n === 1 ? "1 call" : `${n} calls`} went against the city majority and got a gold border.` : "None of your calls went against the city majority." };
   }
   if (g.modifier === "nothing_day" && g.nothing) {
     const title = "NOTHING Day";
