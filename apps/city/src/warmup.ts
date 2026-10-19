@@ -89,13 +89,22 @@ export function warmupView(w: Warmup | null | undefined, now: number): WarmupVie
   };
 }
 
+// A window the phone thinks has opened, though the answer didn't have it yet.
+const AGAIN_MS = 5_000;
+
 // When the card should ask again: when the next window opens, and while a
 // warm-up waits, a minute after its window ends and every minute after
-// that. Null when nothing will change by itself.
+// that. Null when nothing will change by itself. An answer the API gave a
+// moment before the quarter hour can land after it by the phone's clock (a
+// slow reply, or a phone running ahead), so a window already due is asked
+// about again a few seconds on, never dropped.
 export function nextRefresh(w: Warmup | null | undefined, now: number): number | null {
   if (!w) return null;
   const at: number[] = [];
-  if (w.eligible) at.push(Date.parse(w.window && Date.parse(w.window.entryClosesAt) > now ? w.window.entryClosesAt : w.nextWindowAt));
+  if (w.eligible) {
+    const opensOrCloses = Date.parse(w.window && Date.parse(w.window.entryClosesAt) > now ? w.window.entryClosesAt : w.nextWindowAt);
+    at.push(opensOrCloses > now ? opensOrCloses : Number.isFinite(opensOrCloses) ? now + AGAIN_MS : NaN);
+  }
   const waiting = w.mine[0] && !w.mine[0].stamp ? w.mine[0] : null;
   if (waiting) at.push(Math.max(Date.parse(waiting.endsAt) + MIN, now + MIN));
   const due = at.filter((t) => Number.isFinite(t) && t > now);

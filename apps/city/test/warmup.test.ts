@@ -111,6 +111,11 @@ describe("the Contrarian at the Tower door", () => {
     expect(nextRefresh(card(), t0 + 30_000)).toBe(t0 + 2 * MIN);
     // Between windows: when the next opens.
     expect(nextRefresh(card({ window: null }), t0 + 7 * MIN)).toBe(t0 + 15 * MIN);
+    // That reload answered from just before the quarter hour, and landed after
+    // it by the phone's clock: ask again a few seconds on, never give up.
+    expect(nextRefresh(card({ window: null }), t0 + 15 * MIN + 100)).toBe(t0 + 15 * MIN + 5_100);
+    expect(nextRefresh(card({ window: null }), t0 + 15 * MIN)).toBe(t0 + 15 * MIN + 5_000);
+    expect(nextRefresh(card({ window: null, nextWindowAt: "junk" }), t0)).toBeNull();
     // A warm-up waiting: a minute after its window ends, then a minute at a time.
     const waiting = card({ eligible: false, reason: "used_today", mine: [entry()] });
     expect(nextRefresh(waiting, t0 + 3 * MIN)).toBe(t0 + 16 * MIN);
