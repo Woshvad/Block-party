@@ -138,6 +138,7 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     guest: async () => signedIn(await request<AuthResult>("POST", "/v1/auth/guest", { ageAck: true })),
     telegram: async (initData: string, ageAck: boolean) => signedIn(await request<AuthResult>("POST", "/v1/auth/telegram", { initData, ageAck })),
     me: () => request<Me>("GET", "/v1/me"),
+    seeHandleNotice: (id: string) => request<{ ok: true }>("POST", `/v1/resident/handle-notice/${encodeURIComponent(id)}/seen`),
     pickForMe: () => request<ResidentDraft>("GET", "/v1/resident/pick-for-me"),
     handleAvailable: (handle: string) => request<{ available: boolean }>("GET", `/v1/handles/${encodeURIComponent(handle)}/available`),
     moveIn: (draft: ResidentDraft) => request<Resident>("POST", "/v1/resident", draft),
@@ -329,6 +330,9 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     altFlags: () => request<Record<string, unknown>[]>("GET", "/v1/staff/alt-flags"),
     staffModeration: () => request<Array<{ id: string; kind: string; ref: string; authorId: string | null; text: string; status: string; categories: string[]; createdAt: string }>>("GET", "/v1/staff/moderation"),
     reviewModeration: (id: string, verdict: "restore" | "remove") => request<Record<string, unknown>>("POST", `/v1/staff/moderation/${encodeURIComponent(id)}/review`, { verdict }),
+    // Rename a resident's @handle: a neutral one unless newHandle is given; from is the handle staff saw.
+    renameHandle: (userId: string, b: { newHandle?: string; reason: string; from?: string; reportId?: string }) =>
+      request<HandleRename>("POST", `/v1/staff/residents/${encodeURIComponent(userId)}/handle`, b),
     staffMakeGoods: () => request<StaffMakeGood[]>("GET", "/v1/staff/make-goods"),
     createMakeGood: (b: { reason: string; amount: number }) => request<StaffMakeGood>("POST", "/v1/staff/make-goods", b),
     countrySwitch: (code: string, on: boolean) => request<Record<string, unknown>>("PUT", `/v1/staff/countries/${encodeURIComponent(code)}`, { on }),
@@ -345,7 +349,10 @@ export type ResidentDraft = { handle: string; name: string; look: Look; traits: 
 export type Resident = ResidentDraft & { userId: string; backstory: string; starterItem: string; hideCandleColor?: boolean };
 
 // telegramId: the Telegram account this session belongs to, if any.
-export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null; telegramId?: string | null };
+// handleNotice: staff renamed their @handle and they haven't tapped OK yet.
+export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null; telegramId?: string | null; handleNotice?: HandleNotice | null };
+export type HandleNotice = { id: string; from: string; to: string; reason: string; at: string };
+export type HandleRename = { id: string; userId: string; from: string; to: string; reason: string; at: string; heldUntil: string; reportId: string | null };
 
 export const apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 

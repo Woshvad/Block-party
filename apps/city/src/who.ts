@@ -43,4 +43,12 @@ export function useWho(api: Pick<Api, "who">, ids: readonly string[]) {
   }, [api, key]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
+// A rename staff just made: the cached handle follows it at once.
+export function renamedTo(id: string, handle: string) {
+  const w = cache.get(id);
+  if (!w) return;
+  cache.set(id, { ...w, handle });
+  listeners.forEach((l) => l());
+}
+
 export const _resetWho = () => cache.clear();

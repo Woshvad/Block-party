@@ -1,14 +1,14 @@
 "use client";
-import { MAKE_GOOD } from "@bp/core";
+import { HANDLE_RENAME, MAKE_GOOD } from "@bp/core";
 import { useState } from "react";
 import type { Api } from "../api";
 import { makeGoodConfirm, makeGoodProblem } from "../makeGoods";
 import { label } from "../palette";
-import { RESTRICT_FOR, itemPlace, itemState, resolveProblem, reviewChoices } from "../staffForms";
+import { RESTRICT_FOR, itemPlace, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
-import { handleOf, useWho } from "../who";
+import { handleOf, renamedTo, useWho, who } from "../who";
 
 // The staff console. The role is granted in the database only, and the API
 // checks it on every call; for anyone else each panel just says "staff only".
@@ -129,6 +129,7 @@ function Reports({ api, act }: { api: Api; act: Act }) {
                 Restrict{kind[id] ? `: ${forLabel}` : ""}
               </button>
             </div>
+            {reportRenames(r) && <Rename api={api} act={act} userId={target} reportId={id} onDone={() => void reports.reload()} />}
           </section>
         );
       })}
@@ -140,7 +141,7 @@ function Reports({ api, act }: { api: Api; act: Act }) {
 // up), oldest first, waiting for a person to decide.
 function Flagged({ api, act }: { api: Api; act: Act }) {
   const items = useLoad(() => api.staffModeration(), [api]);
-  useWho(api, (items.data ?? []).map((i) => i.authorId ?? "").filter(Boolean));
+  useWho(api, (items.data ?? []).flatMap((i) => [i.authorId ?? "", renameTarget(i) ?? ""]).filter(Boolean));
   if (!items.data) return <Loading error={items.error} retry={items.reload} />;
   return (
     <>
@@ -160,8 +161,60 @@ function Flagged({ api, act }: { api: Api; act: Act }) {
               </button>
             ))}
           </div>
+          {renameTarget(item) && <Rename api={api} act={act} userId={renameTarget(item)!} onDone={() => void items.reload()} />}
         </section>
       ))}
+    </>
+  );
+}
+
+// Rename a resident's @handle: empty for a neutral one, a reason they read,
+// then a confirm. The handle shown here goes along as `from`, so if another
+// staff member renamed them a moment ago nothing happens twice. A rename
+// clears the old handle's flags, and closes the report it was made from.
+function Rename({ api, act, userId, reportId, onDone }: { api: Api; act: Act; userId: string; reportId?: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ newHandle: "", reason: "" });
+  const w = who(userId);
+  const from = w && !w.npc ? w.handle : null;
+  const problem = renameProblem(f);
+  if (!open)
+    return (
+      <div className="btnrow">
+        <button className="btn light" onClick={() => setOpen(true)}>
+          Rename {from ? `@${from}` : "handle"}…
+        </button>
+      </div>
+    );
+  const rename = () =>
+    ifConfirmed(renameConfirm({ from, newHandle: f.newHandle }), () =>
+      act.run(() => api.renameHandle(userId, renameBody(f, from, reportId)), (r) => `Renamed to @${r.to}`).then((r) => {
+        if (!r) return;
+        renamedTo(userId, r.to);
+        setF({ newHandle: "", reason: "" });
+        setOpen(false);
+        onDone();
+      }),
+    );
+  return (
+    <>
+      <label className="field">
+        New handle (leave empty for a neutral one)
+        <input value={f.newHandle} maxLength={16} autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setF({ ...f, newHandle: e.target.value })} placeholder="neighbour_12345" />
+      </label>
+      <label className="field">
+        Reason the resident reads
+        <input value={f.reason} maxLength={HANDLE_RENAME.reasonMaxChars} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="Your handle named a real person." />
+      </label>
+      {(f.reason.trim() || f.newHandle.trim()) && problem && <p className="muted">{problem}</p>}
+      <div className="btnrow">
+        <button className="btn danger" disabled={!!problem || act.pending} onClick={rename}>
+          Rename
+        </button>
+        <button className="btn light" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
     </>
   );
 }
