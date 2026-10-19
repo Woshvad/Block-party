@@ -149,3 +149,44 @@ describe("the Contrarian at the Tower door", () => {
     expect(nextRefresh(null, t0)).toBeNull();
   });
 });
+
+describe("the warm-up card's colours", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  // A colour as the stylesheet sets it for `selector`: the last rule that
+  // names it in its selector list and sets the property.
+  const colour = (selector: string, prop: "color" | "background") => {
+    let hex: string | undefined;
+    for (const [, list, body] of css.matchAll(/(?:^|\n)([^{}\n@]+)\{([^}]*)\}/g)) {
+      if (!list!.split(",").some((s) => s.trim() === selector)) continue;
+      hex = new RegExp(String.raw`(?:^|;)\s*${prop}\s*:\s*#([0-9a-f]{6}|[0-9a-f]{3})\b`, "i").exec(body!)?.[1] ?? hex;
+    }
+    expect(hex, `${selector} sets ${prop}`).toBeDefined();
+    return hex!.length === 3 ? hex!.replace(/./g, "$&$&") : hex!;
+  };
+  // WCAG 2's contrast ratio.
+  const lum = (hex: string) => {
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const contrast = (a: string, b: string) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+
+  it("UP and DOWN read at 4.5:1 (17px bold isn't large text), and each stands 3:1 off the card", () => {
+    expect(contrast("ffffff", "3f9b6d")).toBeCloseTo(3.43, 2); // the check catches the old UP
+    const card = colour(".warmup", "background");
+    for (const side of [".warmup-side.up", ".warmup-side.down"]) {
+      expect(contrast(colour(side, "color"), colour(side, "background")), side).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(colour(side, "background"), card), side).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("every line of text on the card reads at 4.5:1", () => {
+    const card = colour(".warmup", "background");
+    for (const s of [".warmup", ".warmup .eyebrow", ".warmup .npc-label", ".warmup-small", ".warmup-next", ".warmup-receipt", ".warmup-receipt b", ".warmup .credit"]) {
+      expect(contrast(colour(s, "color"), card), s).toBeGreaterThanOrEqual(4.5);
+    }
+    const reel = colour(".warmup-reel", "background");
+    for (const s of [".warmup-reel li.good", ".warmup-reel li.bad"]) expect(contrast(colour(s, "color"), reel), s).toBeGreaterThanOrEqual(4.5);
+    const feedback = colour(".warmup .action-feedback", "background");
+    for (const s of [".warmup .action-feedback", ".warmup .action-feedback.bad"]) expect(contrast(colour(s, "color"), feedback), s).toBeGreaterThanOrEqual(4.5);
+  });
+});
