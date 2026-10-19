@@ -232,6 +232,7 @@ import {
   staffMakeGoods,
   myMakeGoods,
   collectMakeGood,
+  roofBoards,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -1183,6 +1184,10 @@ export function createApp(cfg: AppConfig) {
   app.put("/v1/staff/countries/:code", auth, async (c) => c.json(await setCountrySwitch(db, c.get("userId"), c.req.param("code"), (await body(c)).on, opts())));
   app.post("/v1/bell-stamp", auth, async (c) => c.json(await claimBellStamp(db, c.get("userId"), opts())));
   app.get("/v1/tower/right-list", auth, async (c) => c.json(await rightList(db, { ...opts(), userId: c.get("userId"), limit: 100 })));
+  // The Roof's screens: the Right List beside the Season Stack, and the crews'
+  // night. Handles and scores only, less anyone this reader has blocked, is
+  // blocked by or has muted.
+  app.get("/v1/roof", auth, async (c) => c.json(await roofBoards(db, c.get("userId"), opts())));
   // Public: anyone with the link sees the receipt, nobody can fake one.
   app.get("/v1/receipts/:token", async (c) => {
     await limit(c, `receipt-ip:${await ipKey(c)}`, limits.readsPerUserPerMinute, 60);
