@@ -113,6 +113,12 @@ export function renameProblem(f: { newHandle: string; reason: string }): string 
   return null;
 }
 
+// Deciding a resident's appeal against a rename: the note is theirs to read
+// (and an overturn's reason), so it has a rename reason's limits, as the API.
+export function renameDecisionProblem(note: string): string | null {
+  return renameReason(note) === null ? `The note they read needs ${HANDLE_RENAME.reasonMinChars} to ${HANDLE_RENAME.reasonMaxChars} characters.` : null;
+}
+
 // The confirm before renaming. Telegram's own dialog takes up to 256 characters.
 export function renameConfirm(f: { from: string; newHandle: string }): string {
   const h = f.newHandle.trim().replace(/^@/, "");

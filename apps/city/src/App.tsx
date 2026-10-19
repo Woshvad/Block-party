@@ -309,7 +309,16 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
       <AppNavigation active={page ? "more" : tab} onSelect={go} />
       <LinkedSheets api={api} me={me} onSelf={() => setPage("me")} />
-      {renamed && <HandleNotice notice={renamed} onOk={() => renameSeen(renamed.id)} />}
+      {renamed && (
+        <HandleNotice
+          notice={renamed}
+          onOk={() => renameSeen(renamed.id)}
+          onAppeal={() => {
+            renameSeen(renamed.id);
+            setPage("me");
+          }}
+        />
+      )}
     </>
   );
 }

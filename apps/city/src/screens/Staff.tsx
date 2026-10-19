@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Api } from "../api";
 import { makeGoodConfirm, makeGoodProblem } from "../makeGoods";
 import { label } from "../palette";
-import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
+import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameDecisionProblem, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
@@ -31,7 +31,12 @@ export default function Staff({ api, onBack }: { api: Api; onBack: () => void })
       </div>
       {tab === "reports" && <Reports api={api} act={act} />}
       {tab === "flagged" && <Flagged api={api} act={act} />}
-      {tab === "appeals" && <Appeals api={api} act={act} />}
+      {tab === "appeals" && (
+        <>
+          <Appeals api={api} act={act} />
+          <RenameAppeals api={api} act={act} />
+        </>
+      )}
       {tab === "markets" && <Markets api={api} act={act} />}
       {tab === "make_goods" && <MakeGoods api={api} act={act} />}
       {tab === "alts" && <Alts api={api} />}
@@ -260,6 +265,48 @@ function Appeals({ api, act }: { api: Api; act: Act }) {
               </button>
               <button className="btn light" disabled={!note[id]?.trim()} onClick={() => act.run(() => api.decideAppeal(id, false, note[id]!), "Upheld").then(() => appeals.reload())}>
                 Uphold
+              </button>
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+// Residents' appeals against renames, each with the rename it's about. Give
+// it back renames them to their old handle (a new notice tells them); keep
+// leaves it. Either way they read the note. An appeal against your own rename
+// goes to someone else.
+function RenameAppeals({ api, act }: { api: Api; act: Act }) {
+  const appeals = useLoad(() => api.staffRenameAppeals(), [api]);
+  const [note, setNote] = useState<Record<string, string>>({});
+  useWho(api, (appeals.data ?? []).map((a) => a.renamedBy));
+  if (!appeals.data) return <Loading error={appeals.error} retry={appeals.reload} />;
+  return (
+    <>
+      {appeals.data.length === 0 && <p className="muted">No open rename appeals.</p>}
+      {appeals.data.map((a) => {
+        const problem = renameDecisionProblem(note[a.id] ?? "");
+        const decide = (overturn: boolean) =>
+          act.run(() => api.decideRenameAppeal(a.id, overturn, note[a.id]!.trim()), overturn ? `Gave @${a.from} back` : `Kept @${a.to}`).then((r) => r && appeals.reload());
+        return (
+          <section className="card" key={a.id}>
+            <p>
+              <b>Rename</b> @{a.from} → @{a.to} by {handleOf(a.renamedBy)}: {a.reason}
+            </p>
+            <p className="notice">"{a.text}"</p>
+            <label className="field">
+              Note (they read it)
+              <input value={note[a.id] ?? ""} maxLength={HANDLE_RENAME.reasonMaxChars} onChange={(e) => setNote({ ...note, [a.id]: e.target.value })} />
+            </label>
+            {note[a.id]?.trim() && problem && <p className="muted">{problem}</p>}
+            <div className="btnrow">
+              <button className="btn" disabled={!!problem || act.pending} onClick={() => ifConfirmed(`Give @${a.from} back to them? They read your note.`, () => void decide(true))}>
+                Give @{a.from} back
+              </button>
+              <button className="btn light" disabled={!!problem || act.pending} onClick={() => void decide(false)}>
+                Keep @{a.to}
               </button>
             </div>
           </section>

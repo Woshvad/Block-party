@@ -1,6 +1,6 @@
 import { HANDLE_RENAME, MODERATION } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
+import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameDecisionProblem, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
 
 describe("closing a report from the staff console", () => {
   const note = "spam links ok"; // 13 characters: enough for a note, too short for a reason
@@ -102,6 +102,13 @@ describe("renaming a flagged @handle", () => {
     expect(renameProblem({ newHandle: "ab", reason })).toBe("New handle: 3 to 15 letters, digits or _.");
     expect(renameProblem({ newHandle: "admin", reason })).toBe("New handle: reserved.");
     expect(renameProblem({ newHandle: "x__y", reason })).toBe("New handle: no double underscores.");
+  });
+
+  it("deciding an appeal needs a note the resident can read, as long as a rename's reason", () => {
+    expect(renameDecisionProblem("We looked again: it's a real first name.")).toBeNull();
+    for (const bad of ["", "too short", "x".repeat(HANDLE_RENAME.reasonMaxChars + 1)]) {
+      expect(renameDecisionProblem(bad)).toBe(`The note they read needs ${HANDLE_RENAME.reasonMinChars} to ${HANDLE_RENAME.reasonMaxChars} characters.`);
+    }
   });
 
   it("the confirm says what happens, inside Telegram's 256 characters", () => {

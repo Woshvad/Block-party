@@ -2,8 +2,9 @@
 import type { HandleNotice as Notice } from "./api";
 import { handleNoticeText } from "./renameNotice";
 
-// Staff renamed your @handle: a short note from the city, once, until Got it.
-export default function HandleNotice({ notice, onOk }: { notice: Notice; onOk: () => void }) {
+// Staff renamed your @handle: a short note from the city, once, until Got it
+// (or Appeal, which takes you to Me, where the appeal is).
+export default function HandleNotice({ notice, onOk, onAppeal }: { notice: Notice; onOk: () => void; onAppeal: () => void }) {
   const t = handleNoticeText(notice);
   return (
     <div className="backdrop">
@@ -15,9 +16,15 @@ export default function HandleNotice({ notice, onOk }: { notice: Notice; onOk: (
         <p>{t.changed}</p>
         <p className="notice">{t.why}</p>
         {t.links && <p className="muted">{t.links}</p>}
+        {t.appeal && <p className="muted">{t.appeal}</p>}
         <button className="cta" onClick={onOk} autoFocus>
           Got it
         </button>
+        {t.appeal && (
+          <button className="btn light" onClick={onAppeal}>
+            Appeal
+          </button>
+        )}
       </div>
     </div>
   );
