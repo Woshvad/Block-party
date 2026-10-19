@@ -31,6 +31,7 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
 - **A staff rename for flagged @handles.** The handle trigger blocks it; staff restrict the resident instead.
 - **Promised but inert:** three alert toggles have no producer (the warm-up's has one now, behind its switch), and Contrarian Day and NOTHING Day have copy but no rules.
+- **Push wording can repeat within 5 days** for the other alerts: each has 2 wordings, so a third faded, snap or shift push in 5 days reuses one. The warm-up's has 4 for its 3 pushes.
 - **An asset pipeline** (compressed GLBs, unused models removed, immutable cache headers once the city has hosting).
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
 - **Profile the API suite.** It took 15 to 50 minutes on a dev machine; CI allows 90.
@@ -105,7 +106,8 @@ Still open:
 
 - [x] **The BTC 15-minute windows.** The 15-minute warm-up has its own feed of them, apart from the curated markets (README brick 44). Built and tested behind `FEATURE_WARMUP`, which stays off.
 - [ ] **Welcome back (Launch):** after 14+ days away, a Hodl Day, a comeback tag, a warm-up and a crew ping. None of it is built; the warm-up's one-a-day rule would take a comeback day once the rest exists.
-- [ ] **A free 10-minute City market** for the warm-up's fallback, as the plan has it. City markets are staff-written, take GM and settle at the bell, so for now the warm-up points at the open one that locks soonest.
+- [ ] **A free 10-minute City market** for the warm-up's fallback, as the plan has it. City markets are staff-written, take GM and a Tower ticket and settle at the bell, so for now the warm-up has no fallback: it says when the next window opens, or that the feed is quiet.
+- [ ] **The warm-up before moving in, inside Telegram.** A guest in a browser meets the Contrarian on the guest panel, but a Telegram arrival goes straight to Create-a-Resident and meets him in the Tower after. The guest panel's line also needs its browser check: the map tools move up by an estimate of its height.
 - [ ] **Copium Pharmacy** opens first as a counter in the Gwei Diner (Launch). Hackerspace runs as "Builder Night" in the Bot Café (Launch), so it has no building of its own on purpose.
 - [ ] **Launch places have no interiors yet:** Club Liquidity, Touch Grass Park, the Blockspace Canvas game and the Bot Café.
 - [ ] **The Roof** has the bell but not the leaderboards. Watch Party City markets and in-play calls aren't on its screen yet.
