@@ -8,6 +8,7 @@ import {
   NPC_IDS,
   TOWER,
   addDays,
+  againstCity,
   npcById,
   CAST,
   auraCenti,
@@ -33,7 +34,7 @@ import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
 import { ratioHeadline } from "./ratio";
 import { isOnSlate, slateModifier } from "./slate";
-import { calls, crewMembers, feedPolls, marketTicks, markets, residents, streakGrants, streaks, tickets, users } from "./schema";
+import { calls, contrarianCards, crewMembers, feedPolls, marketTicks, markets, residents, streakGrants, streaks, tickets, users } from "./schema";
 
 export class TowerError extends Error {
   constructor(
@@ -300,14 +301,17 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
 // --- The city's calls ------------------------------------------------------------------
 
 // The calls that move the City bar: Proof of Neighbour accounts only (so one
-// viral link can't brigade a market), and never the cast.
-export async function cityCalls(db: Db, marketIds: string[]) {
+// viral link can't brigade a market), and never the cast. atFreeze: the bar as
+// it stood when each market froze, so a mark stamped after that (the PoN page
+// grants it when it's opened) doesn't count.
+export async function cityCalls(db: Db, marketIds: string[], opts: { atFreeze?: boolean } = {}) {
   if (!marketIds.length) return [];
   const rows = await db
     .select({ userId: calls.userId, marketId: calls.marketId, side: calls.side, chance: calls.chance })
     .from(calls)
     .innerJoin(users, eq(users.id, calls.userId))
-    .where(and(inArray(calls.marketId, marketIds), eq(calls.status, "locked"), isNotNull(users.proofOfNeighbourAt)));
+    .innerJoin(markets, eq(markets.id, calls.marketId))
+    .where(and(inArray(calls.marketId, marketIds), eq(calls.status, "locked"), opts.atFreeze ? lte(users.proofOfNeighbourAt, markets.freezesAt) : isNotNull(users.proofOfNeighbourAt)));
   return rows.filter((r) => !NPC_IDS.includes(r.userId));
 }
 
@@ -364,6 +368,8 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
       resolvedAt: markets.resolvedAt,
       aura: calls.auraCenti,
       via: calls.via,
+      onSlate: calls.onSlate,
+      createdAt: calls.createdAt,
     })
     .from(calls)
     .innerJoin(markets, eq(markets.id, calls.marketId))
@@ -375,6 +381,14 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
   const cityRows = await cityCalls(db, [r.marketId]);
   const city = cityRows.length >= TOWER.cityBarMin ? median(cityRows.map((x) => x.chance)) : null;
   const revealed = r.status === "resolved" && r.resolvedAt !== null && now >= revealAt(r.resolvedAt);
+  // Contrarian Day: a Slate call against the city majority the bell recorded
+  // for its card (the Slate of the day it was made) gets the gold border.
+  const [card] = r.onSlate
+    ? await db
+        .select({ majority: contrarianCards.majority })
+        .from(contrarianCards)
+        .where(and(eq(contrarianCards.marketId, r.marketId), eq(contrarianCards.cityDay, cityDay(r.createdAt))))
+    : [];
   return {
     id: r.id,
     handle: r.handle ?? CAST[npc!].name,
@@ -390,6 +404,7 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
     // Sealed until the bell, even when the world settled hours earlier.
     stamp: !revealed ? (r.status === "void" ? "VOID" : "IN THE MEMPOOL") : (r.side === "yes") === r.outcome ? "CALLED IT" : "REKT",
     aura: revealed && r.via !== "tail" && r.aura !== null ? r.aura / 100 : null,
+    contrarian: !!card && againstCity(r.side, card.majority),
     // The Ratio of the Day's winning headline, printed on this market's share card.
     ratio: (await ratioHeadline(db, { marketId: r.marketId }))?.headline ?? null,
   };

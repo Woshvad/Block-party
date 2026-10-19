@@ -1,12 +1,13 @@
 import { DUEL, NPC_IDS, canDouble, duelAccountId, nextBell, retreatSplit, userAccountId } from "@bp/core";
-import { and, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { isFlaggedPair } from "./alts";
 import { burn, getBalance, openEscrowAccount, transfer } from "./ledger";
 import { maybeTilt, moodState } from "./moods";
 import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
-import { calls, duelPrefs, duels, markets, residents, users } from "./schema";
+import { calls, crewMembers, duelPrefs, duels, markets, residents, users } from "./schema";
+import { onBlindSlate } from "./slate";
 
 export class DuelError extends Error {
   constructor(
@@ -27,7 +28,8 @@ export class DuelError extends Error {
       | "TILTED"
       | "AT_THE_CAP"
       | "CANT_COVER"
-      | "ALT_FLAGGED",
+      | "ALT_FLAGGED"
+      | "BLIND_SLATE",
     message: string,
   ) {
     super(message);
@@ -84,6 +86,15 @@ async function lockDuel(tx: Db, duelId: unknown) {
   return d;
 }
 
+// Both in the same crew right now.
+async function crewmates(db: Db, a: string, b: string) {
+  const rows = await db
+    .select({ crewId: crewMembers.crewId })
+    .from(crewMembers)
+    .where(and(inArray(crewMembers.userId, [a, b]), isNull(crewMembers.leftAt)));
+  return rows.length === 2 && rows[0]!.crewId === rows[1]!.crewId;
+}
+
 const marketOf = async (db: Db, id: string) => (await db.select().from(markets).where(eq(markets.id, id)))[0]!;
 const beforeLock = (m: typeof markets.$inferSelect, now: Date) => m.status === "open" && now < m.freezesAt;
 
@@ -100,6 +111,12 @@ export async function challenge(db: Db, challengerId: string, input: { marketId?
   if (NPC_IDS.includes(opponentId)) throw new DuelError("INVALID_INPUT", "you never duel the cast for GM");
   const [m] = await db.select().from(markets).where(eq(markets.id, marketId));
   if (!m || !beforeLock(m, now) || m.settlesBy > nextBell(now)) throw new DuelError("MARKET_CLOSED", "duels are on markets that settle by the next bell, before they lock");
+  // On a Blind Slate even your crew's sides stay hidden until the bell, and
+  // whether a crewmate is across from you would give theirs away. Checked
+  // before the sides are.
+  if ((await onBlindSlate(db, marketId, now)) && (await crewmates(db, challengerId, opponentId))) {
+    throw new DuelError("BLIND_SLATE", "it's a Blind Slate: your crew's sides stay hidden until the bell");
+  }
   const sides = await db
     .select({ userId: calls.userId, side: calls.side })
     .from(calls)

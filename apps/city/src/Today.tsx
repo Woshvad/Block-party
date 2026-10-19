@@ -10,6 +10,7 @@ import { haptic } from "./telegram";
 import { useLoad } from "./useLoad";
 import TodayView from "./TodayView";
 import DailyClue from "./DailyClue";
+import LastBell from "./LastBell";
 const CallSheet = dynamic(() => import("./CallSheet"), { ssr: false });
 
 export default function Today({ api, onGm, onBunker, onBoard }: { api: Api; onGm: (balance: number) => void; onBunker?: (place: string) => void; onBoard?: () => void }) {
@@ -48,6 +49,7 @@ export default function Today({ api, onGm, onBunker, onBoard }: { api: Api; onGm
   const notice = <>
     {mgNote && <p className={`make-good-note ${mgNote.bad ? "bad" : "good"}`} role={mgNote.bad ? "alert" : "status"}>{mgNote.text}</p>}
     {showing && <MakeGoodCard m={showing} pending={collecting} onCollect={() => void collect(showing)} onSetAside={() => { setHidden(setAside.add(showing.id)); setMgNote(null); }} />}
+    <LastBell api={api} now={now} />
   </>;
   const sayGm = async () => {
     if (saying.current) return;

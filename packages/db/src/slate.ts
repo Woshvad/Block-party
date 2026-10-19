@@ -1,9 +1,10 @@
-import { type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, cityDay, gridText, modifierFor, oddsCredit, pickSlate, slateNumber, square } from "@bp/core";
+import { CAST, type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, againstCity, cityDay, gridText, modifierFor, oddsCredit, pickSlate, slateNumber, square } from "@bp/core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client";
-import { calls, markets, slateCards, slates } from "./schema";
+import { bellSteps, calls, contrarianCards, markets, nothingDayGrids, nothingDayWins, slateCards, slates } from "./schema";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const bellAfter = (day: CityDay) => new Date(`${addDays(day, 1)}T00:00:00Z`);
 
 // Publishes today's Slate once (racing publishers agree on one). Six cards as
@@ -41,6 +42,14 @@ export async function isOnSlate(db: Db, marketId: string, now = new Date()): Pro
 export async function slateModifier(db: Db, now = new Date()): Promise<Modifier | null> {
   const [s] = await db.select({ modifier: slates.modifier }).from(slates).where(eq(slates.cityDay, cityDay(now)));
   return (s?.modifier as Modifier) ?? null;
+}
+
+// Is this market a card on today's Blind Slate? Then even your crew's sides
+// stay hidden until the bell: no Crew bar, no syndicate, no duel between
+// crewmates that would say who's across from whom.
+export async function onBlindSlate(db: Db, marketId: unknown, now = new Date()): Promise<boolean> {
+  if (typeof marketId !== "string" || !UUID.test(marketId)) return false;
+  return (await slateModifier(db, now)) === "blind_slate" && (await isOnSlate(db, marketId.toLowerCase(), now));
 }
 
 // Today's Slate as one resident sees it: the cards, their own call on each,
@@ -132,5 +141,64 @@ export async function myGrid(db: Db, userId: string, day: unknown, opts: { now?:
     share: gridText(day, squares),
     aura: myTotal === undefined ? null : myTotal / 100,
     percentile,
+    // Contrarian Day: which of your squares went against the city majority
+    // (the gold border), as the bell recorded it. Null on other days, and
+    // until the bell has counted (never a false "no border").
+    contrarian: s.modifier === "contrarian_day" ? await contrarianSquares(db, day, cards, mine) : null,
+    // NOTHING Day: NOTHING-9000's grid under yours, whether yours beat it at
+    // the bell (null until the bell has settled it), and the two totals the
+    // bell judged. Null on other days.
+    nothing: s.modifier === "nothing_day" ? await nothingDay(db, userId, day, cards, all) : null,
+  };
+}
+
+type GridCard = { marketId: string; tier: string; outcome: boolean | null; status: string };
+type GridCall = { userId: string; marketId: string; side: "yes" | "no"; aura: number | null };
+
+// The grid opens by the clock at midnight, but the bell's modifier step runs
+// after the chains and the Tower step: until it has, the day isn't settled.
+async function modifierSettled(db: Db, day: string) {
+  const [step] = await db
+    .select({ day: bellSteps.bellDay })
+    .from(bellSteps)
+    .where(and(eq(bellSteps.bellDay, day), eq(bellSteps.step, "modifier")));
+  return !!step;
+}
+
+async function contrarianSquares(db: Db, day: string, cards: GridCard[], mine: GridCall[]) {
+  if (!(await modifierSettled(db, day))) return null;
+  const recorded = await db.select({ marketId: contrarianCards.marketId, majority: contrarianCards.majority }).from(contrarianCards).where(eq(contrarianCards.cityDay, day));
+  return cards.map((c) => {
+    const m = mine.find((x) => x.marketId === c.marketId);
+    const r = recorded.find((x) => x.marketId === c.marketId);
+    return !!m && !!r && againstCity(m.side, r.majority);
+  });
+}
+
+async function nothingDay(db: Db, userId: string, day: string, cards: GridCard[], all: GridCall[]) {
+  const bot = all.filter((c) => c.userId === CAST.nothing_9000.id);
+  const squares = cards.map((c) => {
+    const b = bot.find((x) => x.marketId === c.marketId);
+    return square(b ? { side: b.side, auraCenti: b.aura } : null, c.tier as SlateTier, c.outcome, c.status === "void");
+  });
+  const settled = await modifierSettled(db, day);
+  const [win] = await db
+    .select({ tile: nothingDayWins.tile })
+    .from(nothingDayWins)
+    .where(and(eq(nothingDayWins.cityDay, day), eq(nothingDayWins.userId, userId)));
+  const [judged] = await db
+    .select({ mine: nothingDayGrids.auraCenti, bot: nothingDayGrids.botAuraCenti })
+    .from(nothingDayGrids)
+    .where(and(eq(nothingDayGrids.cityDay, day), eq(nothingDayGrids.userId, userId)));
+  return {
+    squares,
+    aura: bot.length ? bot.reduce((a, c) => a + (c.aura ?? 0), 0) / 100 : null,
+    beat: settled ? !!win : null,
+    tile: !!win?.tile,
+    // Your Slate Aura and the bot's when the bell judged them (a card not
+    // settled by then counted 0): the numbers the verdict stands on. A card
+    // that settles later moves the grids and `aura`, never these. Null until
+    // the bell has judged, or if you had no call then.
+    atBell: judged ? { mine: judged.mine / 100, bot: judged.bot === null ? null : judged.bot / 100 } : null,
   };
 }

@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { MODIFIERS, type SlateCandidate, eligible, gridText, modifierFor, pickSlate, slateNumber, square, tierOf } from "../src";
+import { CATALOGUE, MODIFIERS, NOTHING_DAY_TILE, type SlateCandidate, TOWER, againstCity, beatsBot, cityMajority, eligible, gridText, modifierFor, pickSlate, slateNumber, square, tierOf } from "../src";
 
 const DAY = "2031-03-10";
 const at = (h: number) => new Date(Date.parse(`${DAY}T00:00:00Z`) + h * 3_600_000);
@@ -97,5 +97,39 @@ describe("the modifier, the number and the grid", () => {
   it("the share line", () => {
     expect(slateNumber("2026-10-05")).toBe(1);
     expect(gridText("2026-10-06", ["green", "white", "red", "black", "green", "gold"])).toBe("Block Party #2 🟩⬜🟥⬛🟩🟨");
+  });
+});
+
+describe("what the modifiers decide", () => {
+  it("Contrarian Day: the majority is the side most neighbours took, once the City bar shows", () => {
+    expect(TOWER.cityBarMin).toBe(10);
+    expect(cityMajority(6, 4)).toBe("yes");
+    expect(cityMajority(3, 7)).toBe("no");
+    expect(cityMajority(1, 9)).toBe("no");
+    expect(cityMajority(6, 3)).toBeNull(); // 9 neighbours: no City bar, so no majority
+    expect(cityMajority(0, 0)).toBeNull();
+    expect(cityMajority(5, 5)).toBeNull(); // a tie has no majority
+    expect(cityMajority(40, 40)).toBeNull();
+    for (const junk of [-1, 1.5, NaN, Infinity]) expect(cityMajority(junk, 20)).toBeNull();
+  });
+
+  it("Contrarian Day: only a call on the other side of a majority gets the gold border", () => {
+    expect(againstCity("yes", "no")).toBe(true);
+    expect(againstCity("no", "yes")).toBe(true);
+    expect(againstCity("yes", "yes")).toBe(false);
+    expect(againstCity("no", null)).toBe(false);
+  });
+
+  it("NOTHING Day: more Aura than the bot's grid beats it; a tie, no call or no bot grid doesn't", () => {
+    expect(beatsBot(1, 0)).toBe(true);
+    expect(beatsBot(-299, -300)).toBe(true);
+    expect(beatsBot(0, 0)).toBe(false);
+    expect(beatsBot(-5, 120)).toBe(false);
+    expect(beatsBot(null, -500)).toBe(false);
+    expect(beatsBot(500, null)).toBe(false);
+  });
+
+  it("NOTHING Day's banner tile is an earned-only wall piece, never sold", () => {
+    expect(CATALOGUE.get(NOTHING_DAY_TILE)).toMatchObject({ band: "earned", layer: "wall", price: null });
   });
 });

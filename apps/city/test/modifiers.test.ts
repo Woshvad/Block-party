@@ -1,0 +1,102 @@
+import { describe, expect, it } from "vitest";
+import type { OpenGrid } from "../src/api";
+import { CONTRARIAN_LINE, MODIFIER_NAMES, auraText, gridCells, gridLines, lastBellDay, modifierResult, stillSettling } from "../src/modifiers";
+
+const grid = (over: Partial<OpenGrid> = {}): OpenGrid => ({
+  cityDay: "2026-10-18",
+  sealed: false,
+  number: 14,
+  modifier: "blind_slate",
+  squares: ["green", "red", "white", "black", "pending", "gold"],
+  share: "Block Party #14 🟩🟥⬜⬛⏳🟨",
+  aura: 7.4,
+  percentile: 50,
+  contrarian: null,
+  nothing: null,
+  ...over,
+});
+const nothing = (over: Partial<NonNullable<OpenGrid["nothing"]>> = {}) => ({ squares: grid().squares, aura: -3.1, beat: true, tile: true, atBell: { mine: 7.4, bot: -3.1 }, ...over });
+
+describe("the grid's squares", () => {
+  it("each says what it is in words; a gold border says so too, never by colour alone", () => {
+    const cells = gridCells(["green", "red", "black"], [false, true, false]);
+    expect(cells.map((c) => c.emoji)).toEqual(["🟩", "🟥", "⬛"]);
+    expect(cells.map((c) => c.label)).toEqual(["Card 1: beat the market", "Card 2: REKT, against the city (gold border)", "Card 3: no call"]);
+    expect(cells.map((c) => c.contrarian)).toEqual([false, true, false]);
+  });
+
+  it("no border list (another day) means no gold border, and every square has words", () => {
+    const all = ["green", "white", "red", "black", "gold", "void", "pending"] as const;
+    const cells = gridCells(all);
+    expect(cells.every((c) => !c.contrarian && !c.label.includes("gold") && !c.label.includes("unknown"))).toBe(true);
+    expect(gridCells(["green"], [])).toEqual([{ emoji: "🟩", label: "Card 1: beat the market", contrarian: false }]);
+  });
+});
+
+describe("the grid's rows", () => {
+  it("yours, then NOTHING-9000's on NOTHING Day, labelled NPC · AI on screen and to a screen reader", () => {
+    const [you, bot, ...more] = gridLines(grid({ modifier: "nothing_day", nothing: nothing() }));
+    expect(more).toEqual([]);
+    expect([you!.who, you!.label]).toEqual(["You", "Your grid, Block Party #14"]);
+    expect([bot!.who, bot!.label]).toEqual(["NOTHING-9000 · NPC · AI", "NOTHING-9000's grid, NPC · AI"]);
+    expect(bot!.cells.map((c) => c.contrarian)).toEqual([false, false, false, false, false, false]);
+    expect(gridLines(grid({ modifier: "contrarian_day", contrarian: [true, false, false, false, false, false] })).map((l) => l.cells[0]!.contrarian)).toEqual([true]);
+  });
+});
+
+describe("what the modifier came to", () => {
+  it("Contrarian Day counts your gold borders", () => {
+    expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: [false, true, false, false, false, true] }))).toEqual({ title: "Contrarian Day", text: "2 calls went against the city majority and got a gold border." });
+    expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: [true, false, false, false, false, false] }))!.text).toBe("1 call went against the city majority and got a gold border.");
+    expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: [false, false, false, false, false, false] }))!.text).toBe("None of your calls went against the city majority.");
+  });
+
+  it("Contrarian Day before the bell has counted says so, never \"none of your calls\"", () => {
+    expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: null }))).toEqual({ title: "Contrarian Day", text: "The bell is still settling Contrarian Day." });
+  });
+
+  it("still settling: either modifier before the bell's step, never a Blind Slate or a settled day", () => {
+    expect(stillSettling(grid({ modifier: "contrarian_day", contrarian: null }))).toBe(true);
+    expect(stillSettling(grid({ modifier: "contrarian_day", contrarian: [false, false, false, false, false, false] }))).toBe(false);
+    expect(stillSettling(grid({ modifier: "nothing_day", nothing: nothing({ beat: null, tile: false }) }))).toBe(true);
+    expect(stillSettling(grid({ modifier: "nothing_day", nothing: nothing({ beat: false, tile: false }) }))).toBe(false);
+    expect(stillSettling(grid())).toBe(false);
+  });
+
+  it("NOTHING Day: beat it (tile or not), held, still settling, or no bot grid", () => {
+    const day = (n: ReturnType<typeof nothing>, aura = 7.4) => modifierResult(grid({ modifier: "nothing_day", nothing: n, aura }))!.text;
+    expect(day(nothing())).toBe("You beat NOTHING-9000's grid at the bell, Aura +7.4 to −3.1. Banner tile earned: it's in your home's storage.");
+    expect(day(nothing({ tile: false }))).toBe("You beat NOTHING-9000's grid at the bell, Aura +7.4 to −3.1. You already have its banner tile.");
+    expect(day(nothing({ beat: false, tile: false, aura: 2, atBell: { mine: -5, bot: 2 } }), -5)).toBe("NOTHING-9000's grid held at the bell, Aura +2.0 to your −5.0.");
+    expect(day(nothing({ beat: null, tile: false, atBell: null }))).toBe("The bell is still settling NOTHING Day.");
+    expect(day(nothing({ beat: false, tile: false, aura: null, squares: [], atBell: { mine: 7.4, bot: null } }))).toBe("NOTHING-9000 had no grid that day, so there was nothing to beat.");
+    expect(day(nothing({ beat: false, tile: false, atBell: null }))).toBe("You had no call when the bell judged NOTHING Day.");
+    expect(modifierResult(grid({ modifier: "nothing_day", nothing: nothing() }))!.title).toBe("NOTHING Day");
+  });
+
+  it("NOTHING Day keeps the bell's numbers when a card settles after it, and says why the grids moved", () => {
+    // At the bell: you +1.0 to the bot's +0.5. Then a late card: you −2.0, the bot +2.5.
+    const won = grid({ modifier: "nothing_day", aura: -2, nothing: nothing({ aura: 2.5, atBell: { mine: 1, bot: 0.5 } }) });
+    expect(modifierResult(won)!.text).toBe("You beat NOTHING-9000's grid at the bell, Aura +1.0 to +0.5. Banner tile earned: it's in your home's storage. A card that settled after the bell doesn't change it.");
+    // And the other way: held at the bell, ahead now.
+    const held = grid({ modifier: "nothing_day", aura: 3.5, nothing: nothing({ beat: false, tile: false, aura: 2, atBell: { mine: 1.5, bot: 2 } }) });
+    expect(modifierResult(held)!.text).toBe("NOTHING-9000's grid held at the bell, Aura +2.0 to your +1.5. A card that settled after the bell doesn't change it.");
+  });
+
+  it("nothing to say on a Blind Slate, or on a day you made no call", () => {
+    expect(modifierResult(grid())).toBeNull();
+    expect(modifierResult(grid({ modifier: "contrarian_day", contrarian: [true, false, false, false, false, false], aura: null }))).toBeNull();
+    expect(modifierResult(grid({ modifier: "nothing_day", nothing: nothing(), aura: null }))).toBeNull();
+  });
+
+  it("names, Aura and the receipt line read plainly", () => {
+    expect(MODIFIER_NAMES).toEqual({ contrarian_day: "Contrarian Day", nothing_day: "NOTHING Day", blind_slate: "Blind Slate" });
+    expect([auraText(7.44), auraText(-3.06), auraText(0)]).toEqual(["+7.4", "−3.1", "0.0"]);
+    expect(CONTRARIAN_LINE).toBe("Against the city · Contrarian Day");
+  });
+
+  it("the last bell closed the city day before (UTC)", () => {
+    expect(lastBellDay(Date.parse("2026-10-19T00:05:00Z"))).toBe("2026-10-18");
+    expect(lastBellDay(Date.parse("2026-10-19T23:59:00Z"))).toBe("2026-10-18");
+  });
+});

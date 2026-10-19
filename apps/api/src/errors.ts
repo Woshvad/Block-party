@@ -220,6 +220,7 @@ const DUEL: Record<DuelError["code"], number> = {
   AT_THE_CAP: 409,
   CANT_COVER: 409,
   ALT_FLAGGED: 403,
+  BLIND_SLATE: 409,
 };
 
 const GRUDGE: Record<GrudgeError["code"], number> = {
@@ -257,6 +258,7 @@ const SYNDICATE: Record<SyndicateError["code"], number> = {
   EXPIRED: 409,
   ALREADY_SHOOK: 409,
   OTHER_SIDE: 409,
+  BLIND_SLATE: 409,
 };
 
 const RATIO: Record<RatioError["code"], number> = {

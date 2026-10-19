@@ -195,7 +195,6 @@ button.pill { border: 0; cursor: pointer; text-align: left; color: var(--ink); }
 .bigq { font-size: 16px; font-weight: 600; }
 .paper p { margin: 6px 0; line-height: 1.4; }
 .ask { flex: 1; min-width: 0; font-size: 16px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(20, 22, 31, 0.15); }
-pre.grid { font-size: 22px; line-height: 1.2; margin: 6px 0; white-space: pre-wrap; }
 .banner { cursor: pointer; }
 .thread { display: flex; flex-direction: column; gap: 8px; }
 .notice { background: #faeeda; border-radius: 12px; padding: 8px 12px; font-size: 13px; margin: 0; }
@@ -684,6 +683,24 @@ button:disabled { cursor: default; }
 .receipt-stamp.rekt { color: #c0392b; }
 .receipt-q { font-size: 22px; letter-spacing: -0.03em; margin: 0; overflow-wrap: anywhere; }
 .receipt-ratio { font-style: italic; margin: 0; }
+/* Contrarian Day: a call against the city majority gets a gold border (and says so, with a star). */
+.receipt-sheet.contrarian { box-shadow: inset 0 0 0 3px #d4a017; }
+.receipt-contrarian { margin: 0; font-size: 13px; font-weight: 750; color: #7a5a06; }
+/* A revealed grid as squares: yours, and NOTHING-9000's under it on NOTHING Day. */
+.grid-rows { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.grid-line { display: flex; flex-direction: column; gap: 3px; }
+.grid-who { font-size: 11px; font-weight: 700; color: var(--muted); }
+.grid-row { display: flex; gap: 6px; list-style: none; margin: 0; padding: 0; }
+.grid-square { position: relative; display: grid; place-items: center; width: 36px; height: 36px; font-size: 22px; line-height: 1; border: 2px solid transparent; border-radius: 9px; }
+.grid-square.contrarian { border-color: #d4a017; background: #fbf1d0; }
+.contrarian-mark { position: absolute; top: -7px; right: -7px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: #d4a017; color: #fff; font-size: 10px; }
+.grid-key { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: #7a5a06; }
+.grid-key-mark { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: #d4a017; color: #fff; font-size: 10px; }
+/* Today: what last night's Bell Modifier came to for you. */
+.last-bell { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border-radius: 18px; border: 1px solid #dcd9bc; background: #fffef8; color: #3c3a2a; }
+.last-bell .eyebrow { color: #8a7444; }
+.last-bell h2 { margin: 0; font-size: 18px; letter-spacing: -.02em; }
+.last-bell p { margin: 0; font-size: 14px; line-height: 1.5; }
 /* Neighbours in the city now, from the places' live headcounts. */
 .neighbours-now .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3ddc97; box-shadow: 0 0 0 3px #3ddc9733; margin-right: 7px; vertical-align: middle; }
 /* The list instead of the 3D map (Me, Graphics, List): no canvas at all; the banner, the HUD and the places scroll as one page. */

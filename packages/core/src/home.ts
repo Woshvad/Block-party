@@ -104,6 +104,8 @@ const EARNED: Piece[] = [
   // The Daily Clue Hunt's trophies (HUNT_TROPHIES in hunt.ts).
   p("poster_clue_map", "earned", "wall", 1, 1, null, "decor"),
   p("magnifier_trophy", "earned", "floor", 1, 1, null),
+  // NOTHING Day's banner tile, for beating NOTHING-9000's grid (NOTHING_DAY_TILE in slate.ts).
+  p("banner_tile_nothing", "earned", "wall", 1, 1, null, "decor"),
 ];
 
 export const CATALOGUE: ReadonlyMap<string, Piece> = new Map([...BUYABLE, ...KIT, ...STARTER, ...EARNED].map((x) => [x.id, x]));

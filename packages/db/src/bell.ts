@@ -5,6 +5,7 @@ import type { Db } from "./client";
 import { collectRent } from "./economy";
 import { lockAccounts, post } from "./ledger";
 import { stepTower } from "./bell-show";
+import { stepModifier } from "./modifiers";
 import { npcBoardLines } from "./cast";
 import { runAltChecks } from "./alts";
 import { stepClose } from "./close";
@@ -25,7 +26,7 @@ export type BellOptions = {
   // step failing partway through the bell.
   onStep?: (step: string) => void | Promise<void>;
   // Run only these steps (ops tooling and tests). The default runs every due step.
-  only?: Array<"chains" | "rent" | "rent_final" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts">;
+  only?: Array<"chains" | "rent" | "rent_final" | "halving" | "election" | "tower" | "modifier" | "npc_lines" | "close" | "league" | "alts">;
 };
 
 // Keyset pagination over a sorted id column. Each page starts strictly after
@@ -202,6 +203,8 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     { day: bellDay, step: "chains", run: () => stepChains(db, now, pageSize) },
     // After the chains, so Bell Scores see tonight's chain lengths.
     { day: bellDay, step: "tower", run: () => stepTower(db, bellDay, now) },
+    // After the Tower step has scored the day: the Bell Modifier's gold borders and banner tiles.
+    { day: bellDay, step: "modifier", run: () => stepModifier(db, bellDay, now) },
   );
   // Saturday: tonight's stakes have paid out, so whoever rent left owing pays now or takes the couch.
   if (isSaturday(today)) due.push({ day: bellDay, step: "rent_final", run: () => stepRentFinal(db, now, pageSize) });
@@ -223,7 +226,7 @@ export async function runBell(db: Db, opts: BellOptions = {}) {
     due.push({ day: seasonLastDay(season), step: "halving", run: () => stepHalving(db, season, pageSize, opts.onHalvingAccount) });
   }
 
-  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "rent_final" | "halving" | "election" | "tower" | "npc_lines" | "close" | "league" | "alts")) : due;
+  const selected = opts.only ? due.filter((d) => opts.only!.includes(d.step as "chains" | "rent" | "rent_final" | "halving" | "election" | "tower" | "modifier" | "npc_lines" | "close" | "league" | "alts")) : due;
 
   // One runner at a time: a transaction-scoped advisory lock held for the
   // whole run. A runner that finds it taken returns at once (busy) instead of
