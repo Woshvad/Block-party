@@ -9,6 +9,7 @@ import {
   createResident,
   ensureSystemAccounts,
   fileReport,
+  findByHandle,
   getResident,
   handleNotice,
   isHandleAvailable,
@@ -216,8 +217,12 @@ describe("the old handle rests", () => {
     await renameHandle(db, mod, await residentAs(resting), { reason: REASON, from: resting }, { now: new Date(Date.now() - 29 * DAY) });
     expect(await isHandleAvailable(db, expired)).toBe(true);
     expect(await isHandleAvailable(db, resting)).toBe(false);
-    expect(await code(createResident(db, await claimed(), { ...pickForMe(seededRandomInt(seed++)), handle: expired, name: "Newcomer" }))).toBe("OK");
+    const newcomer = await claimed();
+    expect(await code(createResident(db, newcomer, { ...pickForMe(seededRandomInt(seed++)), handle: expired, name: "Newcomer" }))).toBe("OK");
     expect(await code(createResident(db, await claimed(), { ...pickForMe(seededRandomInt(seed++)), handle: resting, name: "Newcomer" }))).toBe("HANDLE_TAKEN");
+    // An old p-<handle> link now finds the newcomer: why the resident's notice
+    // says only that old links won't find them, never that they stop opening.
+    expect((await findByHandle(db, expired))?.userId).toBe(newcomer);
   });
 });
 

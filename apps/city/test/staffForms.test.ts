@@ -88,7 +88,7 @@ describe("renaming a flagged @handle", () => {
     const longest = renameConfirm({ from: "a".repeat(15), newHandle: "b".repeat(15) });
     expect(longest).toContain("@aaaaaaaaaaaaaaa to @bbbbbbbbbbbbbbb?");
     expect(longest).toMatch(/reason next time they open the app/);
-    expect(longest).toMatch(/old profile link stops working/);
+    expect(longest).toMatch(/Old profile links stop finding them/); // not "stop working": someone may take the handle later
     expect(longest).toMatch(new RegExp(`${HANDLE_RENAME.holdDays} days`));
     expect(longest.length).toBeLessThanOrEqual(256);
     expect(renameConfirm({ from: "old", newHandle: "  " })).toMatch(/^Rename @old to a neutral handle\?/);

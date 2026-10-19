@@ -9,8 +9,11 @@ describe("the rename notice", () => {
       title: "You're @neighbour_04821 now",
       changed: "Staff changed your handle from @rude_handle.",
       why: "Why: Your handle named a real person.",
-      links: "Links to your old profile won't open any more.",
+      // Not "won't open": once the old handle stops resting, someone else may take it.
+      links: "Old links to your profile won't find you any more.",
     });
+    // Given back in other letter case: lookups ignore case, so old links still find them.
+    expect(handleNoticeText({ ...notice, from: "Cool_Guy", to: "cool_guy" }).links).toBeNull();
   });
 
   it("shows what /v1/me sent until it's dismissed this visit", () => {

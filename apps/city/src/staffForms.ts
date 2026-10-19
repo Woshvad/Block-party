@@ -98,7 +98,7 @@ export function renameProblem(f: { newHandle: string; reason: string }): string 
 // The confirm before renaming. Telegram's own dialog takes up to 256 characters.
 export function renameConfirm(f: { from: string; newHandle: string }): string {
   const h = f.newHandle.trim().replace(/^@/, "");
-  return `Rename @${f.from} to ${h ? `@${h}` : "a neutral handle"}? They see your reason next time they open the app. Their old profile link stops working, and no one else can take the old handle for ${HANDLE_RENAME.holdDays} days.`;
+  return `Rename @${f.from} to ${h ? `@${h}` : "a neutral handle"}? They see your reason next time they open the app. Old profile links stop finding them, and no one else can take the old handle for ${HANDLE_RENAME.holdDays} days.`;
 }
 
 // The request: trimmed, and only what's filled in, but always `from`, the

@@ -14,7 +14,7 @@ export default function HandleNotice({ notice, onOk }: { notice: Notice; onOk: (
         </p>
         <p>{t.changed}</p>
         <p className="notice">{t.why}</p>
-        <p className="muted">{t.links}</p>
+        {t.links && <p className="muted">{t.links}</p>}
         <button className="cta" onClick={onOk} autoFocus>
           Got it
         </button>
