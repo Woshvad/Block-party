@@ -81,7 +81,9 @@ BEGIN
   IF NEW.stamp IS NOT NULL OR NEW.settled_at IS NOT NULL THEN
     RAISE EXCEPTION 'a warm-up starts unsettled' USING ERRCODE = 'integrity_constraint_violation';
   END IF;
-  SELECT created_at INTO arrived FROM users WHERE id = NEW.user_id;
+  -- To the millisecond, as the service reads it: at the very edge of a day
+  -- the two must agree which day it is.
+  SELECT date_trunc('milliseconds', created_at) INTO arrived FROM users WHERE id = NEW.user_id;
   IF arrived IS NULL OR NEW.account_day <> GREATEST(0, floor(extract(epoch FROM NEW.created_at - arrived) / 86400)) THEN
     RAISE EXCEPTION 'a warm-up is on the account day it was taken' USING ERRCODE = 'integrity_constraint_violation';
   END IF;

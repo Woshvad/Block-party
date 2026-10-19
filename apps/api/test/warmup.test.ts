@@ -9,8 +9,9 @@ beforeAll(ready);
 afterAll(close);
 
 const MIN = 60_000;
-// Days of their own, a minute past ten: no sweeps, no daily pings, and a
-// quarter hour for the warm-up's windows to start on.
+// Days of their own, from ten o'clock: a quarter hour for the warm-up's
+// windows to start on, and a minute past it for the cron, clear of the
+// sweeps and the daily pings.
 let base = Date.UTC(2063, 0, 1 + Math.floor(Math.random() * 3000), 10, 0);
 const fresh = () => (base += 6 * 24 * 60 * MIN);
 
