@@ -1967,3 +1967,85 @@ export const makeGoodCollections = pgTable(
   },
   (t) => [primaryKey({ columns: [t.makeGoodId, t.userId] })],
 );
+
+// --- The 15-minute warm-up -------------------------------------------------
+
+export const warmupWindowStatus = pgEnum("warmup_window_status", ["open", "resolved", "void"]);
+export const warmupSide = pgEnum("warmup_side", ["up", "down"]);
+export const warmupStamp = pgEnum("warmup_stamp", ["called_it", "rekt", "void"]);
+
+// Polymarket's rolling 15-minute "Bitcoin Up or Down" windows (a sample feed
+// in development), one per slot per feed. Kept apart from the Tower's
+// markets, so the Slate, the Floor, Aura and the City bar never see them.
+// Final once resolved or void, and never deleted (a trigger).
+export const warmupWindows = pgTable(
+  "warmup_windows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    externalId: text("external_id").notNull(),
+    question: text("question").notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    // Taking orders on Polymarket, as of the latest poll that listed it.
+    trading: boolean("trading").notNull().default(true),
+    status: warmupWindowStatus("status").notNull().default("open"),
+    outcome: warmupSide("outcome"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("warmup_windows_source_external").on(t.source, t.externalId),
+    unique("warmup_windows_source_slot").on(t.source, t.startsAt),
+    // Each poll asks about the ended windows still waiting on a result.
+    index("warmup_windows_waiting").on(t.source, t.endsAt).where(sql`${t.status} = 'open'`),
+    check("warmup_windows_order", sql`${t.endsAt} > ${t.startsAt}`),
+    check("warmup_windows_resolved", sql`(${t.status} = 'resolved') = (${t.outcome} IS NOT NULL)`),
+  ],
+);
+
+// One row per poll of the warm-up feed, so "the feed is down" never reads
+// the Tower's polls (or the Tower the warm-up's).
+export const warmupPolls = pgTable(
+  "warmup_polls",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    source: text("source").notNull(),
+    ok: boolean("ok").notNull(),
+    windows: integer("windows").notNull().default(0),
+    error: text("error"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("warmup_polls_source_at").on(t.source, t.at)],
+);
+
+// A newcomer's free call on a window: UP or DOWN, nothing staked, no GM, no
+// Aura. One per account day (0, 1 or 2: so 3 at most) and one per window.
+// Taken only in a window's first 2 minutes, on the day it says; never
+// edited or deleted, and its stamp is written once, matching the window's
+// result (triggers: WARMUP's 2 minutes and 3 days are written there too).
+export const warmupCalls = pgTable(
+  "warmup_calls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    windowId: uuid("window_id")
+      .notNull()
+      .references(() => warmupWindows.id),
+    side: warmupSide("side").notNull(),
+    accountDay: integer("account_day").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    stamp: warmupStamp("stamp"),
+    settledAt: timestamp("settled_at", { withTimezone: true }),
+  },
+  (t) => [
+    unique("warmup_calls_user_day").on(t.userId, t.accountDay),
+    unique("warmup_calls_window_user").on(t.windowId, t.userId),
+    // Settling reads the calls still waiting on their window.
+    index("warmup_calls_unsettled").on(t.windowId).where(sql`${t.stamp} IS NULL`),
+    check("warmup_calls_day", sql`${t.accountDay} BETWEEN 0 AND 2`),
+    check("warmup_calls_settled", sql`(${t.stamp} IS NULL) = (${t.settledAt} IS NULL)`),
+  ],
+);
