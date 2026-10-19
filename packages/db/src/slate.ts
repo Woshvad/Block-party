@@ -4,6 +4,7 @@ import type { Db } from "./client";
 import { bellSteps, calls, contrarianCards, markets, nothingDayWins, slateCards, slates } from "./schema";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const bellAfter = (day: CityDay) => new Date(`${addDays(day, 1)}T00:00:00Z`);
 
 // Publishes today's Slate once (racing publishers agree on one). Six cards as
@@ -41,6 +42,14 @@ export async function isOnSlate(db: Db, marketId: string, now = new Date()): Pro
 export async function slateModifier(db: Db, now = new Date()): Promise<Modifier | null> {
   const [s] = await db.select({ modifier: slates.modifier }).from(slates).where(eq(slates.cityDay, cityDay(now)));
   return (s?.modifier as Modifier) ?? null;
+}
+
+// Is this market a card on today's Blind Slate? Then even your crew's sides
+// stay hidden until the bell: no Crew bar, no syndicate, no duel between
+// crewmates that would say who's across from whom.
+export async function onBlindSlate(db: Db, marketId: unknown, now = new Date()): Promise<boolean> {
+  if (typeof marketId !== "string" || !UUID.test(marketId)) return false;
+  return (await slateModifier(db, now)) === "blind_slate" && (await isOnSlate(db, marketId.toLowerCase(), now));
 }
 
 // Today's Slate as one resident sees it: the cards, their own call on each,

@@ -4,11 +4,12 @@ import type { Db } from "./client";
 import { lockAccounts, transfer } from "./ledger";
 import { notify } from "./notify";
 import { calls, cityMarkets, cityPositions, crewMembers, crews, dailyGm, markets, residents, syndicateShakes, syndicates } from "./schema";
+import { onBlindSlate } from "./slate";
 import { makeCall } from "./tower";
 
 export class SyndicateError extends Error {
   constructor(
-    readonly code: "NOT_IN_CREW" | "INVALID_INPUT" | "NO_SUCH_MARKET" | "MARKET_CLOSED" | "ALREADY_PROPOSED" | "NO_SUCH_SYNDICATE" | "EXPIRED" | "ALREADY_SHOOK" | "OTHER_SIDE",
+    readonly code: "NOT_IN_CREW" | "INVALID_INPUT" | "NO_SUCH_MARKET" | "MARKET_CLOSED" | "ALREADY_PROPOSED" | "NO_SUCH_SYNDICATE" | "EXPIRED" | "ALREADY_SHOOK" | "OTHER_SIDE" | "BLIND_SLATE",
     message: string,
   ) {
     super(message);
@@ -41,6 +42,9 @@ async function target(db: Db, s: { marketId: string | null; cityMarketId: string
     const [m] = await db.select().from(markets).where(eq(markets.id, s.marketId));
     if (!m) throw new SyndicateError("NO_SUCH_MARKET", "no such market");
     if (m.infoOnly || m.status !== "open" || now >= m.freezesAt) throw new SyndicateError("MARKET_CLOSED", "that market is closed for calls");
+    // A syndicate shows the crew where it stands, and on a Blind Slate even
+    // your crew's sides stay hidden until the bell.
+    if (await onBlindSlate(db, m.id, now)) throw new SyndicateError("BLIND_SLATE", "it's a Blind Slate: your crew's sides stay hidden until the bell");
     return { kind: "tower" as const, price: m.price };
   }
   const [c] = await db.select().from(cityMarkets).where(eq(cityMarkets.id, s.cityMarketId!));

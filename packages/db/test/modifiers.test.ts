@@ -2,16 +2,25 @@ import { randomUUID } from "node:crypto";
 import { CAST, type FeedMarket, type Modifier, NOTHING_DAY_TILE, type OddsProvider, auraCenti, modifierFor, nothingCall } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  DuelError,
+  SyndicateError,
+  challenge,
+  createCrew,
   createDb,
+  createInvite,
   ensureSystemAccounts,
   makeCall,
+  marketView,
   myGrid,
   npcCalls,
   pollOdds,
+  proposeSyndicate,
   publishSlate,
   receipt,
+  redeemInvite,
   reel,
   runBell,
+  shakeSyndicate,
   stepModifier,
 } from "../src";
 import { makeResident, raceAt } from "./helpers";
@@ -83,6 +92,22 @@ const opened = async (s: SlateDay, u: string) => {
   return g;
 };
 const tiles = async (u: string) => (await client`SELECT source FROM items WHERE owner_user_id = ${u} AND piece_id = ${NOTHING_DAY_TILE}`).map((r) => r.source);
+async function code(p: Promise<unknown>) {
+  try {
+    await p;
+    return "OK";
+  } catch (e) {
+    if (e instanceof DuelError || e instanceof SyndicateError) return e.code;
+    throw e;
+  }
+}
+async function crewOf(n: number) {
+  const members = await people(n);
+  await createCrew(db, members[0]!, { name: `Mods ${randomUUID().slice(0, 6)}` });
+  for (const u of members.slice(1)) await redeemInvite(db, u, (await createInvite(db, members[0]!)).code);
+  return members;
+}
+
 beforeAll(() => ensureSystemAccounts(db));
 afterAll(close);
 
@@ -351,5 +376,57 @@ describe("modifiers never touch Aura, GM or real trades", () => {
     const rang = await s.ring(["modifier"]);
     expect(rang.ran.modifier).toMatchObject({ modifier });
     expect(await snapshot(s.ids)).toEqual(before);
+  });
+});
+
+describe("Blind Slate: even your crew's sides stay hidden until the bell", () => {
+  it("no Crew bar on a Blind Slate card, even after you lock; it's back after the bell", async () => {
+    const s = await slateDay("blind_slate");
+    const crew = await crewOf(3);
+    for (const u of crew) await call(s, u, 1, "yes", 70);
+    await s.poll(9 + 1 / 60);
+    expect(await marketView(db, crew[0]!, s.ids[1]!, { now: s.at(9.1) })).toMatchObject({ blurred: false, crew: null, counts: { crew: 3 } });
+    // (No bell run here: the Tower step would walk this crew's gm chain from
+    // today's date to the test's far-off day. The bar is back by the clock.)
+    await s.settle();
+    expect(await marketView(db, crew[0]!, s.ids[1]!, { now: s.afterBell })).toMatchObject({ crew: 70 });
+  });
+
+  it("no syndicate on a Blind Slate card, nor a shake on one proposed before the Slate went out; off the Slate, and on other days, as before", async () => {
+    const crew = await crewOf(3);
+    let early = "";
+    const s = await slateDay("blind_slate", async (d0, ids) => {
+      early = (await proposeSyndicate(db, crew[0]!, { marketId: ids[1], side: "yes" }, { now: new Date(d0 + 9 * H - 2 * MIN) })).id;
+    });
+    expect(await code(shakeSyndicate(db, crew[1]!, early, {}, { now: s.at(9) }))).toBe("BLIND_SLATE");
+    expect(await code(proposeSyndicate(db, crew[1]!, { marketId: s.ids[2], side: "no" }, { now: s.at(9) }))).toBe("BLIND_SLATE");
+    // A Tower market that isn't on today's Slate.
+    const off = s.f.add(s.d0, 45);
+    await s.poll(9);
+    expect(await code(proposeSyndicate(db, crew[1]!, { marketId: await idOf(off.externalId), side: "no" }, { now: s.at(9) }))).toBe("OK");
+
+    const other = await slateDay("contrarian_day");
+    expect(await code(proposeSyndicate(db, crew[2]!, { marketId: other.ids[1], side: "yes" }, { now: other.at(9) }))).toBe("OK");
+  });
+
+  it("no duel between crewmates on a Blind Slate card, checked before the sides; anyone else, or another day, as before", async () => {
+    const s = await slateDay("blind_slate");
+    const [a, b, c] = await crewOf(3);
+    const stranger = await makeResident(db);
+    await call(s, a!, 1, "yes", 60);
+    await call(s, b!, 1, "no", 40); // across from a
+    await call(s, c!, 1, "yes", 60); // on a's side: the refusal mustn't say so
+    await call(s, stranger!, 1, "no", 40);
+    await s.poll(9 + 1 / 60);
+    const now = { now: s.at(9.1) };
+    expect(await code(challenge(db, a!, { marketId: s.ids[1], opponentId: b }, now))).toBe("BLIND_SLATE");
+    expect(await code(challenge(db, a!, { marketId: s.ids[1], opponentId: c }, now))).toBe("BLIND_SLATE");
+    expect(await code(challenge(db, a!, { marketId: s.ids[1], opponentId: stranger }, now))).toBe("DUELS_OFF"); // not crew: the usual checks
+
+    const other = await slateDay("nothing_day");
+    await call(other, a!, 1, "yes", 60);
+    await call(other, b!, 1, "no", 40);
+    await other.poll(9 + 1 / 60);
+    expect(await code(challenge(db, a!, { marketId: other.ids[1], opponentId: b }, { now: other.at(9.1) }))).toBe("DUELS_OFF");
   });
 });
