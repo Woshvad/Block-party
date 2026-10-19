@@ -14,10 +14,10 @@ import {
   validateResidentInput,
   validateTraits,
 } from "@bp/core";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { setUpHome } from "./home";
-import { residents, users } from "./schema";
+import { handleRenames, residents, users } from "./schema";
 
 export type ResidentErrorCode =
   | "INVALID_INPUT"
@@ -81,7 +81,8 @@ export async function createResident(
     });
   } catch (e) {
     const c = constraintOf(e);
-    if (c === "residents_handle_lower") throw new ResidentError("HANDLE_TAKEN", "that handle is taken", "handle");
+    // residents_handle_held: renamed away from someone by staff, and still resting.
+    if (c === "residents_handle_lower" || c === "residents_handle_held") throw new ResidentError("HANDLE_TAKEN", "that handle is taken", "handle");
     if (c === "residents_pkey") throw new ResidentError("ALREADY_MOVED_IN", "you already live here");
     throw e;
   }
@@ -119,13 +120,17 @@ export async function findByHandle(db: Db, handle: string): Promise<Resident | n
   return r ?? null;
 }
 
+// Free means valid, nobody's, and not resting after a staff rename.
 export async function isHandleAvailable(db: Db, handle: string): Promise<boolean> {
+  let h: string;
   try {
-    validateHandle(handle);
+    h = validateHandle(handle);
   } catch {
     return false;
   }
-  return (await findByHandle(db, handle)) === null;
+  if ((await findByHandle(db, h)) !== null) return false;
+  const [resting] = await db.select({ id: handleRenames.id }).from(handleRenames).where(and(sql`lower(${handleRenames.oldHandle}) = lower(${h})`, sql`${handleRenames.heldUntil} > now()`)).limit(1);
+  return !resting;
 }
 
 // "Pick for me" on the handle step: a free, valid suggestion.

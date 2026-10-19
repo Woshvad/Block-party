@@ -38,3 +38,4 @@ export * from "./alts";
 export * from "./real-money";
 export * from "./hunt";
 export * from "./make-goods";
+export * from "./handle-renames";

@@ -235,7 +235,8 @@ export const residents = pgTable(
     userId: uuid("user_id")
       .primaryKey()
       .references(() => users.id),
-    // Shown as @handle. Fixed at MVP; unique ignoring case.
+    // Shown as @handle. Unique ignoring case, and fixed except for a staff
+    // rename (renameHandle; a trigger checks).
     handle: text("handle").notNull(),
     name: text("name").notNull(),
     look: jsonb("look").$type<Record<string, unknown>>().notNull(),
@@ -903,6 +904,57 @@ export const moderationItems = pgTable(
     check("moderation_items_review", sql`(${t.reviewedAt} IS NULL) = (${t.review} IS NULL) AND (${t.review} IS NULL OR ${t.review} IN ('restored', 'removed'))`),
   ],
 );
+
+// --- Staff renames for flagged handles ----------------------------------------
+
+// Every time staff renamed a resident's @handle: from what, to what, who did
+// it, the reason the resident reads, and when. Append-only (a trigger). The
+// old handle rests until heldUntil: nobody else can take it before then (a
+// trigger on residents checks), and the handle trigger lets a rename through
+// only with its row here.
+export const handleRenames = pgTable(
+  "handle_renames",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    oldHandle: text("old_handle").notNull(),
+    newHandle: text("new_handle").notNull(),
+    staffId: uuid("staff_id")
+      .notNull()
+      .references(() => users.id),
+    reason: text("reason").notNull(),
+    // The report it closed, if staff renamed from one.
+    reportId: uuid("report_id").references(() => reports.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    heldUntil: timestamp("held_until", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("handle_renames_user").on(t.userId, t.createdAt),
+    index("handle_renames_old_handle").on(sql`lower(${t.oldHandle})`),
+    check("handle_renames_not_self", sql`${t.staffId} <> ${t.userId}`),
+    check("handle_renames_changed", sql`lower(${t.oldHandle}) <> lower(${t.newHandle})`),
+    check("handle_renames_new_handle", sql`${t.newHandle} ~ '^[A-Za-z0-9_]{3,15}$'`),
+    // HANDLE_RENAME in @bp/core: a reason of 20 to 200 characters.
+    check("handle_renames_reason", sql`char_length(${t.reason}) BETWEEN 20 AND 200`),
+    check("handle_renames_held", sql`${t.heldUntil} > ${t.createdAt}`),
+  ],
+);
+
+// What a renamed resident sees the next time they open the app, until they
+// tap OK. One per resident: a newer rename replaces it, and the handle they
+// last knew is kept until they've seen one.
+export const handleNotices = pgTable("handle_notices", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  renameId: uuid("rename_id")
+    .notNull()
+    .references(() => handleRenames.id),
+  fromHandle: text("from_handle").notNull(),
+  seenAt: timestamp("seen_at", { withTimezone: true }),
+});
 
 // --- Frens and persistent chat ----------------------------------------------
 
