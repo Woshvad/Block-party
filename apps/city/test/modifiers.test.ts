@@ -15,7 +15,7 @@ const grid = (over: Partial<OpenGrid> = {}): OpenGrid => ({
   nothing: null,
   ...over,
 });
-const nothing = (over: Partial<NonNullable<OpenGrid["nothing"]>> = {}) => ({ squares: grid().squares, aura: -3.1, beat: true, tile: true, ...over });
+const nothing = (over: Partial<NonNullable<OpenGrid["nothing"]>> = {}) => ({ squares: grid().squares, aura: -3.1, beat: true, tile: true, atBell: { mine: 7.4, bot: -3.1 }, ...over });
 
 describe("the grid's squares", () => {
   it("each says what it is in words; a gold border says so too, never by colour alone", () => {
@@ -54,12 +54,22 @@ describe("what the modifier came to", () => {
 
   it("NOTHING Day: beat it (tile or not), held, still settling, or no bot grid", () => {
     const day = (n: ReturnType<typeof nothing>, aura = 7.4) => modifierResult(grid({ modifier: "nothing_day", nothing: n, aura }))!.text;
-    expect(day(nothing())).toBe("You beat NOTHING-9000's grid, Aura +7.4 to −3.1. Banner tile earned: it's in your home's storage.");
-    expect(day(nothing({ tile: false }))).toBe("You beat NOTHING-9000's grid, Aura +7.4 to −3.1. You already have its banner tile.");
-    expect(day(nothing({ beat: false, tile: false, aura: 2 }), -5)).toBe("NOTHING-9000's grid held, Aura +2.0 to your −5.0.");
-    expect(day(nothing({ beat: null, tile: false }))).toBe("The bell is still settling NOTHING Day.");
-    expect(day(nothing({ beat: false, tile: false, aura: null, squares: [] }))).toBe("NOTHING-9000 had no grid that day, so there was nothing to beat.");
+    expect(day(nothing())).toBe("You beat NOTHING-9000's grid at the bell, Aura +7.4 to −3.1. Banner tile earned: it's in your home's storage.");
+    expect(day(nothing({ tile: false }))).toBe("You beat NOTHING-9000's grid at the bell, Aura +7.4 to −3.1. You already have its banner tile.");
+    expect(day(nothing({ beat: false, tile: false, aura: 2, atBell: { mine: -5, bot: 2 } }), -5)).toBe("NOTHING-9000's grid held at the bell, Aura +2.0 to your −5.0.");
+    expect(day(nothing({ beat: null, tile: false, atBell: null }))).toBe("The bell is still settling NOTHING Day.");
+    expect(day(nothing({ beat: false, tile: false, aura: null, squares: [], atBell: { mine: 7.4, bot: null } }))).toBe("NOTHING-9000 had no grid that day, so there was nothing to beat.");
+    expect(day(nothing({ beat: false, tile: false, atBell: null }))).toBe("You had no call when the bell judged NOTHING Day.");
     expect(modifierResult(grid({ modifier: "nothing_day", nothing: nothing() }))!.title).toBe("NOTHING Day");
+  });
+
+  it("NOTHING Day keeps the bell's numbers when a card settles after it, and says why the grids moved", () => {
+    // At the bell: you +1.0 to the bot's +0.5. Then a late card: you −2.0, the bot +2.5.
+    const won = grid({ modifier: "nothing_day", aura: -2, nothing: nothing({ aura: 2.5, atBell: { mine: 1, bot: 0.5 } }) });
+    expect(modifierResult(won)!.text).toBe("You beat NOTHING-9000's grid at the bell, Aura +1.0 to +0.5. Banner tile earned: it's in your home's storage. A card that settled after the bell doesn't change it.");
+    // And the other way: held at the bell, ahead now.
+    const held = grid({ modifier: "nothing_day", aura: 3.5, nothing: nothing({ beat: false, tile: false, aura: 2, atBell: { mine: 1.5, bot: 2 } }) });
+    expect(modifierResult(held)!.text).toBe("NOTHING-9000's grid held at the bell, Aura +2.0 to your +1.5. A card that settled after the bell doesn't change it.");
   });
 
   it("nothing to say on a Blind Slate, or on a day you made no call", () => {

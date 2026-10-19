@@ -1481,6 +1481,26 @@ export const nothingDayWins = pgTable(
   ],
 );
 
+// NOTHING Day: every resident's Slate Aura and NOTHING-9000's as the bell
+// judged them (a card not settled by then counted 0). A card that settles
+// later moves the grids, never the verdict, so the verdict keeps these
+// numbers. `botAuraCenti` null: the bot had no grid. Never changes.
+export const nothingDayGrids = pgTable(
+  "nothing_day_grids",
+  {
+    cityDay: date("city_day", { mode: "string" })
+      .notNull()
+      .references(() => slates.cityDay),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    auraCenti: integer("aura_centi").notNull(),
+    botAuraCenti: integer("bot_aura_centi"),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.cityDay, t.userId] })],
+);
+
 // Bell Stamps: one a city day, for calling that day.
 export const bellStamps = pgTable(
   "bell_stamps",

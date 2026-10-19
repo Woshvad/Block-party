@@ -1,7 +1,7 @@
 import { CAST, type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, againstCity, cityDay, gridText, modifierFor, oddsCredit, pickSlate, slateNumber, square } from "@bp/core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client";
-import { bellSteps, calls, contrarianCards, markets, nothingDayWins, slateCards, slates } from "./schema";
+import { bellSteps, calls, contrarianCards, markets, nothingDayGrids, nothingDayWins, slateCards, slates } from "./schema";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -145,8 +145,9 @@ export async function myGrid(db: Db, userId: string, day: unknown, opts: { now?:
     // (the gold border), as the bell recorded it. Null on other days, and
     // until the bell has counted (never a false "no border").
     contrarian: s.modifier === "contrarian_day" ? await contrarianSquares(db, day, cards, mine) : null,
-    // NOTHING Day: NOTHING-9000's grid under yours, and whether yours beat it
-    // at the bell (null until the bell has settled it). Null on other days.
+    // NOTHING Day: NOTHING-9000's grid under yours, whether yours beat it at
+    // the bell (null until the bell has settled it), and the two totals the
+    // bell judged. Null on other days.
     nothing: s.modifier === "nothing_day" ? await nothingDay(db, userId, day, cards, all) : null,
   };
 }
@@ -185,10 +186,19 @@ async function nothingDay(db: Db, userId: string, day: string, cards: GridCard[]
     .select({ tile: nothingDayWins.tile })
     .from(nothingDayWins)
     .where(and(eq(nothingDayWins.cityDay, day), eq(nothingDayWins.userId, userId)));
+  const [judged] = await db
+    .select({ mine: nothingDayGrids.auraCenti, bot: nothingDayGrids.botAuraCenti })
+    .from(nothingDayGrids)
+    .where(and(eq(nothingDayGrids.cityDay, day), eq(nothingDayGrids.userId, userId)));
   return {
     squares,
     aura: bot.length ? bot.reduce((a, c) => a + (c.aura ?? 0), 0) / 100 : null,
     beat: settled ? !!win : null,
     tile: !!win?.tile,
+    // Your Slate Aura and the bot's when the bell judged them (a card not
+    // settled by then counted 0): the numbers the verdict stands on. A card
+    // that settles later moves the grids and `aura`, never these. Null until
+    // the bell has judged, or if you had no call then.
+    atBell: judged ? { mine: judged.mine / 100, bot: judged.bot === null ? null : judged.bot / 100 } : null,
   };
 }

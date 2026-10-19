@@ -2,7 +2,7 @@ import { CAST, type CityDay, NOTHING_DAY_TILE, NPC_IDS, beatsBot, cityMajority }
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client";
 import { grantEarned } from "./home";
-import { calls, contrarianCards, markets, nothingDayWins, slateCards, slates } from "./schema";
+import { calls, contrarianCards, markets, nothingDayGrids, nothingDayWins, slateCards, slates } from "./schema";
 import { cityCalls } from "./tower";
 
 // The Bell Modifier's results, settled once per bell (runBell records the
@@ -54,7 +54,9 @@ async function recordMajorities(db: Db, day: CityDay, now: Date) {
 
 // NOTHING Day: every resident whose Slate Aura beat NOTHING-9000's grid wins
 // the day; the first win brings the banner tile. Each grid is totalled the way
-// the grid counts it (Slate calls only, an unsettled square is 0).
+// the grid counts it (Slate calls only, an unsettled square is 0), and every
+// resident's total is recorded with the bot's: a card that settles after the
+// bell moves the grids, never the verdict, and the verdict keeps its numbers.
 async function payBannerTiles(db: Db, day: CityDay, now: Date) {
   const ids = (await db.select({ marketId: slateCards.marketId }).from(slateCards).where(eq(slateCards.cityDay, day))).map((c) => c.marketId);
   const locked = ids.length
@@ -66,16 +68,30 @@ async function payBannerTiles(db: Db, day: CityDay, now: Date) {
   const totals = new Map<string, number>();
   for (const c of locked) totals.set(c.userId, (totals.get(c.userId) ?? 0) + (c.aura ?? 0));
   const bot = totals.get(CAST.nothing_9000.id) ?? null;
+  // Sorted, so two racing runs insert in the same order and can't deadlock.
+  const judged = [...totals]
+    .filter(([userId]) => !NPC_IDS.includes(userId))
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([userId, aura]) => ({ cityDay: day, userId, auraCenti: aura, botAuraCenti: bot, at: now }));
+  // All or none, and a replayed step keeps the first count.
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < judged.length; i += 1000) await tx.insert(nothingDayGrids).values(judged.slice(i, i + 1000)).onConflictDoNothing();
+  });
+  // Paid from that record, so a replay judges by the bell's count too.
+  const record = await db
+    .select({ userId: nothingDayGrids.userId, aura: nothingDayGrids.auraCenti, bot: nothingDayGrids.botAuraCenti })
+    .from(nothingDayGrids)
+    .where(eq(nothingDayGrids.cityDay, day));
   let winners = 0;
   let tiles = 0;
-  for (const [userId, aura] of totals) {
-    if (NPC_IDS.includes(userId) || !beatsBot(aura, bot)) continue;
+  for (const r of record) {
+    if (!beatsBot(r.aura, r.bot)) continue;
     const won = await db.transaction(async (tx) => {
       // Once: the tile is an earned piece (once per owner), and the win is
       // keyed by day and resident, so a replayed bell grants and records
       // nothing new.
-      const tile = await grantEarned(tx, userId, NOTHING_DAY_TILE);
-      const [row] = await tx.insert(nothingDayWins).values({ cityDay: day, userId, auraCenti: aura, botAuraCenti: bot!, tile, at: now }).onConflictDoNothing().returning({ tile: nothingDayWins.tile });
+      const tile = await grantEarned(tx, r.userId, NOTHING_DAY_TILE);
+      const [row] = await tx.insert(nothingDayWins).values({ cityDay: day, userId: r.userId, auraCenti: r.aura, botAuraCenti: r.bot!, tile, at: now }).onConflictDoNothing().returning({ tile: nothingDayWins.tile });
       return row ?? null;
     });
     if (won) {

@@ -48,9 +48,14 @@ export function modifierResult(g: OpenGrid): { title: string; text: string } | n
     const title = "NOTHING Day";
     const bot = g.nothing;
     if (bot.beat === null) return { title, text: "The bell is still settling NOTHING Day." };
-    if (bot.aura === null) return { title, text: "NOTHING-9000 had no grid that day, so there was nothing to beat." };
-    if (bot.beat) return { title, text: `You beat NOTHING-9000's grid, Aura ${auraText(g.aura)} to ${auraText(bot.aura)}. ${bot.tile ? "Banner tile earned: it's in your home's storage." : "You already have its banner tile."}` };
-    return { title, text: `NOTHING-9000's grid held, Aura ${auraText(bot.aura)} to your ${auraText(g.aura)}.` };
+    // The verdict's own numbers are the bell's. A card that settled after it
+    // moves both grids (and the Aura shown with them), never the verdict.
+    const at = bot.atBell;
+    if (!at) return { title, text: "You had no call when the bell judged NOTHING Day." };
+    if (at.bot === null) return { title, text: "NOTHING-9000 had no grid that day, so there was nothing to beat." };
+    const moved = at.mine !== g.aura || at.bot !== bot.aura ? " A card that settled after the bell doesn't change it." : "";
+    if (bot.beat) return { title, text: `You beat NOTHING-9000's grid at the bell, Aura ${auraText(at.mine)} to ${auraText(at.bot)}. ${bot.tile ? "Banner tile earned: it's in your home's storage." : "You already have its banner tile."}${moved}` };
+    return { title, text: `NOTHING-9000's grid held at the bell, Aura ${auraText(at.bot)} to your ${auraText(at.mine)}.${moved}` };
   }
   return null;
 }

@@ -383,8 +383,10 @@ export type OpenGrid = {
   // Contrarian Day: which squares went against the city majority (the gold
   // border); null on other days, and until the bell has counted.
   contrarian: boolean[] | null;
-  // NOTHING Day: NOTHING-9000's grid under yours; beat is null until the bell settles it.
-  nothing: { squares: GridSquare[]; aura: number | null; beat: boolean | null; tile: boolean } | null;
+  // NOTHING Day: NOTHING-9000's grid under yours; beat is null until the bell
+  // settles it. atBell: both totals as the bell judged them, which a card
+  // settling later doesn't move (null if you had no call then).
+  nothing: { squares: GridSquare[]; aura: number | null; beat: boolean | null; tile: boolean; atBell: { mine: number; bot: number | null } | null } | null;
 };
 export type Grid = { cityDay: string; sealed: true; bellAt: string } | OpenGrid;
 export type MarketView = {

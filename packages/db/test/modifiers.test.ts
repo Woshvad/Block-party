@@ -314,7 +314,7 @@ describe("NOTHING Day: beat the bot's grid for a banner tile", () => {
 
     // The Tower step has scored the day; the modifier step hasn't run yet.
     await s.ring(["tower"]);
-    expect((await opened(s, winner)).nothing).toEqual({ squares: expect.any(Array), aura: botAura / 100, beat: null, tile: false });
+    expect((await opened(s, winner)).nothing).toEqual({ squares: expect.any(Array), aura: botAura / 100, beat: null, tile: false, atBell: null });
     expect((await reel(db, winner, { now: s.afterBell, bellDay: s.day }))!.beatTheBot).toBeNull(); // not counted yet, never a false 0
     expect(await tiles(winner)).toEqual([]);
 
@@ -348,6 +348,51 @@ describe("NOTHING Day: beat the bot's grid for a banner tile", () => {
     await expect(client`INSERT INTO nothing_day_wins (city_day, user_id, aura_centi, bot_aura_centi, tile, at) VALUES (${s.day}, ${loser}, 0, 0, false, now())`).rejects.toThrow(/nothing_day_wins_beat/);
   });
 
+  it("judged with the bell's own numbers: a card that settles later moves the grids, never the verdict", async () => {
+    const s = await slateDay("nothing_day");
+    const [ahead, behind] = [await makeResident(db), await makeResident(db)];
+    await npcCalls(db, { now: s.at(9) }); // NOTHING-9000: NO on every card
+    await call(s, ahead, 1, "yes", 60);
+    await call(s, ahead, 2, "yes", 99); // REKT when card 2 comes in NO
+    await call(s, behind, 1, "no", 1);
+    await call(s, behind, 2, "no", 1); // and this one wins big
+    await s.poll(9 + 1 / 60);
+    // Every card but card 2 settles YES before the bell; card 2 is still out when it rings.
+    s.ms.forEach((m, i) => i !== 2 && (m.resolved = true));
+    await pollOdds(db, s.f.provider, { now: s.at(21) });
+    await s.ring();
+    const settledBot = [0, 1, 3, 4, 5].reduce((a, i) => a + auraCenti(true, PRICES[i]!, nothingCall(PRICES[i]!)!.chance), 0);
+    const atBell = { ahead: auraCenti(true, 50, 60), behind: auraCenti(true, 50, 1), bot: settledBot };
+    expect(atBell.ahead > atBell.bot && atBell.behind < atBell.bot).toBe(true);
+
+    // 01:00: card 2 comes in NO. Now the bot's grid beats ahead's and behind's beats the bot's.
+    s.ms[2]!.resolved = false;
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + D + H) });
+    const later = { ahead: atBell.ahead + auraCenti(false, 60, 99), behind: atBell.behind + auraCenti(false, 60, 1), bot: atBell.bot + auraCenti(false, 60, nothingCall(60)!.chance) };
+    expect(later.ahead < later.bot && later.behind > later.bot).toBe(true);
+
+    // The grids show the late card; the verdict, and the numbers it stands on, are the bell's.
+    const a = await opened(s, ahead);
+    expect([a.aura, a.nothing!.aura]).toEqual([later.ahead / 100, later.bot / 100]);
+    expect(a.nothing).toMatchObject({ beat: true, tile: true, atBell: { mine: atBell.ahead / 100, bot: atBell.bot / 100 } });
+    const b = await opened(s, behind);
+    expect([b.aura, b.nothing!.aura]).toEqual([later.behind / 100, later.bot / 100]);
+    expect(b.nothing).toMatchObject({ beat: false, tile: false, atBell: { mine: atBell.behind / 100, bot: atBell.bot / 100 } });
+    expect(await tiles(behind)).toEqual([]);
+
+    // Recorded once for every resident who played (never the cast), and it never changes.
+    const judged = await client`SELECT user_id, aura_centi, bot_aura_centi FROM nothing_day_grids WHERE city_day = ${s.day} ORDER BY aura_centi DESC`;
+    expect(judged).toEqual([
+      { user_id: ahead, aura_centi: atBell.ahead, bot_aura_centi: atBell.bot },
+      { user_id: behind, aura_centi: atBell.behind, bot_aura_centi: atBell.bot },
+    ]);
+    await stepModifier(db, s.day, new Date(s.d0 + D + 2 * H)); // a replay after the late card keeps the bell's count
+    expect(await client`SELECT user_id, aura_centi, bot_aura_centi FROM nothing_day_grids WHERE city_day = ${s.day} ORDER BY aura_centi DESC`).toEqual(judged);
+    expect(await client`SELECT user_id FROM nothing_day_wins WHERE city_day = ${s.day}`).toEqual([{ user_id: ahead }]);
+    await expect(client`UPDATE nothing_day_grids SET aura_centi = 0 WHERE city_day = ${s.day}`).rejects.toThrow(/never changes/);
+    await expect(client`DELETE FROM nothing_day_grids WHERE city_day = ${s.day}`).rejects.toThrow(/never changes/);
+  });
+
   it("a second NOTHING Day win is recorded, but the tile comes once", async () => {
     const winner = await makeResident(db);
     for (const first of [true, false]) {
@@ -370,7 +415,7 @@ describe("NOTHING Day: beat the bot's grid for a banner tile", () => {
     await s.poll(9 + 1 / 60);
     await s.settle();
     expect((await s.ring()).ran.modifier).toEqual({ modifier: "nothing_day", botAura: null, winners: 0, tiles: 0 });
-    expect((await opened(s, me)).nothing).toEqual({ squares: ["black", "black", "black", "black", "black", "black"], aura: null, beat: false, tile: false });
+    expect((await opened(s, me)).nothing).toEqual({ squares: ["black", "black", "black", "black", "black", "black"], aura: null, beat: false, tile: false, atBell: { mine: 9, bot: null } });
     expect(await tiles(me)).toEqual([]);
   });
 
