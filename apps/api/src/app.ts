@@ -232,6 +232,9 @@ import {
   staffMakeGoods,
   myMakeGoods,
   collectMakeGood,
+  renameHandle,
+  handleNotice,
+  seeHandleNotice,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -436,8 +439,9 @@ export function createApp(cfg: AppConfig) {
     c.set("sessionToken", token);
     const write = c.req.method !== "GET";
     await limit(c, `user:${s.userId}:${write ? "w" : "r"}`, write ? limits.writesPerUserPerMinute : limits.readsPerUserPerMinute, 60);
-    // A suspended resident can read, log out and appeal; nothing else.
-    if (write && !/^\/v1\/(auth\/logout|restrictions\/[^/]+\/appeal$)/.test(c.req.path)) {
+    // A suspended resident can read, log out, appeal and dismiss a rename
+    // notice; nothing else.
+    if (write && !/^\/v1\/(auth\/logout|restrictions\/[^/]+\/appeal$|resident\/handle-notice\/[^/]+\/seen$)/.test(c.req.path)) {
       const active = await activeRestrictions(db, s.userId, now());
       const suspended = active.filter((r) => r.kind === "suspended");
       if (suspended.length > 0) {
@@ -541,7 +545,7 @@ export function createApp(cfg: AppConfig) {
 
   app.get("/v1/me", auth, async (c) => {
     const userId = c.get("userId");
-    const [resident, crew, balance, telegramId] = await Promise.all([getResident(db, userId), myCrew(db, userId), getBalance(db, userAccountId(userId)), telegramChatId(db, userId)]);
+    const [resident, crew, balance, telegramId, renamed] = await Promise.all([getResident(db, userId), myCrew(db, userId), getBalance(db, userAccountId(userId)), telegramChatId(db, userId), handleNotice(db, userId)]);
     return c.json({
       userId,
       status: c.get("status"),
@@ -551,6 +555,8 @@ export function createApp(cfg: AppConfig) {
       // The Telegram account this is (or null), so the Mini App can see a
       // stored session is already the one it was opened as.
       telegramId,
+      // Staff renamed their @handle and they haven't tapped OK yet (or null).
+      handleNotice: renamed,
     });
   });
 
@@ -575,13 +581,18 @@ export function createApp(cfg: AppConfig) {
     const pick = pickForMe(cryptoRandomInt);
     return c.json({ ...pick, handle: await suggestFreeHandle(db) });
   });
-  app.get("/v1/handles/:handle/available", auth, async (c) => c.json({ available: await isHandleAvailable(db, c.req.param("handle") ?? "") }));
+  // A handle with one of staff's blocked words reads as taken, as move-in refuses it.
+  app.get("/v1/handles/:handle/available", auth, async (c) => {
+    const h = c.req.param("handle") ?? "";
+    return c.json({ available: !containsBlockedWord(h, cfg.blockedWords) && (await isHandleAvailable(db, h)) });
+  });
   app.post("/v1/resident", auth, async (c) => {
     const b = await body(c);
     noBlockedWord(b.name, "name");
+    noBlockedWord(b.handle, "handle");
     const r = await createResident(db, c.get("userId"), b);
-    // Checked apart: a flagged name comes down to the handle, while a handle
-    // can't change, so staff deal with the resident.
+    // Checked apart: a flagged name comes down to the handle, while a flagged
+    // handle waits for staff, who can rename it.
     await enqueueModeration(db, { kind: "resident_name", ref: r.userId, authorId: r.userId, text: r.name });
     await enqueueModeration(db, { kind: "resident_handle", ref: r.userId, authorId: r.userId, text: r.handle });
     return c.json(r, 201);
@@ -602,6 +613,8 @@ export function createApp(cfg: AppConfig) {
     return c.json(r);
   });
   app.put("/v1/resident/traits", auth, async (c) => c.json(await swapTraits(db, c.get("userId"), (await body(c)).traits, opts())));
+  // OK on the notice that staff renamed your @handle (GET /v1/me carries it).
+  app.post("/v1/resident/handle-notice/:id/seen", auth, async (c) => c.json(await seeHandleNotice(db, c.get("userId"), uuid(c, "id"), opts())));
   // Who's who, for chat, DMs, boards and frens lists: ?ids=a,b,c (up to 100).
   app.get("/v1/residents", auth, async (c) => c.json(await residentsByIds(db, (c.req.query("ids") ?? "").split(",").filter(Boolean))));
   app.get("/v1/residents/:handle", auth, async (c) => {
@@ -848,6 +861,13 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/staff/make-goods", auth, async (c) => {
     const b = await body(c);
     return c.json(await createMakeGood(db, c.get("userId"), { reason: b.reason, amount: b.amount }, sendOpts()), 201);
+  });
+  // Rename a resident's @handle (usually a flagged one): a neutral one unless
+  // newHandle is given, a reason they read, the handle staff saw as `from`,
+  // and the report it closes, if any. Staff's blocked words apply.
+  app.post("/v1/staff/residents/:id/handle", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await renameHandle(db, c.get("userId"), uuid(c, "id"), { newHandle: b.newHandle, reason: b.reason, from: b.from, reportId: b.reportId }, sendOpts()));
   });
   // What the AI check flagged, or couldn't check, waiting for a person.
   app.get("/v1/staff/moderation", auth, async (c) => c.json(await moderationQueue(db, c.get("userId"))));
