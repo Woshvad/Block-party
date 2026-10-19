@@ -64,11 +64,20 @@ export function reviewChoices(item: Pick<ModerationItem, "kind" | "status">): Ar
 
 // Who a Rename button renames: a flagged handle's or display name's resident
 // (the item's ref; a name taken down shows the @handle, so a handle saying the
-// same thing needs renaming too), or the target of an impersonation report.
+// same thing needs renaming too), or whoever a report is about, whatever its
+// reason: residents report a slur of a handle as harassment or "other" too,
+// and without the AI check a handle never reaches the Flagged tab.
 export function renameTarget(item: Pick<ModerationItem, "kind" | "ref">): string | null {
   return item.kind === "resident_handle" || item.kind === "resident_name" ? item.ref : null;
 }
-export const reportRenames = (r: { reason?: unknown }) => r.reason === "impersonation";
+export const reportRenames = (r: { targetUserId?: unknown }) => typeof r.targetUserId === "string" && r.targetUserId !== "";
+
+// Controls' Rename a resident, for a handle seen anywhere else: the @handle
+// typed in, ready to look up, or null while it can't be one.
+export function handleToFind(input: string): string | null {
+  const h = input.trim().replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,15}$/.test(h) ? h : null;
+}
 
 // Who a queued item's card names. A display name or handle is the resident's
 // it's on (the ref), even when staff typed it in a rename: then the author is

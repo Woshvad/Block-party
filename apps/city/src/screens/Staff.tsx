@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Api } from "../api";
 import { makeGoodConfirm, makeGoodProblem } from "../makeGoods";
 import { label } from "../palette";
-import { RESTRICT_FOR, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
+import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
@@ -412,8 +412,22 @@ function Controls({ api, act }: { api: Api; act: Act }) {
   const [country, setCountry] = useState("");
   const [ratio, setRatio] = useState("");
   const [r, setR] = useState({ userId: "", kind: "chat_mute", hours: "24", reason: "" });
+  // Rename a resident by the handle staff saw, wherever they saw it.
+  const [find, setFind] = useState("");
+  const [found, setFound] = useState<{ userId: string; handle: string } | null>(null);
+  const lookFor = handleToFind(find);
   return (
     <>
+      <section className="card">
+        <h2>Rename a resident</h2>
+        <div className="row">
+          <input className="ask" value={find} maxLength={16} autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => (setFind(e.target.value), setFound(null))} placeholder="@handle" />
+          <button className="btn" disabled={!lookFor || act.pending} onClick={() => act.run(() => api.resident(lookFor!)).then((p) => p && setFound({ userId: p.userId, handle: p.handle }))}>
+            Find
+          </button>
+        </div>
+        {found && <Rename key={found.userId} api={api} act={act} userId={found.userId} from={found.handle} onDone={() => (setFound(null), setFind(""))} />}
+      </section>
       <section className="card">
         <h2>Real trades by country</h2>
         <div className="row">

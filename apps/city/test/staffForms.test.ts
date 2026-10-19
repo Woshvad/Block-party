@@ -1,6 +1,6 @@
 import { HANDLE_RENAME, MODERATION } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { RESTRICT_FOR, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
+import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
 
 describe("closing a report from the staff console", () => {
   const note = "spam links ok"; // 13 characters: enough for a note, too short for a reason
@@ -59,12 +59,23 @@ describe("where a flagged item stands", () => {
 describe("renaming a flagged @handle", () => {
   const reason = "Your handle named a real person.";
 
-  it("shows on flagged handles and display names, and on impersonation reports", () => {
+  it("shows on flagged handles and display names, and on every report about a resident", () => {
     expect(renameTarget({ kind: "resident_handle", ref: "u1" })).toBe("u1");
     expect(renameTarget({ kind: "resident_name", ref: "u2" })).toBe("u2"); // a name taken down shows the @handle
     for (const kind of ["board", "crew", "dm", "room", "pitch", "crew_name", "make_good"]) expect(renameTarget({ kind, ref: "x" }), kind).toBeNull();
-    expect(reportRenames({ reason: "impersonation" })).toBe(true);
-    for (const r of ["scam", "harassment", "spam", "under_18", "unwanted_romance", "other", undefined]) expect(reportRenames({ reason: r }), String(r)).toBe(false);
+    // A slur of a handle gets reported as harassment or "other" too, and without
+    // the AI check it never reaches Flagged.
+    for (const reason of ["impersonation", "scam", "harassment", "spam", "under_18", "unwanted_romance", "other", undefined]) {
+      const report = { reason, targetUserId: "u3" };
+      expect(reportRenames(report), String(reason)).toBe(true);
+    }
+    for (const targetUserId of [undefined, null, ""]) expect(reportRenames({ targetUserId })).toBe(false);
+  });
+
+  it("Controls finds a resident to rename by the handle staff saw anywhere", () => {
+    expect(handleToFind(" @Cool_Guy ")).toBe("Cool_Guy");
+    expect(handleToFind("neighbour_04821")).toBe("neighbour_04821");
+    for (const bad of ["", "@", "  ", "a b", "x".repeat(16), "roof-rat", "@@x"]) expect(handleToFind(bad), bad).toBeNull();
   });
 
   it("a flagged handle or name's card names the resident it's on, even when staff chose it in a rename", () => {
