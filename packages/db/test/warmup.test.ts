@@ -170,7 +170,8 @@ describe("the warm-up feed", () => {
     await pollWarmup(db, s.feed, { now: at(t + 14 * MIN) }); // the first hasn't ended yet
     expect(s.asked.at(-1)).toEqual([]);
     await pollWarmup(db, s.feed, { now: at(t + 31 * MIN) });
-    // Both ended; the window nobody called (10:30) isn't asked about.
+    await pollWarmup(db, s.feed, { now: at(t + 46 * MIN) });
+    // Both ended; the window nobody called (10:30, over at 10:45) isn't asked about.
     expect(s.asked.at(-1)).toEqual([s.idOf(t + 15 * MIN), s.idOf(t)]);
   });
 });
