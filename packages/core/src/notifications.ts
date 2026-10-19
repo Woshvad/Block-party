@@ -10,6 +10,9 @@ export const NOTIFY = {
   defaultQuietEnd: 8,
   staleAfterHours: 12, // a deferred ping older than this is dropped, not sent late
   crewPostsPerDay: 3,
+  bellPingMinutes: 120, // "Bell in 2h" is queued two hours before the bell...
+  bellPingLateMinutes: 30, // ...and dropped if it can't go out within half an hour, when "2h" would be wrong
+  shiftPingWithinMinutes: 60, // a Mod Shift that ended longer ago than this without its ping gets none
 } as const;
 
 export const ALERT_KINDS = ["shift_done", "nap_done", "away_shift_ready", "faded", "snap", "syndicate_shake", "warmup_settled"] as const;
@@ -45,6 +48,25 @@ export const TEMPLATES: Record<NotifyKind, readonly string[]> = {
   warmup_settled: ["Your warm-up settled. See your receipt.", "The 15-minute window closed. Your receipt is in."],
 };
 
+// The daily ping says the most useful thing it can, worked out as it goes out:
+// a make-good the resident can still collect, then today's clue if they haven't
+// searched, then the usual lines. Wording only: what sends it (an unprotected
+// streak, something riding) doesn't change, and it's still one ping a day.
+export const DAILY_TOPICS = ["make_good", "clue"] as const;
+export type DailyTopic = (typeof DAILY_TOPICS)[number];
+export const DAILY_TOPIC_TEMPLATES: Record<DailyTopic, readonly string[]> = {
+  make_good: [
+    "The city owes you one. Your make-good is on Today.",
+    "gm. A make-good is waiting for you on Today.",
+    "Sorry for the trouble, ser. Collect your make-good on Today.",
+  ],
+  clue: [
+    "Today's clue is up. Something's hidden in the city.",
+    "gm. A new riddle is up. One search, wherever you stand.",
+    "Something's hidden in the city today. Got a hunch?",
+  ],
+};
+
 export const FAREWELL = "We'll stop pinging. The city's still here, ser.";
 
 // Words a push must never carry: money, wallets, FOMO, asks to share or trade.
@@ -68,6 +90,19 @@ export function chooseTemplate(kind: NotifyKind, recentlyUsed: ReadonlyMap<strin
   const fresh = all.filter((t) => (recentlyUsed.get(t) ?? 0) < cutoff);
   const pool = fresh.length ? fresh : [...all].sort((a, b) => (recentlyUsed.get(a) ?? 0) - (recentlyUsed.get(b) ?? 0)).slice(0, 1);
   return pool[Math.abs(seed) % pool.length]!;
+}
+
+// The daily ping's wording: a make-good beats the clue, which beats the usual
+// lines, whatever order the topics come in. A topic whose lines were all used
+// in the last 5 days gives way to the next, so its wording never repeats.
+export function chooseDailyTemplate(topics: readonly DailyTopic[], recentlyUsed: ReadonlyMap<string, number>, now: number, seed: number, values: Record<string, string | number> = {}): string | null {
+  const cutoff = now - NOTIFY.noRepeatDays * 86_400_000;
+  for (const topic of DAILY_TOPICS) {
+    if (!topics.includes(topic)) continue;
+    const fresh = DAILY_TOPIC_TEMPLATES[topic].filter((t) => fillable(t, values) && (recentlyUsed.get(t) ?? 0) < cutoff);
+    if (fresh.length) return fresh[Math.abs(seed) % fresh.length]!;
+  }
+  return chooseTemplate("daily", recentlyUsed, now, seed, values);
 }
 
 // --- Time zones and quiet hours -------------------------------------------

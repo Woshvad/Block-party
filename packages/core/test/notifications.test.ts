@@ -1,6 +1,21 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { ALERT_KINDS, FAREWELL, NEVER_SAY, NOTIFY, TEMPLATES, afterQuietHours, chooseTemplate, fillable, inQuietHours, isTimeZone, localParts, render } from "../src";
+import {
+  ALERT_KINDS,
+  DAILY_TOPIC_TEMPLATES,
+  FAREWELL,
+  NEVER_SAY,
+  NOTIFY,
+  TEMPLATES,
+  afterQuietHours,
+  chooseDailyTemplate,
+  chooseTemplate,
+  fillable,
+  inQuietHours,
+  isTimeZone,
+  localParts,
+  render,
+} from "../src";
 
 describe("templates", () => {
   it("10+ daily templates in the CT voice", () => {
@@ -10,9 +25,24 @@ describe("templates", () => {
 
   it("never mention balances, wallets, deposits, trades, sharing or FOMO", () => {
     for (const [kind, list] of Object.entries(TEMPLATES)) for (const t of list) expect(NEVER_SAY.test(t), `${kind}: ${t}`).toBe(false);
+    for (const [topic, list] of Object.entries(DAILY_TOPIC_TEMPLATES)) for (const t of list) expect(NEVER_SAY.test(t), `daily ${topic}: ${t}`).toBe(false);
     expect(NEVER_SAY.test(FAREWELL)).toBe(false);
     expect(NEVER_SAY.test("check your wallet balance")).toBe(true); // the guard itself works
     expect(NEVER_SAY.test("don't miss out, last chance")).toBe(true);
+  });
+
+  it("every line can be filled from what its producer sends, and needs nothing else", () => {
+    // What each kind's producer passes: the daily scheduler the streak, a
+    // fade or a Snap the other resident's handle, everything else nothing.
+    const sent: Record<string, Record<string, string | number>> = { daily: { streak: 3 }, faded: { handle: "anon" }, snap: { handle: "anon" } };
+    const lines = [...Object.entries(TEMPLATES), ...Object.values(DAILY_TOPIC_TEMPLATES).map((l) => ["daily", l] as const)];
+    for (const [kind, list] of lines)
+      for (const t of list) {
+        expect(fillable(t, sent[kind] ?? {}), `${kind}: ${t}`).toBe(true);
+        expect(render(t, sent[kind] ?? {}), `${kind}: ${t}`).not.toMatch(/[{}]/);
+      }
+    // Each topic has wording that doesn't lean on the streak.
+    for (const list of Object.values(DAILY_TOPIC_TEMPLATES)) expect(list.filter((t) => fillable(t, {})).length).toBeGreaterThanOrEqual(2);
   });
 
   it("renders only known placeholders", () => {
@@ -43,6 +73,39 @@ describe("templates", () => {
     // once every one was used recently, the least recent comes back
     const all = new Map(TEMPLATES.daily.map((t, i) => [t, now - (TEMPLATES.daily.length - i) * 1000]));
     expect(chooseTemplate("daily", all, now, 3, { streak: 3 })).toBe(TEMPLATES.daily[0]);
+  });
+});
+
+describe("the daily ping's topics", () => {
+  const now = Date.UTC(2026, 9, 9);
+  const v = { streak: 4 };
+
+  it("a make-good beats the clue, which beats the usual lines, whatever order they come in", () => {
+    for (let seed = 0; seed < 50; seed++) {
+      expect(DAILY_TOPIC_TEMPLATES.make_good).toContain(chooseDailyTemplate(["clue", "make_good"], new Map(), now, seed, v));
+      expect(DAILY_TOPIC_TEMPLATES.make_good).toContain(chooseDailyTemplate(["make_good", "clue"], new Map(), now, seed, v));
+      expect(DAILY_TOPIC_TEMPLATES.clue).toContain(chooseDailyTemplate(["clue"], new Map(), now, seed, v));
+      expect(TEMPLATES.daily).toContain(chooseDailyTemplate([], new Map(), now, seed, v));
+    }
+  });
+
+  it("a topic whose lines were all used in 5 days gives way: no line repeats while any other is fresh", () => {
+    const used = new Map<string, number>();
+    const seen: string[] = [];
+    // Ten days running with a make-good and the clue both waiting: each
+    // topic's three lines, then the usual ones, never the same line twice.
+    for (let d = 0; d < 10; d++) {
+      const t = chooseDailyTemplate(["make_good", "clue"], used, now, d * 13, v)!;
+      expect(seen).not.toContain(t);
+      seen.push(t);
+      used.set(t, now - 1000);
+    }
+    expect(seen.slice(0, 3).every((t) => DAILY_TOPIC_TEMPLATES.make_good.includes(t))).toBe(true);
+    expect(seen.slice(3, 6).every((t) => DAILY_TOPIC_TEMPLATES.clue.includes(t))).toBe(true);
+    expect(seen.slice(6).every((t) => TEMPLATES.daily.includes(t))).toBe(true);
+    // Lines used more than 5 days ago are fresh again.
+    const old = new Map(DAILY_TOPIC_TEMPLATES.make_good.map((t) => [t, now - 6 * 86_400_000]));
+    expect(DAILY_TOPIC_TEMPLATES.make_good).toContain(chooseDailyTemplate(["make_good"], old, now, 1, v));
   });
 });
 
