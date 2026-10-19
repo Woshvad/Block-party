@@ -87,7 +87,7 @@ describe("the warm-up over HTTP", () => {
     w.clock.now = new Date(t + 30_000);
     const card = await call("GET", "/v1/warmup", { token: me.token, via: w.app });
     expect(card.status).toBe(200);
-    expect(card.body).toMatchObject({ eligible: true, reason: null, day: 0, left: 3, feed: { live: true, credit: "Sample window · Not real" }, fallback: null, mine: [] });
+    expect(card.body).toMatchObject({ eligible: true, reason: null, day: 0, left: 3, feed: { live: true, credit: "Sample window · Not real" }, mine: [] });
     expect(card.body.window).toMatchObject({ startsAt: new Date(t).toISOString(), entryClosesAt: new Date(t + 2 * MIN).toISOString(), endsAt: new Date(t + 15 * MIN).toISOString() });
     // A free call, never a real one.
     expect(JSON.stringify(card.body)).not.toMatch(/back it for real|wallet|usdc|deposit/i);
@@ -121,7 +121,7 @@ describe("the warm-up over HTTP", () => {
     const closed = await call("POST", "/v1/warmup/calls", { token: me.token, via: w.app, body: { side: "up" } });
     expect([closed.status, closed.body.error]).toMatchObject([409, { code: "WINDOW_CLOSED", message: `Calls close 2 minutes into a window. The next one opens at ${new Date(t + 15 * MIN).toISOString().slice(11, 16)} UTC.` }]);
     expect((await call("GET", "/v1/warmup", { token: me.token, via: w.app })).body).toMatchObject({ window: null, nextWindowAt: new Date(t + 15 * MIN).toISOString() });
-    // No feed configured (no ODDS_SOURCE): never a window, only the fallback.
+    // No feed configured (no ODDS_SOURCE): never a window to call.
     const bare = world({ warmup: null });
     bare.clock.now = new Date(t + 15 * MIN + 30_000);
     const down = await call("POST", "/v1/warmup/calls", { token: me.token, via: bare.app, body: { side: "up" } });

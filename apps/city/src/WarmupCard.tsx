@@ -9,7 +9,7 @@ import { CONTRARIAN, CONTRARIAN_LINE, type WarmupView, calledLine, nextRefresh, 
 // with a free UP or DOWN call on Bitcoin's next 15 minutes, your receipt
 // while it runs, and the mini-reel once it settles. Switched off (the API's
 // FEATURE_WARMUP) or done with, there's no card at all.
-export default function WarmupCard({ api, now, onCityMarkets }: { api: Api; now: number; onCityMarkets?: () => void }) {
+export default function WarmupCard({ api, now }: { api: Api; now: number }) {
   // Off, the API answers 503: no card, and the Tower works the same.
   const w = useLoad(() => api.warmup().catch(() => null), [api]);
   const [pending, setPending] = useState(false);
@@ -43,7 +43,7 @@ export default function WarmupCard({ api, now, onCityMarkets }: { api: Api; now:
   };
   const view = warmupView(w.data, now);
   if (!view) return null;
-  return <WarmupCardView view={view} pending={pending} feedback={feedback} onCall={(side) => void call(side)} onCityMarkets={onCityMarkets} />;
+  return <WarmupCardView view={view} pending={pending} feedback={feedback} onCall={(side) => void call(side)} />;
 }
 
 export type WarmupCardViewProps = {
@@ -51,9 +51,8 @@ export type WarmupCardViewProps = {
   pending: boolean;
   feedback: { text: string; bad: boolean } | null;
   onCall: (side: WarmupSide) => void;
-  onCityMarkets?: () => void;
 };
-export function WarmupCardView({ view: v, pending, feedback, onCall, onCityMarkets }: WarmupCardViewProps) {
+export function WarmupCardView({ view: v, pending, feedback, onCall }: WarmupCardViewProps) {
   return (
     <section className="warmup" aria-labelledby="warmup-title">
       <div className="warmup-door">
@@ -99,18 +98,6 @@ export function WarmupCardView({ view: v, pending, feedback, onCall, onCityMarke
         </ol>
       )}
       {v.next && <p className="warmup-next">{v.next}</p>}
-      {v.fallback && (
-        <div className="warmup-fallback">
-          <p>
-            Meanwhile, a City market: <q>{v.fallback.question}</q>
-          </p>
-          {onCityMarkets && (
-            <button className="btn light" onClick={onCityMarkets}>
-              City markets
-            </button>
-          )}
-        </div>
-      )}
       {v.note && <p className="warmup-small">{v.note}</p>}
       {feedback && (
         <p className={`action-feedback ${feedback.bad ? "bad" : "good"}`} role={feedback.bad ? "alert" : "status"}>

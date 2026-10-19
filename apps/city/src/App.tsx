@@ -205,8 +205,6 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
   const [room, setRoom] = useState<string | null>(null);
   const [page, setPage] = useState<PageId | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
-  // Games opens on City markets when the warm-up sends someone there.
-  const [gamesStart, setGamesStart] = useState<"city" | undefined>(undefined);
 
   // Opened from a link: a crew invite opens Crew with the code filled in; a
   // push the player tapped is marked opened.
@@ -263,7 +261,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
     ) : page === "staff" ? (
       <Staff api={api} onBack={back} />
     ) : page === "games" ? (
-      <Games api={api} me={me} onBack={() => (setGamesStart(undefined), back())} onChanged={refreshGm} start={gamesStart} />
+      <Games api={api} me={me} onBack={back} onChanged={refreshGm} />
     ) : page === "crew" ? (
       <Crew api={api} me={me} invite={invite} onBack={back} onChanged={refreshGm} onGoToHouse={(crewId) => (setPage(null), setTrip({ place: `crew_house:${crewId}`, ridesFree: false }))} />
     ) : page ? (
@@ -298,7 +296,7 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       )}
       {!pageView && tab === "home" && <HomeEditor api={api} gm={me.gm} onGm={refreshGm} onGoInside={() => setTrip({ place: `home:${me.userId}`, ridesFree: false })} />}
       {!pageView && tab === "today" && <Today api={api} onGm={(balance) => setMe((m) => ({ ...m, gm: balance }))} onBunker={(place) => setTrip({ place, ridesFree: false })} onBoard={() => go("city")} />}
-      {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} onCityMarkets={() => (setGamesStart("city"), setPage("games"))} />}
+      {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
       <AppNavigation active={page ? "more" : tab} onSelect={go} />
       <LinkedSheets api={api} me={me} onSelf={() => setPage("me")} />
     </>

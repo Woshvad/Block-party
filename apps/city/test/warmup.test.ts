@@ -15,7 +15,6 @@ const card = (over: Partial<Warmup> = {}): Warmup => ({
   feed: { live: true, credit: "Window from Polymarket · Not affiliated" },
   window: { id: "w", question: "Bitcoin Up or Down - October 19, 6:00AM-6:15AM ET", startsAt: iso(t0), entryClosesAt: iso(t0 + 2 * MIN), endsAt: iso(t0 + 15 * MIN) },
   nextWindowAt: iso(t0 + 15 * MIN),
-  fallback: null,
   mine: [],
   ...over,
 });
@@ -38,22 +37,24 @@ describe("the Contrarian at the Tower door", () => {
   });
 
   it("shows UP and DOWN only while the window takes calls, with the countdown to its 2 minutes", () => {
-    expect(warmupView(card(), t0 + 30_000)).toMatchObject({ call: { closesIn: "1m", left: 3 }, waiting: null, reel: null, next: null, fallback: null, note: null, credit: "Window from Polymarket · Not affiliated" });
+    expect(warmupView(card(), t0 + 30_000)).toMatchObject({ call: { closesIn: "1m", left: 3 }, waiting: null, reel: null, next: null, note: null, credit: "Window from Polymarket · Not affiliated" });
     expect(warmupView(card(), t0 + 2 * MIN - 5_000)!.call).toEqual({ closesIn: "5s", left: 3 });
-    // Already had today's: the window's open, but no buttons, and no City market pushed instead.
+    // Already had today's: the window's open, but no buttons.
     const usedToday = warmupView(card({ eligible: false, reason: "used_today", left: 2, mine: [entry({ startsAt: iso(t0 - 24 * 60 * MIN), endsAt: iso(t0 - 23 * 60 * MIN - 45 * MIN), stamp: "rekt", settledAt: iso(t0 - 60 * MIN), reel: reel("down") })] }), t0 + 30_000);
-    expect(usedToday).toMatchObject({ call: null, next: null, fallback: null, note: "Your next warm-up opens tomorrow." });
-    // With a window to call, the fallback waits.
-    expect(warmupView(card({ fallback: { id: "m", question: "Q?", locksAt: iso(t0) } }), t0 + 30_000)!.fallback).toBeNull();
+    expect(usedToday).toMatchObject({ call: null, next: null, note: "Your next warm-up opens tomorrow." });
     // The 2 minutes run out on the phone before the card reloads: no buttons.
-    const late = warmupView(card({ fallback: { id: "m", question: "20+ on the Roof at the bell?", locksAt: iso(t0 + 9 * 3600_000) } }), t0 + 2 * MIN);
-    expect(late).toMatchObject({ call: null, next: "Next window opens in 13m. Calls are taken in its first 2 minutes.", fallback: { id: "m", question: "20+ on the Roof at the bell?" } });
+    const late = warmupView(card(), t0 + 2 * MIN);
+    expect(late).toMatchObject({ call: null, next: "Next window opens in 13m. Calls are taken in its first 2 minutes." });
   });
 
-  it("between windows: when the next opens, and a City market meanwhile; the feed down says so", () => {
-    expect(warmupView(card({ window: null }), t0 + 7 * MIN)).toMatchObject({ call: null, next: "Next window opens in 8m. Calls are taken in its first 2 minutes.", fallback: null });
-    const down = warmupView(card({ window: null, feed: { live: false, credit: null }, fallback: { id: "m", question: "Q?", locksAt: iso(t0) } }), t0);
-    expect(down).toMatchObject({ next: "The Bitcoin feed is quiet right now.", fallback: { id: "m", question: "Q?" }, credit: null });
+  it("between windows: when the next opens, and nothing that costs GM meanwhile; the feed down says so", () => {
+    expect(warmupView(card({ window: null }), t0 + 7 * MIN)).toEqual({ call: null, waiting: null, reel: null, next: "Next window opens in 8m. Calls are taken in its first 2 minutes.", note: null, credit: "Window from Polymarket · Not affiliated" });
+    // A City market takes GM and a ticket and settles at the bell: never under
+    // "Free call, ser", even from an API that still sends one.
+    const paid = { ...card({ window: null }), fallback: { id: "m", question: "20+ on the Roof at the bell?", locksAt: iso(t0 + 9 * 3600_000) } } as Warmup;
+    expect(JSON.stringify(warmupView(paid, t0 + 7 * MIN))).not.toContain("20+ on the Roof");
+    const down = warmupView(card({ window: null, feed: { live: false, credit: null } }), t0);
+    expect(down).toMatchObject({ next: "The Bitcoin feed is quiet right now.", credit: null });
   });
 
   it("no card when it's switched off, or nothing to call and nothing recent to show", () => {

@@ -199,17 +199,17 @@ describe("window timing and the 2-minute entry", () => {
     expect(after.nextWindowAt).toEqual(at(start + 15 * MIN));
   });
 
-  it("no live feed, or a window it doesn't list or that's stopped trading: refused, and the card offers a City market", async () => {
+  it("no live feed, or a window it doesn't list or that's stopped trading: refused, and no City market offered instead", async () => {
     const t = fresh();
     const s = scripted();
     const u = await newcomer(t - 60 * MIN);
     // Nothing polled yet, and no feed at all.
-    expect(await code(makeWarmup(db, u, { side: "up" }, opts(s, t)))).toBe("FEED_DOWN");
+    await expect(makeWarmup(db, u, { side: "up" }, opts(s, t))).rejects.toMatchObject({ code: "FEED_DOWN", message: "The Bitcoin feed is quiet right now. Try again in a few minutes." });
     expect(await code(makeWarmup(db, u, { side: "up" }, { now: at(t) }))).toBe("FEED_DOWN");
     // A good poll, but 4 minutes old.
     await pollWarmup(db, s.feed, { now: at(t - 4 * MIN) });
     expect(await code(makeWarmup(db, u, { side: "up" }, opts(s, t)))).toBe("FEED_DOWN");
-    // Polled, but the feed didn't list this window.
+    // Polled, but the feed listed no window: a failed poll.
     const s2 = scripted();
     s2.listing = false;
     await pollWarmup(db, s2.feed, { now: at(t) });
@@ -220,20 +220,19 @@ describe("window timing and the 2-minute entry", () => {
     s3.trading = false;
     await pollWarmup(db, s3.feed, { now: at(t + 10_000) });
     expect((await windowRow(s3, t))!.trading).toBe(false);
-    expect(await code(makeWarmup(db, u, { side: "up" }, opts(s3, t + 20_000)))).toBe("FEED_DOWN");
+    await expect(makeWarmup(db, u, { side: "up" }, opts(s3, t + 20_000))).rejects.toMatchObject({ code: "FEED_DOWN", message: "This window isn't on the feed. Try the next one." });
 
+    // A City market is open, but the card doesn't put it under "Free call,
+    // ser": it takes GM and a Tower ticket and settles at the bell, and the
+    // plan's fallback is free.
     const staffer = await makeResident(db);
     await client`INSERT INTO staff (user_id, role) VALUES (${staffer}, 'moderator')`;
     const m = await createCityMarket(db, staffer, { question: "20+ on the Roof at the warm-up's bell?", kind: "manual", bellDay: at(t).toISOString().slice(0, 10) }, { now: at(t) });
+    expect((await openCityMarkets(db, { now: at(t + 20_000) })).map((x) => x.id)).toContain(m.id);
     const card = await warmupState(db, u, opts(s3, t + 20_000));
     expect(card).toMatchObject({ eligible: true, window: null, feed: { live: true } });
-    const soonest = (await openCityMarkets(db, { now: at(t + 20_000) })).sort((a, b) => a.locksAt.getTime() - b.locksAt.getTime())[0]!;
-    expect(card.fallback).toEqual({ id: soonest.id, question: soonest.question, locksAt: soonest.locksAt });
-    expect(card.fallback).not.toBeNull();
-    expect(soonest.locksAt.getTime()).toBeLessThanOrEqual(m.locksAt.getTime());
-    // With a window to call there's no fallback.
-    await pollWarmup(db, s.feed, { now: at(t) });
-    expect((await warmupState(db, u, opts(s, t + 30_000))).fallback).toBeNull();
+    expect(card).not.toHaveProperty("fallback");
+    expect(JSON.stringify(card)).not.toContain("20+ on the Roof");
   });
 
   it("refuses junk sides, unknown residents and bad options", async () => {

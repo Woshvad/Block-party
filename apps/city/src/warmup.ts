@@ -55,9 +55,9 @@ export type WarmupView = {
   waiting: { side: string; settles: string; newcomers: string } | null;
   // Your latest warm-up's reel, for a day after it settles.
   reel: ReelLine[] | null;
-  // When there's nothing to call right now.
+  // When there's nothing to call right now. No City market stands in: they
+  // take GM and a ticket, and the warm-up is free.
   next: string | null;
-  fallback: { id: string; question: string } | null;
   note: string | null;
   credit: string | null;
 };
@@ -83,7 +83,6 @@ export function warmupView(w: Warmup | null | undefined, now: number): WarmupVie
       : null,
     reel: settled ? reelLines(settled) : null,
     next: w.eligible && !callable ? (w.feed.live ? `Next window opens in ${until(w.nextWindowAt, now)}. Calls are taken in its first ${WARMUP.entryMinutes} minutes.` : "The Bitcoin feed is quiet right now.") : null,
-    fallback: w.eligible && !callable && w.fallback ? { id: w.fallback.id, question: w.fallback.question } : null,
     note: w.eligible ? null : w.reason === "used_today" && w.left > 0 ? "Your next warm-up opens tomorrow." : w.reason === "used_today" ? "That was your last warm-up." : `Warm-ups are for your first ${WARMUP.days} days. The Slate's yours now.`,
     credit: w.feed.credit,
   };

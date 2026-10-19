@@ -15,7 +15,6 @@ import {
   windowStart,
 } from "@bp/core";
 import { and, asc, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
-import { openCityMarkets } from "./city-markets";
 import type { Db } from "./client";
 import { grantMood } from "./moods";
 import { notify } from "./notify";
@@ -240,8 +239,10 @@ export async function settleWarmups(db: Db, opts: { now?: Date; batch?: number }
 // --- Playing ----------------------------------------------------------------------
 
 // The warm-up card: whether you can make one, the window taking calls (if
-// any) or when the next opens, a City market when there's no window to
-// call, and your warm-ups with their receipts and, once settled, the reel.
+// any) or when the next opens, and your warm-ups with their receipts and,
+// once settled, the reel. No City market stands in when there's no window:
+// the plan's fallback is a free 10-minute one, and every City market takes
+// GM and a Tower ticket and settles at the bell (HANDOFF.md).
 export async function warmupState(db: Db, userId: string, opts: Opts = {}) {
   const p = parse(userId, opts);
   const [u] = await db.select({ createdAt: users.createdAt }).from(users).where(eq(users.id, p.userId));
@@ -286,9 +287,6 @@ export async function warmupState(db: Db, userId: string, opts: Opts = {}) {
           .from(warmupWindows)
           .where(and(eq(warmupWindows.source, p.source), eq(warmupWindows.startsAt, slot), eq(warmupWindows.status, "open"), eq(warmupWindows.trading, true)))
       : [];
-  // No window to call (between windows, or the feed is down): the plan's
-  // fallback is a City market, the soonest to lock.
-  const fallback = e.ok && !current ? ((await openCityMarkets(db, { now: p.now })).sort((a, b) => a.locksAt.getTime() - b.locksAt.getTime())[0] ?? null) : null;
   return {
     eligible: e.ok,
     reason: e.ok ? null : e.reason,
@@ -297,7 +295,6 @@ export async function warmupState(db: Db, userId: string, opts: Opts = {}) {
     feed: { live, credit: p.source ? warmupCredit(p.source) : null },
     window: current ? { ...current, entryClosesAt: entryClosesAt(current.startsAt) } : null,
     nextWindowAt: nextWindowAt(p.now),
-    fallback: fallback ? { id: fallback.id, question: fallback.question, locksAt: fallback.locksAt } : null,
     mine: rows.map((r) => {
       const window = sides.filter((s) => s.windowId === r.windowId).map((s) => s.side);
       return {
@@ -335,14 +332,14 @@ export async function makeWarmup(db: Db, userId: string, input: { side?: unknown
     );
     if (!e.ok && e.reason === "not_new") throw new WarmupError("NOT_NEW", `The warm-up is for your first ${WARMUP.days} days in the city.`);
     if (!e.ok) throw new WarmupError("ALREADY_TODAY", e.left > 0 ? "One warm-up a day. Your next one opens tomorrow." : "That was your last warm-up.");
-    if (!p.source || !(await feedLive(tx, p.source, p.now))) throw new WarmupError("FEED_DOWN", "The Bitcoin feed is quiet right now. Try a City market instead.");
+    if (!p.source || !(await feedLive(tx, p.source, p.now))) throw new WarmupError("FEED_DOWN", "The Bitcoin feed is quiet right now. Try again in a few minutes.");
     const slot = windowStart(p.now);
     if (!takingCalls(slot, p.now)) throw new WarmupError("WINDOW_CLOSED", `Calls close ${WARMUP.entryMinutes} minutes into a window. The next one opens at ${hhmm(nextWindowAt(p.now))} UTC.`);
     const [w] = await tx
       .select({ id: warmupWindows.id, startsAt: warmupWindows.startsAt, endsAt: warmupWindows.endsAt, trading: warmupWindows.trading })
       .from(warmupWindows)
       .where(and(eq(warmupWindows.source, p.source), eq(warmupWindows.startsAt, slot), eq(warmupWindows.status, "open")));
-    if (!w || !w.trading) throw new WarmupError("FEED_DOWN", "This window isn't on the feed. Try a City market instead.");
+    if (!w || !w.trading) throw new WarmupError("FEED_DOWN", "This window isn't on the feed. Try the next one.");
     try {
       const [c] = await tx.insert(warmupCalls).values({ userId: p.userId, windowId: w.id, side, accountDay: e.day, createdAt: p.now }).returning();
       const [{ n } = { n: 1 }] = await tx.select({ n: sql<number>`count(*)::int` }).from(warmupCalls).where(eq(warmupCalls.windowId, w.id));

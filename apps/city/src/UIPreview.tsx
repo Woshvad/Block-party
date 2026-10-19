@@ -46,7 +46,7 @@ export default function UIPreview() {
 function WarmupPreview({ epoch, now, onNote }: { epoch: number; now: number; onNote: (n: string) => void }) {
   const start = Math.floor(epoch / 900_000) * 900_000;
   const iso = (ms: number) => new Date(ms).toISOString();
-  const base: Warmup = { eligible: true, reason: null, day: 0, left: 3, feed: { live: true, credit: "Sample window · Not real" }, window: { id: "w", question: "Bitcoin up or down? (sample)", startsAt: iso(start), entryClosesAt: iso(now + 75_000), endsAt: iso(start + 900_000) }, nextWindowAt: iso(start + 900_000), fallback: null, mine: [] };
+  const base: Warmup = { eligible: true, reason: null, day: 0, left: 3, feed: { live: true, credit: "Sample window · Not real" }, window: { id: "w", question: "Bitcoin up or down? (sample)", startsAt: iso(start), entryClosesAt: iso(now + 75_000), endsAt: iso(start + 900_000) }, nextWindowAt: iso(start + 900_000), mine: [] };
   const reel = (result: "up" | "down") => ({ result, voided: false, newcomers: 7, up: 4, down: 3, calledIt: result === "up" ? 4 : 3, bot: { name: "NOTHING-9000", label: "NPC · AI", side: "down" as const, stamp: result === "down" ? ("called_it" as const) : ("rekt" as const) } });
   const settled = (stamp: "called_it" | "rekt", result: "up" | "down") => ({ id: stamp, side: "up" as const, startsAt: iso(start - 900_000), endsAt: iso(start), stamp, settledAt: iso(epoch), newcomers: 7, reel: reel(result) });
   const states: Array<[string, Warmup]> = [
@@ -54,7 +54,8 @@ function WarmupPreview({ epoch, now, onNote }: { epoch: number; now: number; onN
     ["Receipt", { ...base, eligible: false, reason: "used_today", left: 2, window: null, mine: [{ id: "r", side: "up", startsAt: iso(start), endsAt: iso(now + 12 * 60_000), stamp: null, settledAt: null, newcomers: 6, reel: null }] }],
     ["Reel: CALLED IT", { ...base, eligible: false, reason: "used_today", left: 2, window: null, mine: [settled("called_it", "up")] }],
     ["Reel: REKT", { ...base, eligible: false, reason: "used_today", left: 0, window: null, mine: [settled("rekt", "down")] }],
-    ["Between windows", { ...base, window: null, fallback: { id: "m", question: "20+ on the Roof at the bell?", locksAt: iso(epoch + 6 * 3600_000) } }],
+    ["Between windows", { ...base, window: null }],
+    ["Feed down", { ...base, window: null, feed: { live: false, credit: null } }],
   ];
-  return <Page title="Prediction Tower">{states.map(([name, w]) => { const v = warmupView(w, now); return v && <div key={name}><p className="eyebrow">{name.toUpperCase()}</p><WarmupCardView view={v} pending={false} feedback={null} onCall={(side) => onNote(`Preview only: no ${side.toUpperCase()} call was made.`)} onCityMarkets={() => onNote("City markets are in Games, in the signed-in app.")} /></div>; })}</Page>;
+  return <Page title="Prediction Tower">{states.map(([name, w]) => { const v = warmupView(w, now); return v && <div key={name}><p className="eyebrow">{name.toUpperCase()}</p><WarmupCardView view={v} pending={false} feedback={null} onCall={(side) => onNote(`Preview only: no ${side.toUpperCase()} call was made.`)} /></div>; })}</Page>;
 }

@@ -14,7 +14,7 @@ const CallSheet = dynamic(() => import("./CallSheet"), { ssr: false });
 // A newcomer meets the Contrarian at the door first: the 15-minute warm-up
 // (WarmupCard), while the API has it switched on.
 
-export default function Tower({ api, onBunker, onCityMarkets }: { api: Api; onBunker?: (place: string) => void; onCityMarkets?: () => void }) {
+export default function Tower({ api, onBunker }: { api: Api; onBunker?: (place: string) => void }) {
   const markets = useLoad(() => api.markets(), [api]);
   const tickets = useLoad(() => api.tickets(), [api]);
   const feed = useLoad(() => api.feed(), [api]);
@@ -32,7 +32,7 @@ export default function Tower({ api, onBunker, onCityMarkets }: { api: Api; onBu
           </span>
         )}
       </div>
-      <WarmupCard api={api} now={now} onCityMarkets={onCityMarkets} />
+      <WarmupCard api={api} now={now} />
       {feed.data?.paused && <p className="tag">Odds paused: the feed has gone quiet. Calls open again when it's back.</p>}
       {(markets.error || tickets.error) && <p className="bad">{markets.error ?? tickets.error}</p>}
       <section className="card">

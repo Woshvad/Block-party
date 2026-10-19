@@ -408,8 +408,8 @@ export type Hunt = {
 // trophies: pieces this search just won.
 export type HuntSearch = { day: string; place: string; found: boolean; finds: number; trophies: string[] };
 // The warm-up card: a window while one takes calls (its first 2 minutes),
-// otherwise when the next opens and a City market to try meanwhile; your
-// warm-ups newest first, each with its reel once settled.
+// otherwise when the next opens; your warm-ups newest first, each with its
+// reel once settled.
 export type WarmupSide = "up" | "down";
 export type WarmupStamp = "called_it" | "rekt" | "void";
 export type WarmupReel = { result: WarmupSide | null; voided: boolean; newcomers: number; up: number; down: number; calledIt: number; bot: { name: string; label: string; side: WarmupSide; stamp: WarmupStamp } };
@@ -422,7 +422,6 @@ export type Warmup = {
   feed: { live: boolean; credit: string | null };
   window: { id: string; question: string; startsAt: string; entryClosesAt: string; endsAt: string } | null;
   nextWindowAt: string;
-  fallback: { id: string; question: string; locksAt: string } | null;
   mine: WarmupEntry[];
 };
 export type WarmupMade = { id: string; side: WarmupSide; startsAt: string; endsAt: string; day: number; left: number; newcomers: number };
