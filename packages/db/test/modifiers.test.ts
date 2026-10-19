@@ -273,6 +273,7 @@ describe("NOTHING Day: beat the bot's grid for a banner tile", () => {
     // The Tower step has scored the day; the modifier step hasn't run yet.
     await s.ring(["tower"]);
     expect((await opened(s, winner)).nothing).toEqual({ squares: expect.any(Array), aura: botAura / 100, beat: null, tile: false });
+    expect((await reel(db, winner, { now: s.afterBell, bellDay: s.day }))!.beatTheBot).toBeNull(); // not counted yet, never a false 0
     expect(await tiles(winner)).toEqual([]);
 
     const rang = await s.ring(["modifier"]);
