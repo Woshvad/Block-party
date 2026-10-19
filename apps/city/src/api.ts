@@ -422,6 +422,8 @@ export type Warmup = {
   feed: { live: boolean; credit: string | null };
   window: { id: string; question: string; startsAt: string; entryClosesAt: string; endsAt: string } | null;
   nextWindowAt: string;
+  // False when your 3 days are up before that window opens.
+  nextCallable: boolean;
   mine: WarmupEntry[];
 };
 export type WarmupMade = { id: string; side: WarmupSide; startsAt: string; endsAt: string; day: number; left: number; newcomers: number };

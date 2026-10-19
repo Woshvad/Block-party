@@ -274,6 +274,29 @@ describe("3 per resident, first 3 days only", () => {
     expect((await client`SELECT count(*)::int AS n FROM warmup_calls WHERE user_id = ${u}`)[0]!.n).toBe(WARMUP.max);
   });
 
+  it("on the last day, the next window isn't promised if the 3 days are up before it opens", async () => {
+    const t = fresh();
+    const s = scripted();
+    // Both on day 2 at 10:05. Day 3 starts at 10:10 for one, before the 10:15
+    // window opens; at 10:20 for the other, after it.
+    const [late, inTime] = [await newcomer(t - 3 * DAY + 10 * MIN), await newcomer(t - 3 * DAY + 20 * MIN)];
+    await pollWarmup(db, s.feed, { now: at(t + 4 * MIN) });
+    expect(await warmupState(db, late, opts(s, t + 5 * MIN))).toMatchObject({ eligible: true, day: 2, window: null, nextWindowAt: at(t + 15 * MIN), nextCallable: false });
+    await expect(makeWarmup(db, late, { side: "up" }, opts(s, t + 5 * MIN))).rejects.toMatchObject({
+      code: "WINDOW_CLOSED",
+      message: "Calls close 2 minutes into a window, and your first 3 days are up before the next one opens.",
+    });
+    expect(await warmupState(db, inTime, opts(s, t + 5 * MIN))).toMatchObject({ eligible: true, day: 2, nextCallable: true });
+    await expect(makeWarmup(db, inTime, { side: "up" }, opts(s, t + 5 * MIN))).rejects.toMatchObject({
+      code: "WINDOW_CLOSED",
+      message: `Calls close 2 minutes into a window. The next one opens at ${at(t + 15 * MIN).toISOString().slice(11, 16)} UTC.`,
+    });
+    // Both kept their word at 10:15.
+    await pollWarmup(db, s.feed, { now: at(t + 15 * MIN) });
+    expect(await makeWarmup(db, inTime, { side: "up" }, opts(s, t + 15 * MIN + 30_000))).toMatchObject({ day: 2, left: 0 });
+    expect(await code(makeWarmup(db, late, { side: "up" }, opts(s, t + 15 * MIN + 30_000)))).toBe("NOT_NEW");
+  });
+
   it("a skipped day doesn't come back; an old account never gets one", async () => {
     const t = fresh();
     const s = scripted();

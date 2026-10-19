@@ -82,7 +82,14 @@ export function warmupView(w: Warmup | null | undefined, now: number): WarmupVie
         }
       : null,
     reel: settled ? reelLines(settled) : null,
-    next: w.eligible && !callable ? (w.feed.live ? `Next window opens in ${until(w.nextWindowAt, now)}. Calls are taken in its first ${WARMUP.entryMinutes} minutes.` : "The Bitcoin feed is quiet right now.") : null,
+    next:
+      w.eligible && !callable
+        ? !w.nextCallable
+          ? `Your first ${WARMUP.days} days are up before the next window opens. The Slate's yours now.`
+          : w.feed.live
+            ? `Next window opens in ${until(w.nextWindowAt, now)}. Calls are taken in its first ${WARMUP.entryMinutes} minutes.`
+            : "The Bitcoin feed is quiet right now."
+        : null,
     note: w.eligible ? null : w.reason === "used_today" && w.left > 0 ? "Your next warm-up opens tomorrow." : w.reason === "used_today" ? "That was your last warm-up." : `Warm-ups are for your first ${WARMUP.days} days. The Slate's yours now.`,
     credit: w.feed.credit,
   };
@@ -91,17 +98,18 @@ export function warmupView(w: Warmup | null | undefined, now: number): WarmupVie
 // A window the phone thinks has opened, though the answer didn't have it yet.
 const AGAIN_MS = 5_000;
 
-// When the card should ask again: when the next window opens, and while a
-// warm-up waits, a minute after its window ends and every minute after
-// that. Null when nothing will change by itself. An answer the API gave a
-// moment before the quarter hour can land after it by the phone's clock (a
-// slow reply, or a phone running ahead), so a window already due is asked
-// about again a few seconds on, never dropped.
+// When the card should ask again: when the next window opens (if you could
+// call it), and while a warm-up waits, a minute after its window ends and
+// every minute after that. Null when nothing will change by itself. An
+// answer the API gave a moment before the quarter hour can land after it by
+// the phone's clock (a slow reply, or a phone running ahead), so a window
+// already due is asked about again a few seconds on, never dropped.
 export function nextRefresh(w: Warmup | null | undefined, now: number): number | null {
   if (!w) return null;
   const at: number[] = [];
-  if (w.eligible) {
-    const opensOrCloses = Date.parse(w.window && Date.parse(w.window.entryClosesAt) > now ? w.window.entryClosesAt : w.nextWindowAt);
+  const open = w.window && Date.parse(w.window.entryClosesAt) > now ? w.window : null;
+  if (w.eligible && (open || w.nextCallable)) {
+    const opensOrCloses = Date.parse(open ? open.entryClosesAt : w.nextWindowAt);
     at.push(opensOrCloses > now ? opensOrCloses : Number.isFinite(opensOrCloses) ? now + AGAIN_MS : NaN);
   }
   const waiting = w.mine[0] && !w.mine[0].stamp ? w.mine[0] : null;

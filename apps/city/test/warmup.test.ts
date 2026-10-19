@@ -15,6 +15,7 @@ const card = (over: Partial<Warmup> = {}): Warmup => ({
   feed: { live: true, credit: "Window from Polymarket · Not affiliated" },
   window: { id: "w", question: "Bitcoin Up or Down - October 19, 6:00AM-6:15AM ET", startsAt: iso(t0), entryClosesAt: iso(t0 + 2 * MIN), endsAt: iso(t0 + 15 * MIN) },
   nextWindowAt: iso(t0 + 15 * MIN),
+  nextCallable: true,
   mine: [],
   ...over,
 });
@@ -55,6 +56,18 @@ describe("the Contrarian at the Tower door", () => {
     expect(JSON.stringify(warmupView(paid, t0 + 7 * MIN))).not.toContain("20+ on the Roof");
     const down = warmupView(card({ window: null, feed: { live: false, credit: null } }), t0);
     expect(down).toMatchObject({ next: "The Bitcoin feed is quiet right now.", credit: null });
+  });
+
+  it("on the last day, no promise of a window that opens after the 3 days are up", () => {
+    const last = card({ window: null, day: 2, left: 1, nextCallable: false });
+    expect(warmupView(last, t0 + 7 * MIN)).toMatchObject({ call: null, next: "Your first 3 days are up before the next window opens. The Slate's yours now." });
+    // Nor when the feed is down: there's nothing to wait for either way.
+    expect(warmupView({ ...last, feed: { live: false, credit: null } }, t0 + 7 * MIN)!.next).toBe("Your first 3 days are up before the next window opens. The Slate's yours now.");
+    // And no reload for it.
+    expect(nextRefresh(last, t0 + 7 * MIN)).toBeNull();
+    // A window still taking calls is still yours.
+    expect(warmupView(card({ day: 2, left: 1, nextCallable: false }), t0 + 30_000)!.call).toEqual({ closesIn: "1m", left: 1 });
+    expect(nextRefresh(card({ day: 2, left: 1, nextCallable: false }), t0 + 30_000)).toBe(t0 + 2 * MIN);
   });
 
   it("no card when it's switched off, or nothing to call and nothing recent to show", () => {

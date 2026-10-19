@@ -295,6 +295,9 @@ export async function warmupState(db: Db, userId: string, opts: Opts = {}) {
     feed: { live, credit: p.source ? warmupCredit(p.source) : null },
     window: current ? { ...current, entryClosesAt: entryClosesAt(current.startsAt) } : null,
     nextWindowAt: nextWindowAt(p.now),
+    // Whether you could call that window when it opens: on your last day it
+    // can open after your 3 days are up, and then the card promises nothing.
+    nextCallable: warmupEligibility(u.createdAt, nextWindowAt(p.now), rows.map((r) => r.day)).ok,
     mine: rows.map((r) => {
       const window = sides.filter((s) => s.windowId === r.windowId).map((s) => s.side);
       return {
@@ -334,7 +337,13 @@ export async function makeWarmup(db: Db, userId: string, input: { side?: unknown
     if (!e.ok) throw new WarmupError("ALREADY_TODAY", e.left > 0 ? "One warm-up a day. Your next one opens tomorrow." : "That was your last warm-up.");
     if (!p.source || !(await feedLive(tx, p.source, p.now))) throw new WarmupError("FEED_DOWN", "The Bitcoin feed is quiet right now. Try again in a few minutes.");
     const slot = windowStart(p.now);
-    if (!takingCalls(slot, p.now)) throw new WarmupError("WINDOW_CLOSED", `Calls close ${WARMUP.entryMinutes} minutes into a window. The next one opens at ${hhmm(nextWindowAt(p.now))} UTC.`);
+    if (!takingCalls(slot, p.now)) {
+      // No promise of a window that opens after the resident's 3 days are up.
+      const next = nextWindowAt(p.now);
+      if (!warmupEligibility(u.createdAt, next, used.map((x) => x.day)).ok)
+        throw new WarmupError("WINDOW_CLOSED", `Calls close ${WARMUP.entryMinutes} minutes into a window, and your first ${WARMUP.days} days are up before the next one opens.`);
+      throw new WarmupError("WINDOW_CLOSED", `Calls close ${WARMUP.entryMinutes} minutes into a window. The next one opens at ${hhmm(next)} UTC.`);
+    }
     const [w] = await tx
       .select({ id: warmupWindows.id, startsAt: warmupWindows.startsAt, endsAt: warmupWindows.endsAt, trading: warmupWindows.trading })
       .from(warmupWindows)
