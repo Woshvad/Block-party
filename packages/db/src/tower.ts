@@ -8,6 +8,7 @@ import {
   NPC_IDS,
   TOWER,
   addDays,
+  againstCity,
   npcById,
   CAST,
   auraCenti,
@@ -33,7 +34,7 @@ import { notify } from "./notify";
 import { isBlockedEitherWay } from "./safety";
 import { ratioHeadline } from "./ratio";
 import { isOnSlate, slateModifier } from "./slate";
-import { calls, crewMembers, feedPolls, marketTicks, markets, residents, streakGrants, streaks, tickets, users } from "./schema";
+import { calls, contrarianCards, crewMembers, feedPolls, marketTicks, markets, residents, streakGrants, streaks, tickets, users } from "./schema";
 
 export class TowerError extends Error {
   constructor(
@@ -364,6 +365,8 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
       resolvedAt: markets.resolvedAt,
       aura: calls.auraCenti,
       via: calls.via,
+      onSlate: calls.onSlate,
+      createdAt: calls.createdAt,
     })
     .from(calls)
     .innerJoin(markets, eq(markets.id, calls.marketId))
@@ -375,6 +378,14 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
   const cityRows = await cityCalls(db, [r.marketId]);
   const city = cityRows.length >= TOWER.cityBarMin ? median(cityRows.map((x) => x.chance)) : null;
   const revealed = r.status === "resolved" && r.resolvedAt !== null && now >= revealAt(r.resolvedAt);
+  // Contrarian Day: a Slate call against the city majority the bell recorded
+  // for its card (the Slate of the day it was made) gets the gold border.
+  const [card] = r.onSlate
+    ? await db
+        .select({ majority: contrarianCards.majority })
+        .from(contrarianCards)
+        .where(and(eq(contrarianCards.marketId, r.marketId), eq(contrarianCards.cityDay, cityDay(r.createdAt))))
+    : [];
   return {
     id: r.id,
     handle: r.handle ?? CAST[npc!].name,
@@ -390,6 +401,7 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
     // Sealed until the bell, even when the world settled hours earlier.
     stamp: !revealed ? (r.status === "void" ? "VOID" : "IN THE MEMPOOL") : (r.side === "yes") === r.outcome ? "CALLED IT" : "REKT",
     aura: revealed && r.via !== "tail" && r.aura !== null ? r.aura / 100 : null,
+    contrarian: !!card && againstCity(r.side, card.majority),
     // The Ratio of the Day's winning headline, printed on this market's share card.
     ratio: (await ratioHeadline(db, { marketId: r.marketId }))?.headline ?? null,
   };

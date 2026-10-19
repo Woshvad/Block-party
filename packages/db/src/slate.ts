@@ -1,7 +1,7 @@
-import { type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, cityDay, gridText, modifierFor, oddsCredit, pickSlate, slateNumber, square } from "@bp/core";
+import { CAST, type CityDay, type Modifier, NPC_IDS, type SlateTier, addDays, againstCity, cityDay, gridText, modifierFor, oddsCredit, pickSlate, slateNumber, square } from "@bp/core";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client";
-import { calls, markets, slateCards, slates } from "./schema";
+import { bellSteps, calls, contrarianCards, markets, nothingDayWins, slateCards, slates } from "./schema";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const bellAfter = (day: CityDay) => new Date(`${addDays(day, 1)}T00:00:00Z`);
@@ -132,5 +132,45 @@ export async function myGrid(db: Db, userId: string, day: unknown, opts: { now?:
     share: gridText(day, squares),
     aura: myTotal === undefined ? null : myTotal / 100,
     percentile,
+    // Contrarian Day: which of your squares went against the city majority
+    // (the gold border), as the bell recorded it. Null on other days.
+    contrarian: s.modifier === "contrarian_day" ? await contrarianSquares(db, day, cards, mine) : null,
+    // NOTHING Day: NOTHING-9000's grid under yours, and whether yours beat it
+    // at the bell (null until the bell has settled it). Null on other days.
+    nothing: s.modifier === "nothing_day" ? await nothingDay(db, userId, day, cards, all) : null,
+  };
+}
+
+type GridCard = { marketId: string; tier: string; outcome: boolean | null; status: string };
+type GridCall = { userId: string; marketId: string; side: "yes" | "no"; aura: number | null };
+
+async function contrarianSquares(db: Db, day: string, cards: GridCard[], mine: GridCall[]) {
+  const recorded = await db.select({ marketId: contrarianCards.marketId, majority: contrarianCards.majority }).from(contrarianCards).where(eq(contrarianCards.cityDay, day));
+  return cards.map((c) => {
+    const m = mine.find((x) => x.marketId === c.marketId);
+    const r = recorded.find((x) => x.marketId === c.marketId);
+    return !!m && !!r && againstCity(m.side, r.majority);
+  });
+}
+
+async function nothingDay(db: Db, userId: string, day: string, cards: GridCard[], all: GridCall[]) {
+  const bot = all.filter((c) => c.userId === CAST.nothing_9000.id);
+  const squares = cards.map((c) => {
+    const b = bot.find((x) => x.marketId === c.marketId);
+    return square(b ? { side: b.side, auraCenti: b.aura } : null, c.tier as SlateTier, c.outcome, c.status === "void");
+  });
+  const [settled] = await db
+    .select({ day: bellSteps.bellDay })
+    .from(bellSteps)
+    .where(and(eq(bellSteps.bellDay, day), eq(bellSteps.step, "modifier")));
+  const [win] = await db
+    .select({ tile: nothingDayWins.tile })
+    .from(nothingDayWins)
+    .where(and(eq(nothingDayWins.cityDay, day), eq(nothingDayWins.userId, userId)));
+  return {
+    squares,
+    aura: bot.length ? bot.reduce((a, c) => a + (c.aura ?? 0), 0) / 100 : null,
+    beat: settled ? !!win : null,
+    tile: !!win?.tile,
   };
 }

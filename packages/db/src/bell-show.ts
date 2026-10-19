@@ -10,7 +10,7 @@ import type { Db } from "./client";
 import { gmDestroyed } from "./economy";
 import { mint } from "./ledger";
 import { grantMood, maybeTilt } from "./moods";
-import { bellStamps, bellSteps, calls, cityMarkets, crewBellScores, crewMembers, crews, duels, markets, residents, slateCards } from "./schema";
+import { bellStamps, bellSteps, calls, cityMarkets, contrarianCards, crewBellScores, crewMembers, crews, duels, markets, nothingDayWins, residents, slateCards, slates } from "./schema";
 import { myGrid } from "./slate";
 import { cityCalls, settleCalls } from "./tower";
 
@@ -219,6 +219,17 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     .from(slateCards)
     .innerJoin(markets, eq(markets.id, slateCards.marketId))
     .where(and(eq(slateCards.cityDay, addDays(bellDay, 1)), eq(slateCards.tier, "long_shot")));
+  // The Bell Modifier: on Contrarian Day each card shows the majority the bell
+  // recorded; on NOTHING Day, how many residents beat the bot's grid.
+  const [slate] = await db.select({ modifier: slates.modifier }).from(slates).where(eq(slates.cityDay, bellDay));
+  const majorities =
+    slate?.modifier === "contrarian_day"
+      ? await db.select({ marketId: contrarianCards.marketId, majority: contrarianCards.majority }).from(contrarianCards).where(eq(contrarianCards.cityDay, bellDay))
+      : [];
+  // (Counted only once the bell's modifier step has settled the day.)
+  const [settled] =
+    slate?.modifier === "nothing_day" ? await db.select({ step: bellSteps.step }).from(bellSteps).where(and(eq(bellSteps.bellDay, bellDay), eq(bellSteps.step, "modifier"))) : [];
+  const [beatTheBot] = settled ? await db.select({ n: sql<number>`count(*)::int` }).from(nothingDayWins).where(eq(nothingDayWins.cityDay, bellDay)) : [];
   // City markets come first on the reel, smallest to biggest.
   const city = await db
     .select({ question: cityMarkets.question, outcome: cityMarkets.outcome, status: cityMarkets.status })
@@ -226,13 +237,24 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     .where(and(eq(cityMarkets.bellDay, bellDay), inArray(cityMarkets.status, ["settled", "refunded"])));
   return {
     bellDay,
+    modifier: slate?.modifier ?? null,
     cityMarkets: city.map((c) => ({ question: c.question, result: c.status === "refunded" ? "void" : c.outcome ? "yes" : "no" })),
     slate: cards.map((c) => {
       const cs = chances.filter((x) => x.marketId === c.marketId).map((x) => x.chance);
       const result = c.status === "void" ? "void" : c.outcome === null ? "pending" : c.outcome ? "yes" : "no";
       // The losing Bunker's lights go out.
       const dark = result === "yes" ? "no" : result === "no" ? "yes" : null;
-      return { slot: c.slot, tier: c.tier, question: c.question, result, world: c.world, city: cs.length >= 10 ? median(cs) : null, darkBunker: dark };
+      const majority = majorities.find((x) => x.marketId === c.marketId);
+      return {
+        slot: c.slot,
+        tier: c.tier,
+        question: c.question,
+        result,
+        world: c.world,
+        city: cs.length >= 10 ? median(cs) : null,
+        darkBunker: dark,
+        ...(slate?.modifier === "contrarian_day" ? { cityMajority: majority?.majority ?? null } : {}),
+      };
     }),
     bellScores: { top: top.map((t) => ({ ...t, score: t.scoreMilli / 1000 })), mine: myCrew && { score: myCrew.scoreMilli / 1000, rank: myCrew.rank } },
     // Tower Lights: whose colours lit the Tower tonight.
@@ -242,6 +264,8 @@ export async function reel(db: Db, userId: string, opts: { now?: Date; bellDay?:
     // Duels settle at the bell after the day: "@a ate @b's Snap".
     duels: await duelLines(db, dayStart(addDays(bellDay, 1)), dayStart(addDays(bellDay, 2))),
     burned,
+    // NOTHING Day: residents who beat NOTHING-9000's grid (null on other days).
+    beatTheBot: beatTheBot?.n ?? null,
     grid: await myGrid(db, userId, bellDay, { now }),
     tomorrowsLongShot: tomorrow ?? null,
   };

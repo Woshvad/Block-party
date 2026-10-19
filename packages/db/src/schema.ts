@@ -5,6 +5,7 @@ import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -1432,6 +1433,51 @@ export const slateCards = pgTable(
     unique("slate_cards_market_once").on(t.cityDay, t.marketId),
     index("slate_cards_market").on(t.marketId),
     check("slate_cards_slot", sql`${t.slot} BETWEEN 0 AND 5`),
+  ],
+);
+
+// Contrarian Day: each card's city majority, recorded once at the bell from
+// the City bar's calls (none lock after the card froze). Null: a tie, or too
+// few neighbours for a City bar. Never changes.
+export const contrarianCards = pgTable(
+  "contrarian_cards",
+  {
+    cityDay: date("city_day", { mode: "string" }).notNull(),
+    marketId: uuid("market_id").notNull(),
+    yes: integer("yes").notNull(),
+    no: integer("no").notNull(),
+    majority: callSide("majority"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.cityDay, t.marketId] }),
+    foreignKey({ name: "contrarian_cards_slate_card_fk", columns: [t.cityDay, t.marketId], foreignColumns: [slateCards.cityDay, slateCards.marketId] }),
+    check("contrarian_cards_counts", sql`${t.yes} >= 0 AND ${t.no} >= 0`),
+    check("contrarian_cards_majority", sql`${t.majority} IS NULL OR (${t.majority} = 'yes' AND ${t.yes} > ${t.no}) OR (${t.majority} = 'no' AND ${t.no} > ${t.yes})`),
+  ],
+);
+
+// NOTHING Day: each resident whose Slate beat NOTHING-9000's grid, settled
+// once at the bell. `tile`: this win brought the banner tile (the first one
+// does; an earned piece comes once). Never changes.
+export const nothingDayWins = pgTable(
+  "nothing_day_wins",
+  {
+    cityDay: date("city_day", { mode: "string" })
+      .notNull()
+      .references(() => slates.cityDay),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    auraCenti: integer("aura_centi").notNull(),
+    botAuraCenti: integer("bot_aura_centi").notNull(),
+    tile: boolean("tile").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.cityDay, t.userId] }),
+    index("nothing_day_wins_user").on(t.userId),
+    check("nothing_day_wins_beat", sql`${t.auraCenti} > ${t.botAuraCenti}`),
   ],
 );
 
