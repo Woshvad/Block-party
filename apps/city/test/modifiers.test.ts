@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenGrid } from "../src/api";
-import { CONTRARIAN_LINE, MODIFIER_NAMES, auraText, gridCells, lastBellDay, modifierResult, stillSettling } from "../src/modifiers";
+import { CONTRARIAN_LINE, MODIFIER_NAMES, auraText, gridCells, gridLines, lastBellDay, modifierResult, stillSettling } from "../src/modifiers";
 
 const grid = (over: Partial<OpenGrid> = {}): OpenGrid => ({
   cityDay: "2026-10-18",
@@ -30,6 +30,17 @@ describe("the grid's squares", () => {
     const cells = gridCells(all);
     expect(cells.every((c) => !c.contrarian && !c.label.includes("gold") && !c.label.includes("unknown"))).toBe(true);
     expect(gridCells(["green"], [])).toEqual([{ emoji: "🟩", label: "Card 1: beat the market", contrarian: false }]);
+  });
+});
+
+describe("the grid's rows", () => {
+  it("yours, then NOTHING-9000's on NOTHING Day, labelled NPC · AI on screen and to a screen reader", () => {
+    const [you, bot, ...more] = gridLines(grid({ modifier: "nothing_day", nothing: nothing() }));
+    expect(more).toEqual([]);
+    expect([you!.who, you!.label]).toEqual(["You", "Your grid, Block Party #14"]);
+    expect([bot!.who, bot!.label]).toEqual(["NOTHING-9000 · NPC · AI", "NOTHING-9000's grid, NPC · AI"]);
+    expect(bot!.cells.map((c) => c.contrarian)).toEqual([false, false, false, false, false, false]);
+    expect(gridLines(grid({ modifier: "contrarian_day", contrarian: [true, false, false, false, false, false] })).map((l) => l.cells[0]!.contrarian)).toEqual([true]);
   });
 });
 

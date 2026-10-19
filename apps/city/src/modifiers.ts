@@ -1,4 +1,4 @@
-import { SQUARE_EMOJI } from "@bp/core";
+import { CAST, SQUARE_EMOJI } from "@bp/core";
 import type { GridSquare, OpenGrid } from "./api";
 
 // The Bell Modifiers' results in plain words: Contrarian Day's gold borders
@@ -26,6 +26,18 @@ export function gridCells(squares: readonly GridSquare[], contrarian: readonly b
     const gold = contrarian?.[i] === true;
     return { emoji: SQUARE_EMOJI[s] ?? "⬛", label: `Card ${i + 1}: ${SQUARE_WORDS[s] ?? "unknown"}${gold ? ", against the city (gold border)" : ""}`, contrarian: gold };
   });
+}
+
+export type GridLineProps = { who: string; label: string; cells: GridCell[] };
+
+// The rows a revealed grid draws: yours, then NOTHING-9000's on NOTHING Day.
+// Each list's name for a screen reader says what's written over it, so the
+// bot's row is NPC · AI out loud too, never only on screen.
+export function gridLines(g: OpenGrid): GridLineProps[] {
+  const lines = [{ who: "You", label: `Your grid, Block Party #${g.number}`, cells: gridCells(g.squares, g.contrarian) }];
+  const bot = CAST.nothing_9000;
+  if (g.nothing) lines.push({ who: `${bot.name} · ${bot.label}`, label: `${bot.name}'s grid, ${bot.label}`, cells: gridCells(g.nothing.squares) });
+  return lines;
 }
 
 export const auraText = (aura: number) => `${aura > 0 ? "+" : aura < 0 ? "−" : ""}${Math.abs(aura).toFixed(1)}`;
