@@ -145,6 +145,9 @@ export async function renameHandle(
           // Two renames before they look: they last knew the first one's old handle.
           set: { renameId: row!.id, fromHandle: sql`CASE WHEN ${handleNotices.seenAt} IS NULL THEN ${handleNotices.fromHandle} ELSE excluded.from_handle END`, seenAt: null },
         });
+      // Put back to that handle before they looked (staff undoing a mistake):
+      // nothing changed for them, so there's nothing to tell.
+      await tx.delete(handleNotices).where(and(eq(handleNotices.userId, userId), eq(handleNotices.fromHandle, handle)));
       // The old handle's flags are dealt with: they leave the staff queue. An
       // item the AI check is reading right now is skipped, not waited for: the
       // batch holds it while it waits on the provider, and may then take the

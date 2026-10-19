@@ -251,6 +251,26 @@ describe("the resident's notice", () => {
     expect(await handleNotice(db, other)).toBeNull();
     expect(await handleNotice(db, u)).toMatchObject({ id: r.id });
   });
+
+  it("a rename undone before they look leaves no notice: nothing changed for them", async () => {
+    const mod = await staffer();
+    const old = `Cap_${uniq().slice(1, 9)}`;
+    const u = await residentAs(old);
+    const undo = "Renamed by mistake, so it's yours again.";
+    const away = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    await renameHandle(db, mod, u, { reason: undo, from: away.to, newHandle: old });
+    expect(await handleNotice(db, u)).toBeNull();
+    // Back in other letter case, they're told: the handle they see did change.
+    const again = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    const lower = await renameHandle(db, mod, u, { reason: undo, from: again.to, newHandle: old.toLowerCase() });
+    expect(await handleNotice(db, u)).toMatchObject({ id: lower.id, from: old, to: old.toLowerCase() });
+    // Once they've seen one, a rename back is news too.
+    await seeHandleNotice(db, u, lower.id);
+    const third = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    await seeHandleNotice(db, u, third.id);
+    const back = await renameHandle(db, mod, u, { reason: undo, from: third.to, newHandle: old });
+    expect(await handleNotice(db, u)).toMatchObject({ id: back.id, from: third.to, to: old });
+  });
 });
 
 describe("moderation around a rename", () => {

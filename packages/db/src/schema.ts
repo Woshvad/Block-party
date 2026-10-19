@@ -944,7 +944,8 @@ export const handleRenames = pgTable(
 
 // What a renamed resident sees the next time they open the app, until they
 // tap OK. One per resident: a newer rename replaces it, and the handle they
-// last knew is kept until they've seen one.
+// last knew is kept until they've seen one. A rename back to that handle
+// before they look removes it.
 export const handleNotices = pgTable("handle_notices", {
   userId: uuid("user_id")
     .primaryKey()
