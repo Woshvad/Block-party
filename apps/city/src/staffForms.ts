@@ -70,6 +70,15 @@ export function renameTarget(item: Pick<ModerationItem, "kind" | "ref">): string
 }
 export const reportRenames = (r: { reason?: unknown }) => r.reason === "impersonation";
 
+// Who a queued item's card names. A display name or handle is the resident's
+// it's on (the ref), even when staff typed it in a rename: then the author is
+// that staff member (so they can't review it), named apart as who chose it.
+// Anything else is its author's.
+export function itemPeople(item: Pick<ModerationItem, "kind" | "ref" | "authorId">): { resident: string | null; chosenBy: string | null } {
+  const resident = renameTarget(item) ?? item.authorId;
+  return { resident, chosenBy: item.authorId && item.authorId !== resident ? item.authorId : null };
+}
+
 // The handle a Rename on a queued item goes from (the API needs it): a
 // flagged handle's own text, as that's what staff are judging, so if they've
 // been renamed since nothing happens; for a flagged name, their handle as the

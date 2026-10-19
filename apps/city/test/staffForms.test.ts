@@ -1,6 +1,6 @@
 import { HANDLE_RENAME, MODERATION } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { RESTRICT_FOR, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
+import { RESTRICT_FOR, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
 
 describe("closing a report from the staff console", () => {
   const note = "spam links ok"; // 13 characters: enough for a note, too short for a reason
@@ -65,6 +65,15 @@ describe("renaming a flagged @handle", () => {
     for (const kind of ["board", "crew", "dm", "room", "pitch", "crew_name", "make_good"]) expect(renameTarget({ kind, ref: "x" }), kind).toBeNull();
     expect(reportRenames({ reason: "impersonation" })).toBe(true);
     for (const r of ["scam", "harassment", "spam", "under_18", "unwanted_romance", "other", undefined]) expect(reportRenames({ reason: r }), String(r)).toBe(false);
+  });
+
+  it("a flagged handle or name's card names the resident it's on, even when staff chose it in a rename", () => {
+    // A handle staff typed is queued with them as its author, so they can't review it.
+    expect(itemPeople({ kind: "resident_handle", ref: "resident", authorId: "staff" })).toEqual({ resident: "resident", chosenBy: "staff" });
+    expect(itemPeople({ kind: "resident_handle", ref: "resident", authorId: "resident" })).toEqual({ resident: "resident", chosenBy: null });
+    expect(itemPeople({ kind: "resident_name", ref: "resident", authorId: "resident" })).toEqual({ resident: "resident", chosenBy: null });
+    expect(itemPeople({ kind: "board", ref: "msg", authorId: "poster" })).toEqual({ resident: "poster", chosenBy: null });
+    expect(itemPeople({ kind: "room", ref: "roof#1", authorId: null })).toEqual({ resident: null, chosenBy: null });
   });
 
   it("renames from the flagged handle itself, or from a flagged name's handle once it has loaded", () => {

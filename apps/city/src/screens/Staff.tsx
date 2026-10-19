@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { Api } from "../api";
 import { makeGoodConfirm, makeGoodProblem } from "../makeGoods";
 import { label } from "../palette";
-import { RESTRICT_FOR, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
+import { RESTRICT_FOR, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
@@ -146,24 +146,28 @@ function Flagged({ api, act }: { api: Api; act: Act }) {
   return (
     <>
       {items.data.length === 0 && <p className="muted">Nothing flagged.</p>}
-      {items.data.map((item) => (
-        <section className="card" key={item.id}>
-          <p>
-            <b>{itemPlace(item)}</b>
-            {item.authorId ? ` by ${handleOf(item.authorId)}` : ""} · {itemState(item)}
-          </p>
-          <p className="notice">"{item.text}"</p>
-          {item.authorId && <p className="muted">Resident id: {item.authorId}</p>}
-          <div className="btnrow">
-            {reviewChoices(item).map((c) => (
-              <button key={c.verdict} className={c.verdict === "remove" ? "btn danger" : "btn light"} onClick={() => act.run(() => api.reviewModeration(item.id, c.verdict), c.label).then(() => items.reload())}>
-                {c.label}
-              </button>
-            ))}
-          </div>
-          {renameTarget(item) && <Rename api={api} act={act} userId={renameTarget(item)!} from={itemRenameFrom(item, loadedHandle(renameTarget(item)!))} onDone={() => void items.reload()} />}
-        </section>
-      ))}
+      {items.data.map((item) => {
+        const people = itemPeople(item);
+        return (
+          <section className="card" key={item.id}>
+            <p>
+              <b>{itemPlace(item)}</b>
+              {people.resident ? ` by ${handleOf(people.resident)}` : ""}
+              {people.chosenBy ? ` (${handleOf(people.chosenBy)} chose it in a rename)` : ""} · {itemState(item)}
+            </p>
+            <p className="notice">"{item.text}"</p>
+            {people.resident && <p className="muted">Resident id: {people.resident}</p>}
+            <div className="btnrow">
+              {reviewChoices(item).map((c) => (
+                <button key={c.verdict} className={c.verdict === "remove" ? "btn danger" : "btn light"} onClick={() => act.run(() => api.reviewModeration(item.id, c.verdict), c.label).then(() => items.reload())}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            {renameTarget(item) && <Rename api={api} act={act} userId={renameTarget(item)!} from={itemRenameFrom(item, loadedHandle(renameTarget(item)!))} onDone={() => void items.reload()} />}
+          </section>
+        );
+      })}
     </>
   );
 }
