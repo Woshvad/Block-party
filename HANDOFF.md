@@ -106,7 +106,8 @@ Still open:
 - [ ] **The BTC 15-minute windows** in the odds feed. The plan's odds worker wants these alongside the curated markets.
 - [ ] **Copium Pharmacy** opens first as a counter in the Gwei Diner (Launch). Hackerspace runs as "Builder Night" in the Bot Café (Launch), so it has no building of its own on purpose.
 - [ ] **Launch places have no interiors yet:** Club Liquidity, Touch Grass Park, the Blockspace Canvas game and the Bot Café.
-- [x] **The Roof's leaderboards:** three screens (the Right List with NOTHING-9000's line, the Season Stack, the crews') from `GET /v1/roof`, and the Watch Party's screen shows the Hall's own City markets. In-play calls stay out on purpose: the plan freezes sports at kickoff.
+- [x] **The Roof's leaderboards:** three screens (the Right List with NOTHING-9000's line, the Season Stack, the crews') from `GET /v1/roof`, and the Watch Party's screen shows the Hall's own City markets.
+- [ ] **Free in-play calls in the Watch Party Hall** (MVP in the plan, on the big screen beside the room-only City markets). In the Hall, a free call on a match can be made after kickoff: it locks at the first tick at least 2 minutes after you confirm, for half the Aura. Backing for real still closes at kickoff. Not built: sports markets freeze at kickoff everywhere, so the Hall's screen shows only pre-kickoff odds and its City markets.
 - [x] **The Season Stack ranks Proof of Neighbour residents only,** on the Roof and in Games, as the plan's risks table has it for every leaderboard and as the Right List already did.
 
 ### 3. Waiting on the owner (see PARKED.md)
