@@ -31,9 +31,10 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
 - ~~**A staff rename for flagged @handles.**~~ Done (README brick 45): Rename on flagged handles and names, on every report and by handle in Controls, a neutral handle unless staff type one, a notice on the resident's next open, the old handle rests 30 days, and the resident can appeal it once (other staff decide; overturning gives the handle back).
   - **Still open:** a resident in a live room when they're renamed keeps the old name tag there until they next join a room (the room ticket carries the handle). After the 30 days, old `p-<handle>` links open whoever takes the handle next; the notice only promises they won't find the resident. The rename UI is checked by unit tests only, not yet in a browser.
-- **Promised but inert:** of the four alert toggles that had no producer, shift done, away shift ready and Bell in 2h now fire (19 October); warm-up settled waits for the warm-up. The crew bot's three posts (syndicate call, Bell in 15, the crew card) still can't go out: no crew is linked to a Telegram group, because the API takes no bot updates (no webhook, no `/crew`). Contrarian Day and NOTHING Day have their rules now (README brick 44, with Blind Slate finished).
+- **Promised but inert:** of the four alert toggles that had no producer, shift done, away shift ready and Bell in 2h now fire (19 October); warm-up settled is sent by the warm-up, behind its switch. The crew bot's three posts (syndicate call, Bell in 15, the crew card) still can't go out: no crew is linked to a Telegram group, because the API takes no bot updates (no webhook, no `/crew`). Contrarian Day and NOTHING Day have their rules now (README brick 44, with Blind Slate finished).
 - **Pushes at launch scale.** The minute cron sends up to 600 pushes (kept under a Worker's 1,000 subrequests a run), so "Bell in 2h" reaches about 18,000 residents before it expires; a bigger city needs Telegram's paid broadcasts or a queue consumer. An event alert that fires more than once a day (a fade, a Snap, a nap) runs out of fresh lines within the week, and the extras are held back rather than repeat wording.
 - **Bell Modifiers, still open:** the banner tile is a home piece until crew banners take earned tiles; the share line shows no gold borders; a syndicate proposed just before a Blind Slate went out still shows its side on the Crew Table; NOTHING Day is judged at the bell with a late card counting 0, so revisit it if the late-settlement policy carries cards to the next bell.
+- **The Tower's odds can be 5 minutes old.** Gamma answers with `Cache-Control: public, max-age=300` and Cloudflare serves it from cache, and the odds poll asks the same address every minute (seen 19 October: a HIT 68 seconds old). The warm-up's feed now puts the poll's time in its addresses; the Tower's feed (`polymarket.ts`) still doesn't, so its ticks and closed lookups can lag the plan's 30 to 60 seconds.
 - **An asset pipeline** (built 19 October, except compression). Unused models are gone and tangents stripped, so `public/assets` fell from 16.75 MB to 6.84 MB. The packs sit in content-hashed folders (`pnpm --filter @bp/city assets`), with immutable cache headers in `public/_headers` and `next.config.mjs` (README "Deploying"). A page opened before a deploy that changed a pack offers Reload on the map.
   - **Still open:** meshopt needs glTF-Transform, a new dev dependency (the owner's call; PERFORMANCE_BASELINE.md has the commands), and the chosen host must compress `.glb`.
   - **Still open:** that Reload is tested headless only. Try it in a browser: open the map, rename a pack folder and `/assets/kit-packs.json` to match, then retry.
@@ -109,7 +110,10 @@ Still open:
 
 ### 2. From the plan, not started
 
-- [ ] **The BTC 15-minute windows** in the odds feed. The plan's odds worker wants these alongside the curated markets.
+- [x] **The BTC 15-minute windows.** The 15-minute warm-up has its own feed of them, apart from the curated markets (README brick 44). Built and tested behind `FEATURE_WARMUP`, which stays off.
+- [ ] **Welcome back (Launch):** after 14+ days away, a Hodl Day, a comeback tag, a warm-up and a crew ping. None of it is built; the warm-up's one-a-day rule would take a comeback day once the rest exists.
+- [ ] **A free 10-minute City market** for the warm-up's fallback, as the plan has it. City markets are staff-written, take GM and a Tower ticket and settle at the bell, so for now the warm-up has no fallback: it says when the next window opens, or that the feed is quiet.
+- [ ] **The warm-up before moving in, inside Telegram.** A guest in a browser meets the Contrarian on the guest panel, but a Telegram arrival goes straight to Create-a-Resident and meets him in the Tower after. The guest panel's line also needs its browser check: the map tools move up by an estimate of its height.
 - [ ] **Copium Pharmacy** opens first as a counter in the Gwei Diner (Launch). Hackerspace runs as "Builder Night" in the Bot Café (Launch), so it has no building of its own on purpose.
 - [ ] **Launch places have no interiors yet:** Club Liquidity, Touch Grass Park, the Blockspace Canvas game and the Bot Café.
 - [x] **The Roof's leaderboards:** three screens (the Right List with NOTHING-9000's line, the Season Stack, the crews') from `GET /v1/roof`, and the Watch Party's screen shows the Hall's own City markets.
@@ -118,7 +122,7 @@ Still open:
 
 ### 3. Waiting on the owner (see PARKED.md)
 
-- [ ] **Polymarket's written OK** for free calls built on their data. This is needed before launch, even though the feed is now built.
+- [ ] **Polymarket's written OK** for free calls built on their data. This is needed before launch, even though the feed is now built. It also gates the warm-up: `FEATURE_WARMUP` stays off until it and a legal check are in.
 - [ ] **Resolution policy:** UMA can settle late. Decide whether the card carries to the next bell or is voided.
 - [ ] **Verified builder tier** (needed for real trades) and the **legal opinion** (Gate 2). Real money stays off until both are done.
 - [ ] **Telegram bot token and domain.** These are needed for the real Mini App launch and the frame-rate test inside Telegram.

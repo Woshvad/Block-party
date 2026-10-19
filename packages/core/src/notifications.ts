@@ -104,6 +104,7 @@ export const TEMPLATES: Record<NotifyKind, readonly string[]> = {
     "The syndicate is asking for your shake.",
     "Syndicate call from your crew. Your shake?",
   ],
+  // One per warm-up, so a newcomer gets 3 at most: each in its own words.
   warmup_settled: [
     "Your warm-up settled. See your receipt.",
     "The 15-minute window closed. Your receipt is in.",
@@ -111,6 +112,8 @@ export const TEMPLATES: Record<NotifyKind, readonly string[]> = {
     "The window closed. See how your warm-up went.",
     "Warm-up settled, ser. Your receipt's waiting.",
     "Your warm-up is in. Called it?",
+    "Bitcoin made its move. Your warm-up has its stamp.",
+    "CALLED IT or REKT? Your warm-up result is in, ser.",
   ],
 };
 

@@ -5,13 +5,14 @@
 Built since this was first parked (8 October):
 
 - [x] **Odds worker + price-tick store.** `packages/core/src/polymarket.ts` polls Gamma's busiest events per category (read-only, no keys) and every tick is kept. Not yet the plan's "~50 curated markets": there's no curation list or sensitive-topic denylist.
+- [x] **BTC 15-minute windows** (19 October). The 15-minute warm-up has its own read-only feed of Polymarket's "Bitcoin Up or Down" windows, apart from the Tower's markets, settled by the same rules. Built and tested, behind `FEATURE_WARMUP`, which is off (README brick 46).
 - [x] **Resolution and void ingestion** (12 October). Each poll also looks up the markets we still hold open or frozen among Gamma's closed markets. Closed and `resolved` at 1/0 settles YES or NO; a 50/50 final voids. Tested on recorded Gamma payloads, end to end through settlement.
 
 Still yours:
 
 - [ ] **Resolution policy.** UMA can settle hours or days late: real markets sit closed with a result only "proposed" for days. Today they stay frozen and wait, with no timeout (`closedOutcome` in `polymarket.ts` says so). Decide: carry the card to the next bell, or void it after some time.
-- [ ] **BTC 15-minute windows.** Not built; the feed only lists curated categories.
 - [ ] **Polymarket's written OK on free calls** built on their data (the plan flags this as needed).
+- [ ] **Switch the warm-up on** (`FEATURE_WARMUP=on` on the API Worker) only once Polymarket's written OK on free calls against its odds and a legal check of the warm-up are both in: short up-or-down windows read like binary options, which EU regulators have barred from retail since 2018. It's built, tested and off.
 - [ ] **Verified builder tier** application (the free tier allows 100 relayer actions a day).
 - [ ] **Legal opinion** for real trades (Gate 2).
 

@@ -32,6 +32,7 @@ const Staff = dynamic(() => import("./screens/Staff"), { ssr: false });
 const ReceiptSheet = dynamic(() => import("./ReceiptSheet"), { ssr: false });
 const Person = dynamic(() => import("./Person"), { ssr: false });
 const HandleNotice = dynamic(() => import("./HandleNotice"), { ssr: false });
+const WarmupDoor = dynamic(() => import("./WarmupCard").then((m) => m.WarmupDoor), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -167,6 +168,8 @@ export default function App() {
           <CityBoard api={api} me={screen.me} />
           <LinkedSheets api={api} me={screen.me} />
           <div className="claim">
+            {/* The Contrarian's free call comes before moving in (none while the API has it off). */}
+            <WarmupDoor api={api} />
             <b>You're looking around as a guest.</b>
             <span>Open Block Party in Telegram to move in and get your own room.</span>
             {openInTelegram && (

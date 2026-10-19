@@ -34,6 +34,7 @@ import {
   MakeGoodError,
   HandleRenameError,
   type HandleRenameErrorCode,
+  WarmupError,
   ResidentError,
   type ResidentErrorCode,
 } from "@bp/db";
@@ -312,7 +313,17 @@ const HANDLE_RENAME: Record<HandleRenameErrorCode, number> = {
   NO_SUCH_APPEAL: 404,
 };
 
-export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET, SYNDICATE, RATIO, LIGHTS, REAL_MONEY, HUNT, MAKE_GOOD, HANDLE_RENAME };
+const WARMUP: Record<WarmupError["code"], number> = {
+  INVALID_INPUT: 400,
+  UNKNOWN_USER: 404,
+  NOT_NEW: 403,
+  ALREADY_TODAY: 409,
+  ALREADY_IN: 409,
+  WINDOW_CLOSED: 409,
+  FEED_DOWN: 503,
+};
+
+export const STATUS_MAPS = { LEDGER, ACCOUNT, DAILY, RESIDENT, CREW, CHAIN, HOME, ECONOMY, MOODS, POLITICS, SAFETY, CHAT, RIDE, PON_STATUS, NOTIFY, LIFE, RELATIONSHIP, TOWER, BELL_SHOW, DUEL, GRUDGE, CITY_MARKET, SYNDICATE, RATIO, LIGHTS, REAL_MONEY, HUNT, MAKE_GOOD, HANDLE_RENAME, WARMUP };
 
 // Turns anything thrown into a status and a body that is safe to show a
 // player. Unknown errors become a plain 500 with no internals.
@@ -342,6 +353,7 @@ export function toResponse(e: unknown): { status: number; body: ApiErrorBody; in
   if (e instanceof HuntError) return out(HUNT[e.code], e.code, e.message);
   if (e instanceof MakeGoodError) return out(MAKE_GOOD[e.code], e.code, e.message);
   if (e instanceof HandleRenameError) return out(HANDLE_RENAME[e.code], e.code, e.message, e.field);
+  if (e instanceof WarmupError) return out(WARMUP[e.code], e.code, e.message);
   if (e instanceof LightsError) return out(LIGHTS[e.code], e.code, e.message);
   if (e instanceof RatioError) return out(RATIO[e.code], e.code, e.message);
   if (e instanceof SyndicateError) return out(SYNDICATE[e.code], e.code, e.message);

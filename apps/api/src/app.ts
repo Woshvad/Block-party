@@ -23,6 +23,7 @@ import {
   cryptoRandomInt,
   pickForMe,
   userAccountId,
+  type WarmupFeed,
 } from "@bp/core";
 import {
   type Db,
@@ -240,6 +241,9 @@ import {
   openRenameAppeals,
   decideRenameAppeal,
   roofBoards,
+  warmupState,
+  makeWarmup,
+  pollWarmup,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -304,8 +308,11 @@ export type AppConfig = {
   // Signs public receipt links (32+ characters).
   receiptSecret?: string;
   // Switches for features the plan turns on mid-beta (Fade Duels wait for
-  // the alt checks). Off unless set.
-  features?: { duels?: boolean; towerLights?: boolean; realMoney?: boolean };
+  // the alt checks). Off unless set. The warm-up waits for Polymarket's
+  // written OK and a legal check.
+  features?: { duels?: boolean; towerLights?: boolean; realMoney?: boolean; warmup?: boolean };
+  // The 15-minute warm-up's feed (Polymarket's Bitcoin windows; a sample in development).
+  warmup?: WarmupFeed;
   // Where the request comes from, as the edge sees it (cf-ipcountry on Cloudflare).
   countryHeader?: string;
 };
@@ -1232,6 +1239,19 @@ export function createApp(cfg: AppConfig) {
     return c.json(r);
   });
 
+  // --- The 15-minute warm-up (behind FEATURE_WARMUP until Polymarket's written OK and a legal check) ---
+
+  // Switched off, every warm-up route refuses, as Fade Duels and Tower Lights do.
+  const warmupOn = async (_c: C, next: () => Promise<void>) => {
+    if (!cfg.features?.warmup) throw new ApiError(503, "WARMUP_NOT_YET", "the warm-up isn't switched on yet");
+    await next();
+  };
+  // Without a feed there's never a window to call, only the City market fallback.
+  const warmupOpts = () => ({ now: now(), ...(cfg.warmup ? { source: cfg.warmup.source } : {}) });
+  app.get("/v1/warmup", auth, warmupOn, async (c) => c.json(await warmupState(db, c.get("userId"), warmupOpts())));
+  // A free call: no GM moves, and one a day is its own key, so no Idempotency-Key.
+  app.post("/v1/warmup/calls", auth, warmupOn, async (c) => c.json(await makeWarmup(db, c.get("userId"), { side: (await body(c)).side }, warmupOpts()), 201));
+
   // --- Long actions and the city clock ---------------------------------------
 
   app.post("/v1/naps", auth, async (c) => c.json(await startNap(db, c.get("userId"), (await body(c)).itemId, where, opts()), 201));
@@ -1267,6 +1287,10 @@ export function createApp(cfg: AppConfig) {
   app.post("/internal/tower/poll", internal, async (c) => {
     if (!cfg.odds) throw new ApiError(503, "ODDS_DISABLED", "no odds feed configured");
     return c.json(await pollOdds(db, cfg.odds, opts()));
+  });
+  app.post("/internal/warmup/poll", internal, warmupOn, async (c) => {
+    if (!cfg.warmup) throw new ApiError(503, "WARMUP_FEED_DISABLED", "no warm-up feed configured");
+    return c.json(await pollWarmup(db, cfg.warmup, opts()));
   });
   app.post("/internal/actions/run", internal, async (c) => c.json(await finishDueActions(db, opts())));
   app.post("/internal/notifications/daily", internal, async (c) => c.json(await queueDailyPings(db, opts())));

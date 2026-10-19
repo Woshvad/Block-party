@@ -364,6 +364,41 @@ button:disabled { cursor: default; }
 .make-good-note { margin: 0; padding: 12px 14px; border-radius: 12px; font-size: 13px; }
 .make-good-note.good { background: #e7eddb; color: #325e37; }
 .make-good-note.bad { background: #fff1e9; color: #963c2e; }
+/* The 15-minute warm-up: the Contrarian at the Tower door, a free UP or DOWN, and the mini-reel. */
+.warmup { display: flex; flex-direction: column; gap: 12px; margin: 0 0 14px; padding: 16px 18px; border-radius: 18px; background: #202c2a; color: #f3f1eb; }
+.warmup-door { display: flex; gap: 12px; align-items: flex-start; }
+.warmup-npc { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #e8b04a; color: #202c2a; font-size: 20px; font-weight: 800; }
+.warmup .eyebrow { color: #c0d0ad; font-size: 10px; letter-spacing: .12em; }
+.warmup .npc-label { color: #e8b04a; }
+.warmup h2 { margin: 4px 0 0; font-size: 19px; line-height: 1.3; letter-spacing: -.02em; }
+.warmup-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.warmup-side { border: 0; border-radius: 14px; padding: 14px; font: inherit; font-size: 17px; font-weight: 750; cursor: pointer; }
+.warmup-side.up { background: #35825c; color: #fff; }
+.warmup-side.down { background: #c0533e; color: #fff; }
+.warmup-side:disabled { opacity: .6; cursor: default; }
+.warmup-small, .warmup-next { margin: 0; font-size: 12px; color: #c9cfc3; line-height: 1.5; }
+.warmup-next { font-size: 13px; color: #f3f1eb; }
+.warmup-receipt { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 12px; border: 1px dashed #6b7a72; font-size: 13px; color: #c9cfc3; }
+.warmup-receipt b { color: #f3f1eb; font-size: 15px; letter-spacing: .02em; }
+.warmup-reel { list-style: none; margin: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; border-radius: 12px; background: #2c3a37; font-size: 14px; }
+.warmup-reel li { opacity: 0; animation: warmup-reel-in .5s ease-out forwards; animation-delay: calc(var(--i, 0) * 2.5s); }
+.warmup-reel li.good { color: #8fdcae; font-weight: 700; }
+.warmup-reel li.bad { color: #f0a08f; font-weight: 700; }
+@keyframes warmup-reel-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .warmup-reel li { animation: none; opacity: 1; } }
+.warmup .action-feedback { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: #2c3a37; color: #8fdcae; }
+.warmup .action-feedback.bad { color: #f0a08f; }
+.warmup .credit { color: #98a39a; }
+/* A guest meets it on the guest panel: one line from the Contrarian opens the card in a sheet. The map tools move up by the line. */
+.claim-warmup { display: flex; align-items: center; gap: 10px; border: 0; border-radius: 12px; padding: 8px 10px; background: #202c2a; color: #f3f1eb; font: inherit; font-size: 13px; font-weight: 650; line-height: 1.35; text-align: left; cursor: pointer; }
+.claim-warmup .warmup-npc { width: 28px; height: 28px; font-size: 15px; }
+.person-dialog .person-sheet.warmup-sheet { padding-top: 52px; }
+.warmup-sheet .warmup { margin: 0; }
+@media (max-width: 600px) {
+  body:has(.claim .claim-warmup) .map-tools { bottom: calc(var(--safe-bottom) + 240px); }
+  body:has(.claim .claim-warmup) .map-directory { bottom: calc(var(--safe-bottom) + 294px); }
+}
+body:has(.claim .claim-warmup) .as-list { padding-bottom: calc(var(--safe-bottom) + 260px); }
 .daily-slate { display: flex; flex-direction: column; gap: 18px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .section-heading h2 { margin: 6px 0 0; font-size: 23px; letter-spacing: -.035em; }

@@ -1,0 +1,18 @@
+[
+  {
+    "slug": "btc-updown-15m-1792403100",
+    "markets": [
+      {
+        "id": "5867770",
+        "question": "Bitcoin Up or Down - October 19, 5:45AM-6:00AM ET",
+        "slug": "btc-updown-15m-1792403100",
+        "outcomes": "[\"Up\", \"Down\"]",
+        "outcomePrices": "[\"0.0005\", \"0.9995\"]",
+        "endDate": "2026-10-19T10:00:00Z",
+        "eventStartTime": "2026-10-19T09:45:00Z",
+        "closed": false,
+        "acceptingOrders": true
+      }
+    ]
+  }
+]

@@ -5,11 +5,14 @@ import type { Api } from "./api";
 import { until, useNow } from "./clock";
 import { label } from "./palette";
 import { useLoad } from "./useLoad";
+import WarmupCard from "./WarmupCard";
 
 const CallSheet = dynamic(() => import("./CallSheet"), { ssr: false });
 
 // The Tower: every open market. Off-Slate calls take a ticket (3 a day,
 // stacking to 9); the odds come from the feed, and pause if it goes quiet.
+// A newcomer meets the Contrarian at the door first: the 15-minute warm-up
+// (WarmupCard), while the API has it switched on.
 
 export default function Tower({ api, onBunker }: { api: Api; onBunker?: (place: string) => void }) {
   const markets = useLoad(() => api.markets(), [api]);
@@ -29,6 +32,7 @@ export default function Tower({ api, onBunker }: { api: Api; onBunker?: (place: 
           </span>
         )}
       </div>
+      <WarmupCard api={api} now={now} />
       {feed.data?.paused && <p className="tag">Odds paused: the feed has gone quiet. Calls open again when it's back.</p>}
       {(markets.error || tickets.error) && <p className="bad">{markets.error ?? tickets.error}</p>}
       <section className="card">

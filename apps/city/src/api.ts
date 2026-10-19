@@ -161,6 +161,10 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     // moving in between spends nothing; one search a day, so no key.
     hunt: () => request<Hunt>("GET", "/v1/hunt"),
     huntSearch: (place: string) => request<HuntSearch>("POST", "/v1/hunt/search", { place }),
+    // The 15-minute warm-up. Switched off (FEATURE_WARMUP), both answer 503
+    // WARMUP_NOT_YET and the card stays hidden. A free call: no key.
+    warmup: () => request<Warmup>("GET", "/v1/warmup"),
+    warmupCall: (side: WarmupSide) => request<WarmupMade>("POST", "/v1/warmup/calls", { side }),
     // The key makes a retried tap the same ride: never charged twice.
     ride: (to: string, mode: string, key: string) => request<{ ride: Ride; replayed: boolean }>("POST", "/v1/rides", { to, mode }, { idempotencyKey: key }),
     roomTicket: (place: string) => request<{ ticket: string; url: string }>("POST", "/v1/rooms/ticket", { place }),
@@ -442,6 +446,26 @@ export type Hunt = {
 };
 // trophies: pieces this search just won.
 export type HuntSearch = { day: string; place: string; found: boolean; finds: number; trophies: string[] };
+// The warm-up card: a window while one takes calls (its first 2 minutes),
+// otherwise when the next opens; your warm-ups newest first, each with its
+// reel once settled.
+export type WarmupSide = "up" | "down";
+export type WarmupStamp = "called_it" | "rekt" | "void";
+export type WarmupReel = { result: WarmupSide | null; voided: boolean; newcomers: number; up: number; down: number; calledIt: number; bot: { name: string; label: string; side: WarmupSide; stamp: WarmupStamp } };
+export type WarmupEntry = { id: string; side: WarmupSide; startsAt: string; endsAt: string; stamp: WarmupStamp | null; settledAt: string | null; newcomers: number; reel: WarmupReel | null };
+export type Warmup = {
+  eligible: boolean;
+  reason: "not_new" | "used_today" | null;
+  day: number;
+  left: number;
+  feed: { live: boolean; credit: string | null };
+  window: { id: string; question: string; startsAt: string; entryClosesAt: string; endsAt: string } | null;
+  nextWindowAt: string;
+  // False when your 3 days are up before that window opens.
+  nextCallable: boolean;
+  mine: WarmupEntry[];
+};
+export type WarmupMade = { id: string; side: WarmupSide; startsAt: string; endsAt: string; day: number; left: number; newcomers: number };
 export type Ride = { id: string; fromArea: string; toArea: string; mode: string; fare: number; busId: string | null; departedAt: string; arriveAt: string };
 export type PublicResident = { userId: string; handle: string; name: string; look: Look } & Record<string, unknown>;
 

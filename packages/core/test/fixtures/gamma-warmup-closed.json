@@ -1,0 +1,26 @@
+[
+  {
+    "id": "5866083",
+    "question": "Bitcoin Up or Down - October 19, 5:00AM-5:15AM ET",
+    "slug": "btc-updown-15m-1792400400",
+    "outcomes": "[\"Up\", \"Down\"]",
+    "outcomePrices": "[\"0\", \"1\"]",
+    "endDate": "2026-10-19T09:15:00Z",
+    "eventStartTime": "2026-10-19T09:00:00Z",
+    "closed": true,
+    "acceptingOrders": false,
+    "umaResolutionStatus": "resolved"
+  },
+  {
+    "id": "5866801",
+    "question": "Bitcoin Up or Down - October 19, 5:30AM-5:45AM ET",
+    "slug": "btc-updown-15m-1792402200",
+    "outcomes": "[\"Up\", \"Down\"]",
+    "outcomePrices": "[\"1\", \"0\"]",
+    "endDate": "2026-10-19T09:45:00Z",
+    "eventStartTime": "2026-10-19T09:30:00Z",
+    "closed": true,
+    "acceptingOrders": false,
+    "umaResolutionStatus": "resolved"
+  }
+]
