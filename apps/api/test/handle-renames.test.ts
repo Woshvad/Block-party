@@ -42,7 +42,7 @@ describe("POST /v1/staff/residents/:id/handle", () => {
 
     const me = await call("GET", "/v1/me", { token: u.token });
     expect(me.body.resident.handle).toBe(r.body.to);
-    expect(me.body.handleNotice).toEqual({ id: r.body.id, from: u.handle, to: r.body.to, reason: REASON, at: r.body.at });
+    expect(me.body.handleNotice).toEqual({ id: r.body.id, from: u.handle, to: r.body.to, reason: REASON, at: r.body.at, appealable: true });
     expect((await call("GET", "/v1/me", { token: other.token })).body.handleNotice).toBeNull();
 
     // p-<handle> links resolve through this: the old handle is gone.

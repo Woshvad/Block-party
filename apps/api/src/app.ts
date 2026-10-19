@@ -235,6 +235,10 @@ import {
   renameHandle,
   handleNotice,
   seeHandleNotice,
+  myHandleRename,
+  appealRename,
+  openRenameAppeals,
+  decideRenameAppeal,
 } from "@bp/db";
 import { hitRateLimit, schemaStatus } from "@bp/db";
 import { type Context, Hono } from "hono";
@@ -439,9 +443,9 @@ export function createApp(cfg: AppConfig) {
     c.set("sessionToken", token);
     const write = c.req.method !== "GET";
     await limit(c, `user:${s.userId}:${write ? "w" : "r"}`, write ? limits.writesPerUserPerMinute : limits.readsPerUserPerMinute, 60);
-    // A suspended resident can read, log out, appeal and dismiss a rename
-    // notice; nothing else.
-    if (write && !/^\/v1\/(auth\/logout|restrictions\/[^/]+\/appeal$|resident\/handle-notice\/[^/]+\/seen$)/.test(c.req.path)) {
+    // A suspended resident can read, log out, appeal (a restriction or a
+    // rename) and dismiss a rename notice; nothing else.
+    if (write && !/^\/v1\/(auth\/logout|restrictions\/[^/]+\/appeal$|resident\/handle-renames\/[^/]+\/appeal$|resident\/handle-notice\/[^/]+\/seen$)/.test(c.req.path)) {
       const active = await activeRestrictions(db, s.userId, now());
       const suspended = active.filter((r) => r.kind === "suspended");
       if (suspended.length > 0) {
@@ -615,6 +619,10 @@ export function createApp(cfg: AppConfig) {
   app.put("/v1/resident/traits", auth, async (c) => c.json(await swapTraits(db, c.get("userId"), (await body(c)).traits, opts())));
   // OK on the notice that staff renamed your @handle (GET /v1/me carries it).
   app.post("/v1/resident/handle-notice/:id/seen", auth, async (c) => c.json(await seeHandleNotice(db, c.get("userId"), uuid(c, "id"), opts())));
+  // The rename that gave you your handle, for Me, with its appeal (or null);
+  // and the appeal itself, once, while the old handle rests.
+  app.get("/v1/resident/handle-rename", auth, async (c) => c.json(await myHandleRename(db, c.get("userId"), opts())));
+  app.post("/v1/resident/handle-renames/:id/appeal", auth, async (c) => c.json(await appealRename(db, c.get("userId"), uuid(c, "id"), (await body(c)).text, opts()), 201));
   // Who's who, for chat, DMs, boards and frens lists: ?ids=a,b,c (up to 100).
   app.get("/v1/residents", auth, async (c) => c.json(await residentsByIds(db, (c.req.query("ids") ?? "").split(",").filter(Boolean))));
   app.get("/v1/residents/:handle", auth, async (c) => {
@@ -868,6 +876,13 @@ export function createApp(cfg: AppConfig) {
   app.post("/v1/staff/residents/:id/handle", auth, async (c) => {
     const b = await body(c);
     return c.json(await renameHandle(db, c.get("userId"), uuid(c, "id"), { newHandle: b.newHandle, reason: b.reason, from: b.from, reportId: b.reportId }, sendOpts()));
+  });
+  // Appeals against renames: staff other than the renamer uphold one, or
+  // overturn it, which gives the old handle back. The note is the resident's to read.
+  app.get("/v1/staff/handle-appeals", auth, async (c) => c.json(await openRenameAppeals(db, c.get("userId"))));
+  app.post("/v1/staff/handle-appeals/:id/decide", auth, async (c) => {
+    const b = await body(c);
+    return c.json(await decideRenameAppeal(db, c.get("userId"), uuid(c, "id"), { overturn: b.overturn, note: b.note }, opts()));
   });
   // What the AI check flagged, or couldn't check, waiting for a person.
   app.get("/v1/staff/moderation", auth, async (c) => c.json(await moderationQueue(db, c.get("userId"))));
