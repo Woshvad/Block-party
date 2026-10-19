@@ -30,7 +30,8 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Nothing has run inside Telegram or on a phone.** The BackButton, safe areas, start links and the low tier need a device check, and the frame-rate test is still to do. The `?perf` meter now counts every pass, shadows included, so its numbers are higher than the old 146 draw calls (main pass only).
 - **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
 - **A staff rename for flagged @handles.** The handle trigger blocks it; staff restrict the resident instead.
-- **Promised but inert:** four alert toggles have no producer, and Contrarian Day and NOTHING Day have copy but no rules.
+- **Promised but inert:** four alert toggles have no producer. (Contrarian Day and NOTHING Day have their rules now: README brick 44, with Blind Slate finished.)
+- **Bell Modifiers, still open:** the banner tile is a home piece until crew banners take earned tiles; the share line shows no gold borders; a syndicate proposed just before a Blind Slate went out still shows its side on the Crew Table.
 - **An asset pipeline** (compressed GLBs, unused models removed, immutable cache headers once the city has hosting).
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
 - **Profile the API suite.** It took 15 to 50 minutes on a dev machine; CI allows 90.
