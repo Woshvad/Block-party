@@ -5,6 +5,7 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 ## Read this first: the state of the repo
 
 - **Repo:** https://github.com/isaac-richie/Block-party, branch `feat/backend-bricks` (the default). The repo is **public**, so never commit `.env` or the product plan.
+- **Everything since 11 October is on the fork** https://github.com/Woshvad/Block-party, whose default branch `main` holds all of it. It builds up in three branches, each on top of the last: `fix/review-findings` (the review), `feat/lagos-ideas` (ideas from Lagos Life) and `feat/backlog` (the backlog pass, 19 October). None has a pull request on the upstream repo yet.
 - **Everything is committed.** The latest two commits are the room-access backend (`roomAccess`, `POST /internal/rooms/access`, visitor homes, binder and headcount routes) and the frontend polish pass (navigation, Today, onboarding, social and crew, the trophy wall and TV, the city atmosphere, water, the diner quarter, and the `*-preview` routes).
 - **`apps/api/src/app.ts` was rebuilt once.** On 10 October it was accidentally emptied while uncommitted, then rebuilt from the dev server's compiled cache. Its compiled output matches the lost version byte for byte, and it typechecks again. Any comments the room-access developer wrote in the room-ticket route and `/internal/rooms/access` were lost, so they should re-read both.
 - **Local settings:** the shared `.env` at the repo root (every script, the dev server and the test suites read it, after any `.env` in their own package; no symlinks needed) has `ODDS_SOURCE=polymarket`, so the local API polls live Polymarket. Use `mock` to work offline.
@@ -12,7 +13,7 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 
 ## Review fixes (12 October 2026)
 
-An outside review (a static read of the whole repo, then fixes with tests) ran on 11 and 12 October. The fixes are on the branch `fix/review-findings`, built on `feat/backend-bricks`. It was committed locally and **not pushed**: open a pull request and let CI run before merging. On its last commit, typecheck, every package's suite and the city build passed on a Windows dev machine against Postgres 15: core 664, db 850, API 652, rooms 54 and city 263 tests (before the review: 562, 774, 608, 21 and 138). The API suite took 49 minutes there.
+An outside review (a static read of the whole repo, then fixes with tests) ran on 11 and 12 October. The fixes are on the branch `fix/review-findings`, built on `feat/backend-bricks`, and pushed to the fork (above): open a pull request and let CI run before merging. On its last commit, typecheck, every package's suite and the city build passed on a Windows dev machine against Postgres 15: core 664, db 850, API 652, rooms 54 and city 263 tests (before the review: 562, 774, 608, 21 and 138). The API suite took 49 minutes there.
 
 What it fixed:
 
@@ -42,9 +43,44 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Profile the API suite** (done, 19 October). It took 48 minutes on the Windows dev machine, 47 of them the fuzzer: about 180,000 requests one after another, each mostly waiting on Postgres (a round trip to Postgres in Docker is about 1.2 ms there). Test files now run in parallel, each worker on its own copy of the database, and the fuzzer runs as three shards, 8 routes at a time, with every test and assertion kept. The API suite takes under 5 minutes, the db suite 1.5 (was 6), and CI allows 30 minutes for the whole job.
 - **Still open from it:** a suite can hold about 75 of Postgres's 100 connections at its peak, so several checkouts testing on one Postgres should set `VITEST_MAX_WORKERS=2`.
 
+## Backlog pass (19 October 2026)
+
+The engineering items that needed no owner decision, built in parallel lanes. Two reviewers (correctness, and the plan's rules and security) checked each lane, and 39 of their findings were fixed with tests. The branch is `feat/backlog`, and its migrations are 0054 to 0057.
+
+- **Faster tests.**
+  - **Speeds:** the API suite went from 48 minutes to about 5, and the db suite from 6 minutes to under 2.
+  - **How:** each vitest worker gets its own database copy, and the fuzzer runs in three shards. No test was removed or weakened.
+  - **CI:** its timeout is now 30 minutes.
+- **Every alert fires** (README brick 13's notes). Shift done, away shift ready and Bell in 2h now have producers, each once per event and dropped if it's stale. The daily ping mentions an open make-good or today's clue, still one ping a day.
+- **The Bell Modifiers' rules** (brick 44): Contrarian Day's gold border, NOTHING Day's banner tile, Blind Slate finished. None touches Aura, GM or real trades.
+- **Staff renames for flagged @handles** (brick 45), with a 30-day rest for the old handle and one appeal.
+- **The Roof's leaderboards** (README Frontend): the Right List, the Season Stack and the crews, from `GET /v1/roof`. The Watch Party's screen shows the Hall's City markets.
+- **Kit assets** (README Frontend): unused models removed, so `public/assets` is 6.84 MB instead of 16.75 MB, in content-hashed folders. Compression is the owner's call (PERFORMANCE_BASELINE.md).
+- **The 15-minute Bitcoin warm-up** (brick 46): built and tested, but off behind `FEATURE_WARMUP` until Polymarket's written OK and a legal check (PARKED.md).
+- **Fresh Tower odds:** every Gamma request carries the poll's time, so Gamma's 5-minute cache can't serve old prices.
+
+Tests: on the merged branch, typecheck, every package's suite and the city build passed: core 751, db 1,035, API 759, rooms 61 and city 407. The API suite took 5.4 minutes.
+
+**Checked in a browser** against the local API and rooms, at phone and desktop size:
+- moving in a new resident
+- the city board's neighbours line
+- the clue hunt end to end (the riddle, walking to the Faucet, the search, the trophy and the count)
+- Me's Share and Graphics choices
+- List view, with no canvas at all
+- the Tower with the warm-up off
+- the Roof's three screens and their route
+
+**Still open from this pass:**
+- **Pushes at launch scale.** The cron sends up to 600 a run (see the line above).
+- **Bell Modifiers' leftovers.**
+- **The renamed handle in a live room:** it stays until that resident rejoins a room.
+- **Meshopt compression,** which needs the owner's OK for a new tool.
+- **The warm-up's "Welcome back" grant,** which belongs to the Launch phase.
+- **Crew-bot posts.** They need a Telegram group link, and the API takes no bot updates yet.
+
 ## Ideas from Lagos Life (17 October 2026)
 
-Lagos Life, a browser life-sim set in Lagos, launched on 1 October 2026 and grew fast. Its dated updates up to 15 October were reviewed, and the ideas that fit Block Party without a business decision were built. They're on the branch `feat/lagos-ideas`, built on `fix/review-findings`, committed locally and **not pushed**. The migrations are 0050 to 0053. What needs the owner (selling ad space, sponsored places, a games hub) is in [PARKED.md](PARKED.md).
+Lagos Life, a browser life-sim set in Lagos, launched on 1 October 2026 and grew fast. Its dated updates up to 15 October were reviewed, and the ideas that fit Block Party without a business decision were built. They're on the branch `feat/lagos-ideas`, built on `fix/review-findings`, and pushed to the fork. The migrations are 0050 to 0053. What needs the owner (selling ad space, sponsored places, a games hub) is in [PARKED.md](PARKED.md).
 
 - **The Daily Clue Hunt** (brick 41).
   - **How it works:** each city day something is hidden at one public place, picked at random on the server. Today shows a riddle, and each resident gets one search a day, where they stand.
