@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Warmup, WarmupEntry } from "../src/api";
-import { CONTRARIAN, CONTRARIAN_LINE, calledLine, newcomersLine, nextRefresh, reelLines, warmupView } from "../src/warmup";
+import { CONTRARIAN, CONTRARIAN_LINE, calledLine, doorLine, newcomersLine, nextRefresh, reelLines, warmupView } from "../src/warmup";
 
 const MIN = 60_000;
 const t0 = Date.parse("2026-10-19T10:00:00Z");
@@ -124,6 +124,21 @@ describe("the Contrarian at the Tower door", () => {
     for (const inner of live(readFileSync(new URL("../src/WarmupCard.tsx", import.meta.url), "utf8"))) expect(inner).not.toMatch(ticking);
   });
 
+  it("guests meet it too: the guest panel carries the Contrarian's line, which opens the card", () => {
+    // The guest screen (no Tower: that's for residents) puts the door on its panel.
+    const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+    const guest = app.slice(app.indexOf('case "guest":'), app.indexOf('case "city":'));
+    expect(guest).toMatch(/<div className="claim">\s*(\{\/\*[\s\S]*?\*\/\}\s*)?<WarmupDoor api=\{api\} \/>/);
+    expect(app).toMatch(/const WarmupDoor = dynamic\(\(\) => import\("\.\/WarmupCard"\)\.then\(\(m\) => m\.WarmupDoor\)/);
+    // What the line says, by the card's state.
+    expect(doorLine(warmupView(card(), t0 + 30_000)!)).toBe("Bitcoin, up or down? Free call, ser. Calls close in 1m.");
+    expect(doorLine(warmupView(card({ window: null }), t0 + 7 * MIN)!)).toBe("Next window opens in 8m. Calls are taken in its first 2 minutes.");
+    expect(doorLine(warmupView(card({ window: null, feed: { live: false, credit: null } }), t0)!)).toBe("The Bitcoin feed is quiet right now.");
+    expect(doorLine(warmupView(card({ eligible: false, reason: "used_today", left: 2, mine: [entry()] }), t0 + 3 * MIN)!)).toBe("Your warm-up: you called UP. See your receipt.");
+    const settled = entry({ stamp: "called_it", settledAt: iso(t0 + 16 * MIN), reel: reel("up") });
+    expect(doorLine(warmupView(card({ eligible: false, reason: "used_today", left: 2, mine: [settled] }), t0 + 20 * MIN)!)).toBe("Your warm-up settled. See how you did.");
+  });
+
   it("the Rookie Bell and the call's own answer", () => {
     expect(newcomersLine(1)).toBe("Just you in this window so far. NOTHING-9000 called DOWN, as always.");
     expect(newcomersLine(NaN)).toBe("Just you in this window so far. NOTHING-9000 called DOWN, as always.");
@@ -186,6 +201,7 @@ describe("the warm-up card's colours", () => {
     }
     const reel = colour(".warmup-reel", "background");
     for (const s of [".warmup-reel li.good", ".warmup-reel li.bad"]) expect(contrast(colour(s, "color"), reel), s).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(colour(".claim-warmup", "color"), colour(".claim-warmup", "background"))).toBeGreaterThanOrEqual(4.5);
     const feedback = colour(".warmup .action-feedback", "background");
     for (const s of [".warmup .action-feedback", ".warmup .action-feedback.bad"]) expect(contrast(colour(s, "color"), feedback), s).toBeGreaterThanOrEqual(4.5);
   });

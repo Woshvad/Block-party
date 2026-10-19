@@ -1,16 +1,17 @@
 "use client";
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ApiError, type Api, type WarmupSide } from "./api";
+import { useBackLayer } from "./back";
+import { useNow } from "./clock";
 import { haptic } from "./telegram";
 import { useLoad } from "./useLoad";
-import { CONTRARIAN, CONTRARIAN_LINE, type WarmupView, calledLine, nextRefresh, warmupView } from "./warmup";
+import { CONTRARIAN, CONTRARIAN_LINE, type WarmupView, calledLine, doorLine, nextRefresh, warmupView } from "./warmup";
 
-// The 15-minute warm-up, at the top of the Tower: the Contrarian at the door
-// with a free UP or DOWN call on Bitcoin's next 15 minutes, your receipt
-// while it runs, and the mini-reel once it settles. Switched off (the API's
-// FEATURE_WARMUP) or done with, there's no card at all.
-export default function WarmupCard({ api, now }: { api: Api; now: number }) {
-  // Off, the API answers 503: no card, and the Tower works the same.
+// The warm-up's answer from the API and the call, for the Tower's card and
+// the guest's door. Off, the API answers 503: no data, so no card, and
+// everything around it works the same.
+function useWarmup(api: Api, now: number) {
   const w = useLoad(() => api.warmup().catch(() => null), [api]);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<{ text: string; bad: boolean } | null>(null);
@@ -41,9 +42,77 @@ export default function WarmupCard({ api, now }: { api: Api; now: number }) {
       void w.reload();
     }
   };
-  const view = warmupView(w.data, now);
+  return { view: warmupView(w.data, now), pending, feedback, onCall: (side: WarmupSide) => void call(side) };
+}
+
+// The 15-minute warm-up, at the top of the Tower: the Contrarian at the door
+// with a free UP or DOWN call on Bitcoin's next 15 minutes, your receipt
+// while it runs, and the mini-reel once it settles. Switched off (the API's
+// FEATURE_WARMUP) or done with, there's no card at all.
+export default function WarmupCard({ api, now }: { api: Api; now: number }) {
+  const { view, ...card } = useWarmup(api, now);
+  return view && <WarmupCardView view={view} {...card} />;
+}
+
+// A guest has no Tower, and the plan has the warm-up before moving in, so
+// the guest panel carries one line from the Contrarian that opens the card.
+export function WarmupDoor({ api }: { api: Api }) {
+  const now = useNow(1000);
+  const { view, ...card } = useWarmup(api, now);
+  const [open, setOpen] = useState(false);
   if (!view) return null;
-  return <WarmupCardView view={view} pending={pending} feedback={feedback} onCall={(side) => void call(side)} />;
+  return (
+    <>
+      <button className="claim-warmup" onClick={() => setOpen(true)} aria-haspopup="dialog">
+        <span className="warmup-npc" aria-hidden="true">
+          ↯
+        </span>
+        <span>{doorLine(view)}</span>
+      </button>
+      {open && (
+        <WarmupSheet onClose={() => setOpen(false)}>
+          <WarmupCardView view={view} {...card} />
+        </WarmupSheet>
+      )}
+    </>
+  );
+}
+
+// The card in a sheet over the city, as a receipt opens from its link.
+function WarmupSheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useBackLayer(true, onClose);
+  useEffect(() => {
+    const previous = document.activeElement;
+    const modal = dialog.current;
+    modal?.showModal();
+    return () => {
+      modal?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
+  return createPortal(
+    <dialog
+      ref={dialog}
+      className="person-dialog"
+      aria-labelledby="warmup-title"
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="callsheet tall person-sheet warmup-sheet">
+        <button className="x" aria-label="close" onClick={onClose}>
+          ×
+        </button>
+        {children}
+      </div>
+    </dialog>,
+    document.body,
+  );
 }
 
 export type WarmupCardViewProps = {

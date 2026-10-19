@@ -95,6 +95,15 @@ export function warmupView(w: Warmup | null | undefined, now: number): WarmupVie
   };
 }
 
+// The guest panel's one line from the Contrarian, which opens the card:
+// guests have no Tower, and the plan has the warm-up before moving in.
+export function doorLine(v: WarmupView): string {
+  if (v.call) return `Bitcoin, up or down? Free call, ser. Calls close in ${v.call.closesIn}.`;
+  if (v.waiting) return `Your warm-up: you called ${v.waiting.side}. See your receipt.`;
+  if (v.reel) return "Your warm-up settled. See how you did.";
+  return v.next ?? CONTRARIAN_LINE;
+}
+
 // A window the phone thinks has opened, though the answer didn't have it yet.
 const AGAIN_MS = 5_000;
 

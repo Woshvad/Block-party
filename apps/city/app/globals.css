@@ -390,6 +390,16 @@ button:disabled { cursor: default; }
 .warmup .action-feedback { margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: #2c3a37; color: #8fdcae; }
 .warmup .action-feedback.bad { color: #f0a08f; }
 .warmup .credit { color: #98a39a; }
+/* A guest meets it on the guest panel: one line from the Contrarian opens the card in a sheet. The map tools move up by the line. */
+.claim-warmup { display: flex; align-items: center; gap: 10px; border: 0; border-radius: 12px; padding: 8px 10px; background: #202c2a; color: #f3f1eb; font: inherit; font-size: 13px; font-weight: 650; line-height: 1.35; text-align: left; cursor: pointer; }
+.claim-warmup .warmup-npc { width: 28px; height: 28px; font-size: 15px; }
+.person-dialog .person-sheet.warmup-sheet { padding-top: 52px; }
+.warmup-sheet .warmup { margin: 0; }
+@media (max-width: 600px) {
+  body:has(.claim .claim-warmup) .map-tools { bottom: calc(var(--safe-bottom) + 240px); }
+  body:has(.claim .claim-warmup) .map-directory { bottom: calc(var(--safe-bottom) + 294px); }
+}
+body:has(.claim .claim-warmup) .as-list { padding-bottom: calc(var(--safe-bottom) + 260px); }
 .daily-slate { display: flex; flex-direction: column; gap: 18px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .section-heading h2 { margin: 6px 0 0; font-size: 23px; letter-spacing: -.035em; }
