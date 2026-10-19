@@ -97,8 +97,8 @@ describe("POST /v1/staff/residents/:id/handle", () => {
     for (const v of nasty) {
       for (const body of [{ reason: v }, { reason: REASON, newHandle: v }, { reason: REASON, from: v }, { reason: REASON, reportId: v }, v]) {
         const r = await rename(mod.token, u.userId, body);
-        // null means "not given", so those go through with a neutral handle
-        // (NaN too: JSON sends it as null).
+        // These go through, with a neutral handle: null means "not given" (NaN
+        // too, as JSON sends it as null), and the 36-character id is a long enough reason.
         if (r.status === 200) renamed++;
         else if (r.status >= 500 || !r.body?.error?.code) failures.push(`${r.status} ${JSON.stringify(body)?.slice(0, 60)}`);
       }
@@ -107,7 +107,7 @@ describe("POST /v1/staff/residents/:id/handle", () => {
     }
     expect(failures).toEqual([]);
     expect(logs.filter((l) => l.msg === "input reached the database unvalidated")).toEqual([]);
-    expect(renamed).toBe(6);
+    expect(renamed).toBe(7);
     expect(await client`SELECT 1 FROM handle_renames WHERE user_id = ${u.userId}`).toHaveLength(renamed);
   });
 });
