@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { ApiError, type Api, type Me } from "./api";
 import { useBackLayer } from "./back";
 import { receiptLink } from "./launch";
+import { CONTRARIAN_LINE } from "./modifiers";
 import { receiptShareText } from "./share";
 import ShareButton, { useSharePrompts } from "./ShareButton";
 import { EmptyState, Loading } from "./ui";
@@ -11,7 +12,8 @@ import { useLoad } from "./useLoad";
 
 // A Tower receipt, opened from its link (r-... or ?receipt=). It reads the
 // public receipt route, so anyone with the link sees the same thing: the call,
-// the prices when it locked, and the stamp, sealed until the bell.
+// the prices when it locked, and the stamp, sealed until the bell. A
+// Contrarian Day call against the city majority gets the gold border.
 
 const STAMP_CLASS: Record<string, string> = { "CALLED IT": "called", REKT: "rekt", VOID: "void" };
 const when = (iso: string) => new Date(iso).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -34,7 +36,7 @@ export default function ReceiptSheet({ api, me, token, onClose }: { api: Pick<Ap
 
   return createPortal(
     <dialog ref={dialog} className="person-dialog" aria-labelledby="receipt-title" onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="callsheet tall person-sheet receipt-sheet">
+      <div className={`callsheet tall person-sheet receipt-sheet${r?.contrarian ? " contrarian" : ""}`}>
         <button className="x" aria-label="close" onClick={onClose}>
           ×
         </button>
@@ -52,6 +54,12 @@ export default function ReceiptSheet({ api, me, token, onClose }: { api: Pick<Ap
         ) : (
           <>
             <span className={`receipt-stamp ${STAMP_CLASS[r.stamp] ?? "sealed"}`}>{r.stamp}</span>
+            {r.contrarian && (
+              <p className="receipt-contrarian">
+                <span aria-hidden="true">★ </span>
+                {CONTRARIAN_LINE}
+              </p>
+            )}
             <h2 id="receipt-title" className="receipt-q">{r.question}</h2>
             <p className="muted">
               @{r.handle}

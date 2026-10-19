@@ -1,8 +1,10 @@
 "use client";
 import { type CloseItem, renderClose } from "@bp/core";
 import { useState } from "react";
-import type { Api } from "../api";
+import type { Api, OpenGrid } from "../api";
 import { TIER_LABEL } from "../call";
+import GridRows from "../GridRows";
+import { MODIFIER_NAMES, modifierResult } from "../modifiers";
 import { until, useNow } from "../clock";
 import { label } from "../palette";
 import { PLACE_INFO } from "../places";
@@ -27,8 +29,9 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
   const act = useAction();
   const now = useNow(1000);
   const r = reel.data as Any | undefined;
-  const g = grid.data as Any | undefined;
-  const lastGrid = r?.grid as Any | null | undefined;
+  const g = grid.data;
+  const lastGrid = r?.grid as OpenGrid | { sealed: true } | null | undefined;
+  const modifier = typeof r?.modifier === "string" ? MODIFIER_NAMES[r.modifier] : undefined;
 
   return (
     <Page title="The bell" onBack={onBack}>
@@ -38,7 +41,7 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
         {!g ? (
           <Loading error={grid.error} retry={grid.reload} />
         ) : g.sealed ? (
-          <p className="muted">Sealed until the bell in {until(g.bellAt as string, now)}.</p>
+          <p className="muted">Sealed until the bell in {until(g.bellAt, now)}.</p>
         ) : (
           <GridView g={g} />
         )}
@@ -50,7 +53,7 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
       </section>
 
       <section className="card">
-        <h2>Last bell{r ? ` · ${r.bellDay as string}` : ""}</h2>
+        <h2>Last bell{r ? ` · ${r.bellDay as string}` : ""}{modifier ? ` · ${modifier}` : ""}</h2>
         {!r ? (
           <Loading error={reel.error} retry={reel.reload} />
         ) : (
@@ -59,12 +62,14 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
               <div className="stat" key={c.slot as number}>
                 <span>
                   <small className="muted">{TIER_LABEL[c.tier as string]}</small> {c.question as string}
+                  {typeof c.cityMajority === "string" && <small className="muted"> · The city went {c.cityMajority.toUpperCase()}</small>}
                 </span>
                 <b>{RESULT[c.result as string] ?? String(c.result)}</b>
               </div>
             ))}
             {(r.slate as Any[]).length === 0 && <p className="muted">No Slate settled that day.</p>}
             {lastGrid && !lastGrid.sealed && <GridView g={lastGrid} />}
+            {typeof r.beatTheBot === "number" && <p>🤖 {r.beatTheBot === 1 ? "1 resident" : `${r.beatTheBot} residents`} beat NOTHING-9000's grid that day.</p>}
             {(r.duels as Any[]).map((d, i) => (
               <p key={i}>⚔️ {d.snap ? `@${String(d.winner)} ate @${String(d.loser)}'s Snap` : `@${String(d.winner)} beat @${String(d.loser)}`} ({Number(d.pot)} GM pot)</p>
             ))}
@@ -133,17 +138,25 @@ export default function Results({ api, onBack }: { api: Api; onBack: () => void 
   );
 }
 
-function GridView({ g }: { g: Any }) {
+// The revealed grid: its squares (gold borders on Contrarian Day, NOTHING-9000's
+// row on NOTHING Day), what the modifier came to, your Aura and the share line.
+function GridView({ g }: { g: OpenGrid }) {
+  const result = modifierResult(g);
   return (
     <div>
-      <pre className="grid">{String(g.share ?? "")}</pre>
-      {g.aura !== null && g.aura !== undefined && (
+      <GridRows g={g} />
+      {result && (
         <p>
-          Aura <b>{Number(g.aura).toFixed(1)}</b>
-          {g.percentile !== null && g.percentile !== undefined ? ` · better than ${g.percentile}% of the city` : ""}
+          <b>{result.title}:</b> {result.text}
         </p>
       )}
-      <button className="btn light" onClick={() => navigator.clipboard?.writeText(String(g.share ?? ""))}>
+      {g.aura !== null && (
+        <p>
+          Aura <b>{g.aura.toFixed(1)}</b>
+          {g.percentile !== null ? ` · better than ${g.percentile}% of the city` : ""}
+        </p>
+      )}
+      <button className="btn light" onClick={() => navigator.clipboard?.writeText(g.share)}>
         Copy grid
       </button>
     </div>

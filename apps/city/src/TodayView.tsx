@@ -17,7 +17,7 @@ export type TodayViewProps = {
   onGm: () => void; onCall: (id: string) => void; retryToday: () => void; retrySlate: () => void;
   // The Daily clue card (DailyClue.tsx), between your progress and the Slate.
   clue?: ReactNode;
-  // Shown under the heading when there's something from the city (a make-good to collect).
+  // Shown under the heading when there's something from the city (a make-good to collect, last night's Bell Modifier).
   notice?: ReactNode;
 };
 export default function TodayView({ today: t, slate: s, todayError, slateError, now, pending, feedback, onGm, onCall, retryToday, retrySlate, clue, notice }: TodayViewProps) {

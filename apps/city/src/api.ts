@@ -207,7 +207,7 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     visitHome: (owner: string) => request<Home>("GET", `/v1/homes/${encodeURIComponent(owner)}`),
     binder: (owner: string) => request<ReceiptBinder>("GET", `/v1/homes/${encodeURIComponent(owner)}/binder`),
     reel: (day?: string) => request<Record<string, unknown>>("GET", `/v1/reel${day ? `?day=${encodeURIComponent(day)}` : ""}`),
-    grid: (day: string) => request<Record<string, unknown>>("GET", `/v1/slate/${encodeURIComponent(day)}/grid`),
+    grid: (day: string) => request<Grid>("GET", `/v1/slate/${encodeURIComponent(day)}/grid`),
     // 404: no paper that day. Anything else is a real failure, shown with a retry.
     dailyClose: (day: string) => request<{ bellDay: string; pages: Record<string, { key: string; values: Record<string, string | number> }[]> }>("GET", `/v1/daily-close/${encodeURIComponent(day)}`).catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))),
     rightList: () => request<{ season: number; rows: Record<string, unknown>[]; me: Record<string, unknown> | null }>("GET", "/v1/tower/right-list"),
@@ -369,6 +369,23 @@ export type SlateCard = {
   mine: { side: Side; chance: number; status: CallState } | null;
 };
 export type Slate = { cityDay: string; number: number; modifier: string; bellAt: string; sealed: boolean; credit: string | null; cards: SlateCard[] };
+// A Slate day's grid: sealed until the bell, then a square per card by Aura.
+export type GridSquare = "green" | "white" | "red" | "black" | "gold" | "void" | "pending";
+export type OpenGrid = {
+  cityDay: string;
+  sealed: false;
+  number: number;
+  modifier: string;
+  squares: GridSquare[];
+  share: string;
+  aura: number | null;
+  percentile: number | null;
+  // Contrarian Day: which squares went against the city majority (the gold border).
+  contrarian: boolean[] | null;
+  // NOTHING Day: NOTHING-9000's grid under yours; beat is null until the bell settles it.
+  nothing: { squares: GridSquare[]; aura: number | null; beat: boolean | null; tile: boolean } | null;
+};
+export type Grid = { cityDay: string; sealed: true; bellAt: string } | OpenGrid;
 export type MarketView = {
   id: string;
   question: string;
@@ -464,7 +481,8 @@ export type StaffMakeGood = MakeGood & { createdBy: string; collected: number; p
 
 // A Tower receipt as its public link shows it: never a wallet, a dollar amount
 // or whether it was real. The stamp says IN THE MEMPOOL and the Aura is null
-// until the bell reveals the result.
-export type Receipt = { id: string; handle: string; npc: string | null; question: string; side: Side; chance: number; world: number | null; city: number | null; vibeGap: number | null; lockedAt: string | null; bellAt: string; stamp: string; aura: number | null; ratio: string | null };
+// until the bell reveals the result. contrarian: a Contrarian Day call against
+// the city majority (the gold border), from the bell on.
+export type Receipt = { id: string; handle: string; npc: string | null; question: string; side: Side; chance: number; world: number | null; city: number | null; vibeGap: number | null; lockedAt: string | null; bellAt: string; stamp: string; aura: number | null; contrarian: boolean; ratio: string | null };
 
 export type ReceiptBinder = { season: number; receipts: { callId: string; question: string; side: string; chance: number; world: number; aura: number; resolvedAt: string }[] };
