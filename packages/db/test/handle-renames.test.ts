@@ -88,7 +88,7 @@ describe("staff rename a handle", () => {
     const old = uniq();
     const u = await residentAs(old);
     const at = new Date(Date.now() - 1000);
-    const r = await renameHandle(db, mod, u.toUpperCase(), { reason: `  ${REASON}​ ` }, { now: at });
+    const r = await renameHandle(db, mod, u.toUpperCase(), { reason: `  ${REASON}\u200b ` }, { now: at });
     expect(r.to).toMatch(/^neighbour_\d{5}$/);
     expect(r).toMatchObject({ userId: u, from: old, reason: REASON, at, heldUntil: new Date(at.getTime() + HANDLE_RENAME.holdDays * DAY), reportId: null });
     expect(await handleOf(u)).toBe(r.to);
@@ -120,7 +120,7 @@ describe("staff rename a handle", () => {
     const other = uniq();
     await residentAs(other);
     const send = (newHandle: unknown, blockedWords?: string[]) => code(renameHandle(db, mod, u, { reason: REASON, newHandle }, blockedWords ? { blockedWords } : {}));
-    for (const bad of ["ab", "a".repeat(16), "a b", "roof-rat", "x__y", "12345", "admin", "Faucet_Fren", "rооf_rat", 42, {}, [], ""]) expect(await send(bad), String(bad)).toBe("INVALID_INPUT");
+    for (const bad of ["ab", "a".repeat(16), "a b", "roof-rat", "x__y", "12345", "admin", "Faucet_Fren", "r\u043e\u043ef_rat", 42, {}, [], ""]) expect(await send(bad), String(bad)).toBe("INVALID_INPUT");
     expect(await send(other.toUpperCase())).toBe("HANDLE_TAKEN");
     expect(await send(old.toUpperCase())).toBe("INVALID_INPUT"); // already theirs
     expect(await send("b4d_w0rd", ["badword"])).toBe("MODERATED");
@@ -141,7 +141,7 @@ describe("staff rename a handle", () => {
   it("the reason is required, readable and short", async () => {
     const mod = await staffer();
     const u = await residentAs();
-    for (const reason of [undefined, null, 7, "", "too short", "x".repeat(HANDLE_RENAME.reasonMaxChars + 1), "​".repeat(30)]) {
+    for (const reason of [undefined, null, 7, "", "too short", "x".repeat(HANDLE_RENAME.reasonMaxChars + 1), "\u200b".repeat(30)]) {
       expect(await code(renameHandle(db, mod, u, { reason })), String(reason).slice(0, 12)).toBe("INVALID_INPUT");
     }
     for (const input of [undefined, null, "x", [], 5]) expect(await code(renameHandle(db, mod, u, input as never))).toBe("INVALID_INPUT");

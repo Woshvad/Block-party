@@ -25,13 +25,13 @@ describe("staff renames", () => {
 
   it("the reason is one clean line the resident can read, as long as a restriction's", () => {
     expect(HANDLE_RENAME.reasonMinChars).toBe(MODERATION.reasonMinChars);
-    expect(renameReason("  Your handle   named\na real person.​ ")).toBe("Your handle named a real person.");
+    expect(renameReason("  Your handle   named\na real person.\u200b ")).toBe("Your handle named a real person.");
     expect(renameReason("x".repeat(HANDLE_RENAME.reasonMinChars))).not.toBeNull();
     expect(renameReason("x".repeat(HANDLE_RENAME.reasonMaxChars))).not.toBeNull();
-    for (const bad of [undefined, null, 42, {}, [], "", "   ", "x".repeat(HANDLE_RENAME.reasonMinChars - 1), "x".repeat(HANDLE_RENAME.reasonMaxChars + 1), "​".repeat(40), "x".repeat(10_000)]) {
+    for (const bad of [undefined, null, 42, {}, [], "", "   ", "x".repeat(HANDLE_RENAME.reasonMinChars - 1), "x".repeat(HANDLE_RENAME.reasonMaxChars + 1), "\u200b".repeat(40), "x".repeat(10_000)]) {
       expect(renameReason(bad), String(bad).slice(0, 20)).toBeNull();
     }
     // Invisible characters don't count toward the minimum.
-    expect(renameReason(`${"ab​".repeat(9)}a`)).toBeNull();
+    expect(renameReason(`${"ab\u200b".repeat(9)}a`)).toBeNull();
   });
 });

@@ -91,7 +91,7 @@ describe("POST /v1/staff/residents/:id/handle", () => {
 
   it("a staff session's hostile input never 500s or reaches the database unchecked", async () => {
     const [mod, u] = [await staffer(), await resident()];
-    const nasty: unknown[] = ["", "\u0000", "a\u0000b", "' OR '1'='1", "<script>", "‮evil", "x".repeat(5000), "00000000-0000-0000-0000-000000000000", 0, -1, 1e308, NaN, true, null, [], {}, { __proto__: { admin: true } }, [[["deep"]]]];
+    const nasty: unknown[] = ["", "\u0000", "a\u0000b", "' OR '1'='1", "<script>", "\u202eevil", "x".repeat(5000), "00000000-0000-0000-0000-000000000000", 0, -1, 1e308, NaN, true, null, [], {}, { __proto__: { admin: true } }, [[["deep"]]]];
     const failures: string[] = [];
     let renamed = 0;
     for (const v of nasty) {
