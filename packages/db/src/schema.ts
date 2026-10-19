@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
@@ -909,9 +910,9 @@ export const moderationItems = pgTable(
 
 // Every time staff renamed a resident's @handle: from what, to what, who did
 // it, the reason the resident reads, and when. Append-only (a trigger). The
-// old handle rests until heldUntil: nobody else can take it before then (a
-// trigger on residents checks), and the handle trigger lets a rename through
-// only with its row here.
+// old handle rests until heldUntil, and while an appeal against the rename is
+// open: nobody else can take it before then (a trigger on residents checks),
+// and the handle trigger lets a rename through only with its row here.
 export const handleRenames = pgTable(
   "handle_renames",
   {
@@ -929,10 +930,14 @@ export const handleRenames = pgTable(
     reportId: uuid("report_id").references(() => reports.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     heldUntil: timestamp("held_until", { withTimezone: true }).notNull(),
+    // The appeal it answered by giving the old handle back (overturned), if
+    // any; such a rename can't itself be appealed.
+    appealId: uuid("appeal_id").references((): AnyPgColumn => handleRenameAppeals.id),
   },
   (t) => [
     index("handle_renames_user").on(t.userId, t.createdAt),
     index("handle_renames_old_handle").on(sql`lower(${t.oldHandle})`),
+    uniqueIndex("handle_renames_appeal").on(t.appealId),
     check("handle_renames_not_self", sql`${t.staffId} <> ${t.userId}`),
     check("handle_renames_changed", sql`lower(${t.oldHandle}) <> lower(${t.newHandle})`),
     check("handle_renames_new_handle", sql`${t.newHandle} ~ '^[A-Za-z0-9_]{3,15}$'`),
@@ -956,6 +961,41 @@ export const handleNotices = pgTable("handle_notices", {
   fromHandle: text("from_handle").notNull(),
   seenAt: timestamp("seen_at", { withTimezone: true }),
 });
+
+// A renamed resident's appeal, in their own words: one per rename, made while
+// its old handle rests, and decided by staff other than whoever renamed them.
+// Upheld keeps the new handle; overturned gives the old one back, as a rename
+// of its own (handleRenames.appealId). The decision note is the resident's to
+// read, like a rename's reason.
+export const handleRenameAppeals = pgTable(
+  "handle_rename_appeals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    renameId: uuid("rename_id")
+      .notNull()
+      .unique()
+      .references((): AnyPgColumn => handleRenames.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    text: text("text").notNull(),
+    status: appealStatus("status").notNull().default("open"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decisionNote: text("decision_note"),
+  },
+  (t) => [
+    index("handle_rename_appeals_open").on(t.createdAt).where(sql`${t.status} = 'open'`),
+    // HANDLE_RENAME in @bp/core: an appeal of 10 to 1,000 characters, a decision note like a reason.
+    check("handle_rename_appeals_text", sql`char_length(${t.text}) BETWEEN 10 AND 1000`),
+    check(
+      "handle_rename_appeals_decided",
+      sql`(${t.status} = 'open') = (${t.decidedAt} IS NULL) AND (${t.decidedAt} IS NULL) = (${t.decidedBy} IS NULL) AND (${t.decidedAt} IS NULL) = (${t.decisionNote} IS NULL)`,
+    ),
+    check("handle_rename_appeals_note", sql`${t.decisionNote} IS NULL OR char_length(${t.decisionNote}) BETWEEN 20 AND 200`),
+  ],
+);
 
 // --- Frens and persistent chat ----------------------------------------------
 

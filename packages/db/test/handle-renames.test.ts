@@ -4,9 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   HandleRenameError,
   ResidentError,
+  appealRename,
   createDb,
   createGuest,
   createResident,
+  decideRenameAppeal,
   ensureSystemAccounts,
   fileReport,
   findByHandle,
@@ -14,6 +16,8 @@ import {
   handleNotice,
   isHandleAvailable,
   moderationQueue,
+  myHandleRename,
+  openRenameAppeals,
   openReports,
   reconcile,
   renameHandle,
@@ -233,7 +237,7 @@ describe("the resident's notice", () => {
     const u = await residentAs(old);
     expect(await handleNotice(db, u)).toBeNull();
     const first = await renameHandle(db, mod, u, { reason: REASON, from: old });
-    expect(await handleNotice(db, u)).toEqual({ id: first.id, from: old, to: first.to, reason: REASON, at: first.at });
+    expect(await handleNotice(db, u)).toEqual({ id: first.id, from: old, to: first.to, reason: REASON, at: first.at, appealable: true });
     // A second rename before they look: they last knew the first old handle.
     const second = await renameHandle(db, mod, u, { reason: "Another flag, so a fresh neutral handle.", from: first.to });
     expect(await handleNotice(db, u)).toMatchObject({ id: second.id, from: old, to: second.to });
@@ -398,6 +402,20 @@ describe("races", () => {
     expect(await handleNotice(db, loser)).toBeNull();
   });
 
+  it("two staff deciding one appeal at once: one decision", async () => {
+    const [mod, b, c] = [await staffer(), await staffer(), await staffer()];
+    const old = uniq();
+    const u = await residentAs(old);
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    const a = await appealRename(db, u, r.id, "Alice is my real first name, not anyone famous.");
+    const note = (s: string) => `We looked again, staff member ${s}: it stays.`;
+    const settled = await race("handle_rename_appeals", 2, [b, c].map((s) => () => code(decideRenameAppeal(db, s, a.id, { overturn: false, note: note(s) }))));
+    expect(settled.map((x) => (x.ok ? x.v : "THREW")).sort()).toEqual(["NO_SUCH_APPEAL", "OK"]);
+    const winner = settled[0]!.ok && settled[0]!.v === "OK" ? b : c;
+    const [row] = await client`SELECT status, decided_by, decision_note FROM handle_rename_appeals WHERE id = ${a.id}`;
+    expect(row).toEqual({ status: "upheld", decided_by: winner, decision_note: note(winner) });
+  });
+
   it("a move-in can't slip into a handle while the rename freeing it commits", async () => {
     const mod = await staffer();
     const old = uniq();
@@ -417,6 +435,128 @@ describe("races", () => {
     ]);
     expect(settled.map((r) => (r.ok ? r.v : "THREW"))).toEqual(["OK", "HANDLE_TAKEN"]);
     expect(await getResident(db, newcomer)).toBeNull();
+  });
+});
+
+describe("appeals", () => {
+  const WHY = "Alice is my real first name, not anyone famous.";
+  const GIVE_BACK = "We looked again: it's a real first name, so it's yours.";
+  const KEEP = "We looked again: it still names a famous person.";
+
+  it("the resident appeals once; staff who didn't rename them give the old handle back, and that can't be appealed", async () => {
+    const [mod, other] = [await staffer(), await staffer()];
+    const old = uniq();
+    const u = await residentAs(old);
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    expect(await handleNotice(db, u)).toMatchObject({ id: r.id, appealable: true });
+    expect(await myHandleRename(db, u)).toEqual({ id: r.id, from: old, to: r.to, reason: REASON, at: r.at, appealUntil: r.heldUntil, appeal: null });
+    const a = await appealRename(db, u, r.id.toUpperCase(), `  ${WHY}​ `);
+    expect(a).toMatchObject({ renameId: r.id, userId: u, text: WHY, status: "open", decidedBy: null });
+    expect(await handleNotice(db, u)).toBeNull(); // appealing counts as reading it
+    expect(await code(appealRename(db, u, r.id, WHY))).toBe("ALREADY_APPEALED");
+    expect((await myHandleRename(db, u))?.appeal).toMatchObject({ status: "open", note: null, decidedAt: null });
+
+    // Nobody decides their own case: the renamer doesn't even see it.
+    expect((await openRenameAppeals(db, mod)).map((x) => x.id)).not.toContain(a.id);
+    expect(await code(decideRenameAppeal(db, mod, a.id, { overturn: true, note: GIVE_BACK }))).toBe("NOT_STAFF");
+    expect((await openRenameAppeals(db, other)).find((x) => x.id === a.id)).toEqual({
+      id: a.id,
+      renameId: r.id,
+      userId: u,
+      text: WHY,
+      createdAt: a.createdAt,
+      from: old,
+      to: r.to,
+      reason: REASON,
+      renamedBy: mod,
+      renamedAt: r.at,
+    });
+
+    const d = await decideRenameAppeal(db, other, a.id.toUpperCase(), { overturn: true, note: `${GIVE_BACK} ` });
+    expect(d).toMatchObject({ overturned: true, rename: { userId: u, from: r.to, to: old, reason: GIVE_BACK } });
+    expect(await handleOf(u)).toBe(old);
+    expect((await renamesOf(u)).map((x) => [x.old_handle, x.new_handle, x.staff_id, x.reason])).toEqual([
+      [old, r.to, mod, REASON],
+      [r.to, old, other, GIVE_BACK],
+    ]);
+    const [decided] = await client`SELECT status, decided_by, decision_note FROM handle_rename_appeals WHERE id = ${a.id}`;
+    expect(decided).toEqual({ status: "overturned", decided_by: other, decision_note: GIVE_BACK });
+    // They're told, and the give-back is the end of it.
+    expect(await handleNotice(db, u)).toMatchObject({ id: d.rename!.id, from: r.to, to: old, reason: GIVE_BACK, appealable: false });
+    expect(await code(appealRename(db, u, d.rename!.id, WHY))).toBe("NO_SUCH_RENAME");
+    expect(await myHandleRename(db, u)).toBeNull();
+    expect(await code(decideRenameAppeal(db, other, a.id, { overturn: false, note: KEEP }))).toBe("NO_SUCH_APPEAL");
+    expect((await openRenameAppeals(db, other)).map((x) => x.id)).not.toContain(a.id);
+  });
+
+  it("upheld, the new handle stays and they read why in Me", async () => {
+    const [mod, other] = [await staffer(), await staffer()];
+    const old = uniq();
+    const u = await residentAs(old);
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    const a = await appealRename(db, u, r.id, WHY);
+    expect(await decideRenameAppeal(db, other, a.id, { overturn: false, note: KEEP })).toEqual({ overturned: false, rename: null });
+    expect(await handleOf(u)).toBe(r.to);
+    expect(await renamesOf(u)).toHaveLength(1);
+    expect((await myHandleRename(db, u))?.appeal).toMatchObject({ status: "upheld", note: KEEP });
+    expect(await handleNotice(db, u)).toBeNull();
+  });
+
+  it("only their own latest rename, while its old handle rests, and only in words that fit", async () => {
+    const [mod, other] = [await staffer(), await staffer()];
+    const old = uniq();
+    const [u, someone] = [await residentAs(old), await residentAs()];
+    const first = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    for (const id of [randomUUID(), "junk", undefined, 5]) expect(await code(appealRename(db, u, id, WHY)), String(id)).toBe("NO_SUCH_RENAME");
+    expect(await code(appealRename(db, someone, first.id, WHY))).toBe("NO_SUCH_RENAME");
+    for (const text of [undefined, null, 5, "", "too short", "x".repeat(HANDLE_RENAME.appealMaxChars + 1), "​".repeat(20)]) {
+      expect(await code(appealRename(db, u, first.id, text)), String(text).slice(0, 12)).toBe("INVALID_INPUT");
+    }
+    const second = await renameHandle(db, mod, u, { reason: REASON, from: first.to });
+    expect(await code(appealRename(db, u, first.id, WHY))).toBe("HANDLE_CHANGED"); // only the newest
+    expect(await code(appealRename(db, u, second.id, WHY, { now: second.heldUntil }))).toBe("APPEAL_CLOSED");
+    expect(await myHandleRename(db, u, { now: second.heldUntil })).toBeNull();
+    expect(await client`SELECT 1 FROM handle_rename_appeals WHERE user_id = ${u}`).toHaveLength(0);
+
+    const a = await appealRename(db, u, second.id, WHY);
+    // An open appeal still shows in Me once the 30 days are up.
+    expect((await myHandleRename(db, u, { now: new Date(second.heldUntil.getTime() + DAY) }))?.appeal?.status).toBe("open");
+    for (const note of [undefined, null, "too short", "x".repeat(HANDLE_RENAME.reasonMaxChars + 1)]) expect(await code(decideRenameAppeal(db, other, a.id, { overturn: true, note }))).toBe("INVALID_INPUT");
+    for (const overturn of [undefined, null, "yes", 1]) expect(await code(decideRenameAppeal(db, other, a.id, { overturn, note: GIVE_BACK }))).toBe("INVALID_INPUT");
+    for (const input of [undefined, null, "x", 5]) expect(await code(decideRenameAppeal(db, other, a.id, input as never))).toBe("INVALID_INPUT");
+    for (const id of [randomUUID(), "junk", undefined]) expect(await code(decideRenameAppeal(db, other, id, { overturn: true, note: GIVE_BACK }))).toBe("NO_SUCH_APPEAL");
+    const notStaff = await makeResident(db);
+    expect(await code(decideRenameAppeal(db, notStaff, a.id, { overturn: true, note: GIVE_BACK }))).toBe("NOT_STAFF");
+    expect(await code(openRenameAppeals(db, notStaff))).toBe("NOT_STAFF");
+    expect((await myHandleRename(db, u))?.appeal?.status).toBe("open");
+  });
+
+  it("staff renaming them again before the appeal is decided: an overturn waits for that one", async () => {
+    const [mod, other] = [await staffer(), await staffer()];
+    const old = uniq();
+    const u = await residentAs(old);
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old });
+    const a = await appealRename(db, u, r.id, WHY);
+    const again = await renameHandle(db, mod, u, { reason: REASON, from: r.to });
+    expect(await code(decideRenameAppeal(db, other, a.id, { overturn: true, note: GIVE_BACK }))).toBe("HANDLE_CHANGED");
+    expect(await handleOf(u)).toBe(again.to);
+    expect((await client`SELECT status FROM handle_rename_appeals WHERE id = ${a.id}`)[0]!.status).toBe("open");
+  });
+
+  it("the old handle keeps resting while an appeal is open, so an overturn can always give it back", async () => {
+    const [mod, other] = [await staffer(), await staffer()];
+    const old = uniq();
+    const u = await residentAs(old);
+    // Renamed 31 days ago and appealed on its 29th day: the 30 days are up.
+    const r = await renameHandle(db, mod, u, { reason: REASON, from: old }, { now: new Date(Date.now() - 31 * DAY) });
+    const a = await appealRename(db, u, r.id, WHY, { now: new Date(Date.now() - 2 * DAY) });
+    expect(await isHandleAvailable(db, old)).toBe(false);
+    expect(await code(createResident(db, await claimed(), { ...pickForMe(seededRandomInt(seed++)), handle: old, name: "Quick" }))).toBe("HANDLE_TAKEN");
+    const someone = await residentAs();
+    expect(await code(renameHandle(db, mod, someone, { reason: REASON, from: await handleOf(someone), newHandle: old }))).toBe("HANDLE_TAKEN");
+    // Decided, it rests no longer: upheld, anyone may have it.
+    await decideRenameAppeal(db, other, a.id, { overturn: false, note: KEEP });
+    expect(await isHandleAvailable(db, old)).toBe(true);
   });
 });
 

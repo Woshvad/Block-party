@@ -14,10 +14,10 @@ import {
   validateResidentInput,
   validateTraits,
 } from "@bp/core";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { setUpHome } from "./home";
-import { handleRenames, residents, users } from "./schema";
+import { residents, users } from "./schema";
 
 export type ResidentErrorCode =
   | "INVALID_INPUT"
@@ -120,7 +120,8 @@ export async function findByHandle(db: Db, handle: string): Promise<Resident | n
   return r ?? null;
 }
 
-// Free means valid, nobody's, and not resting after a staff rename.
+// Free means valid, nobody's, and not resting after a staff rename (the
+// database's handle_resting, which the move-in trigger asks too).
 export async function isHandleAvailable(db: Db, handle: string): Promise<boolean> {
   let h: string;
   try {
@@ -129,8 +130,8 @@ export async function isHandleAvailable(db: Db, handle: string): Promise<boolean
     return false;
   }
   if ((await findByHandle(db, h)) !== null) return false;
-  const [resting] = await db.select({ id: handleRenames.id }).from(handleRenames).where(and(sql`lower(${handleRenames.oldHandle}) = lower(${h})`, sql`${handleRenames.heldUntil} > now()`)).limit(1);
-  return !resting;
+  const [r] = await db.execute<{ resting: boolean }>(sql`SELECT handle_resting(${h}, NULL, now()) AS resting`);
+  return r?.resting === false;
 }
 
 // "Pick for me" on the handle step: a free, valid suggestion.

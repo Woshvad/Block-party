@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { HANDLE_RENAME, MODERATION, handleHeldUntil, neutralHandle, renameReason, seededRandomInt, validateHandle } from "../src";
+import { HANDLE_RENAME, MODERATION, handleHeldUntil, neutralHandle, renameAppeal, renameReason, seededRandomInt, validateHandle } from "../src";
 
 const DAY = 86_400_000;
 
@@ -33,5 +33,15 @@ describe("staff renames", () => {
     }
     // Invisible characters don't count toward the minimum.
     expect(renameReason(`${"ab\u200b".repeat(9)}a`)).toBeNull();
+  });
+
+  it("an appeal is the resident's own words, line breaks kept, as long as a restriction's appeal", () => {
+    expect(HANDLE_RENAME.appealMinChars).toBe(MODERATION.noteMinChars);
+    expect(renameAppeal("  Alice is   my real name.\u200b \r\n\r\n\r\n Ask my crew.  ")).toBe("Alice is my real name.\n\nAsk my crew.");
+    expect(renameAppeal("x".repeat(HANDLE_RENAME.appealMinChars))).not.toBeNull();
+    expect(renameAppeal("x".repeat(HANDLE_RENAME.appealMaxChars))).not.toBeNull();
+    for (const bad of [undefined, null, 42, {}, [], "", "   ", "too short", "x".repeat(HANDLE_RENAME.appealMaxChars + 1), "\u200b".repeat(40), "x".repeat(10_000)]) {
+      expect(renameAppeal(bad), String(bad).slice(0, 20)).toBeNull();
+    }
   });
 });

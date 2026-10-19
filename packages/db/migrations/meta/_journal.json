@@ -386,6 +386,13 @@
       "when": 1792404625499,
       "tag": "0054_handle_renames",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792421927564,
+      "tag": "0055_handle_rename_appeals",
+      "breakpoints": true
     }
   ]
 }
