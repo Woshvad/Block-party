@@ -301,14 +301,17 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
 // --- The city's calls ------------------------------------------------------------------
 
 // The calls that move the City bar: Proof of Neighbour accounts only (so one
-// viral link can't brigade a market), and never the cast.
-export async function cityCalls(db: Db, marketIds: string[]) {
+// viral link can't brigade a market), and never the cast. atFreeze: the bar as
+// it stood when each market froze, so a mark stamped after that (the PoN page
+// grants it when it's opened) doesn't count.
+export async function cityCalls(db: Db, marketIds: string[], opts: { atFreeze?: boolean } = {}) {
   if (!marketIds.length) return [];
   const rows = await db
     .select({ userId: calls.userId, marketId: calls.marketId, side: calls.side, chance: calls.chance })
     .from(calls)
     .innerJoin(users, eq(users.id, calls.userId))
-    .where(and(inArray(calls.marketId, marketIds), eq(calls.status, "locked"), isNotNull(users.proofOfNeighbourAt)));
+    .innerJoin(markets, eq(markets.id, calls.marketId))
+    .where(and(inArray(calls.marketId, marketIds), eq(calls.status, "locked"), opts.atFreeze ? lte(users.proofOfNeighbourAt, markets.freezesAt) : isNotNull(users.proofOfNeighbourAt)));
   return rows.filter((r) => !NPC_IDS.includes(r.userId));
 }
 

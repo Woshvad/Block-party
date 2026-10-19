@@ -215,6 +215,27 @@ describe("Contrarian Day: calls against the city majority get a gold border", ()
     expect((g as { contrarian: boolean[] }).contrarian[await s.slot(1)]).toBe(true);
   });
 
+  it("only neighbours who had Proof of Neighbour when the card froze count: a mark stamped before the bell can't move it", async () => {
+    const s = await slateDay("contrarian_day");
+    const yes = await people(6);
+    const no = await people(5);
+    const late = await people(3); // meet every check, but open the PoN page only after the freeze
+    await pon([...yes.slice(1), ...no]);
+    await client`UPDATE users SET proof_of_neighbour_at = ${s.at(16).toISOString()} WHERE id = ${yes[0]!}`; // right at the freeze: counts
+    const yesCall = await call(s, yes[0]!, 1, "yes", 60);
+    for (const u of yes.slice(1)) await call(s, u, 1, "yes", 60);
+    const noCall = await call(s, no[0]!, 1, "no", 40);
+    for (const u of [...no.slice(1), ...late]) await call(s, u, 1, "no", 40);
+    await s.poll(9 + 1 / 60);
+    // 17:00, after the 16:00 freeze and before the bell: the three get their mark.
+    await client`UPDATE users SET proof_of_neighbour_at = ${s.at(17).toISOString()} WHERE id IN ${client(late)}`;
+    await s.settle();
+    await s.ring();
+    expect((await client`SELECT yes, no, majority FROM contrarian_cards WHERE city_day = ${s.day} AND market_id = ${s.ids[1]!}`)[0]).toEqual({ yes: 6, no: 5, majority: "yes" });
+    expect(await receipt(db, noCall.id, { now: s.afterBell })).toMatchObject({ contrarian: true });
+    expect(await receipt(db, yesCall.id, { now: s.afterBell })).toMatchObject({ contrarian: false });
+  });
+
   it("the grid opens at midnight, but says nothing about borders until the bell has counted them", async () => {
     const s = await slateDay("contrarian_day");
     const me = await makeResident(db);

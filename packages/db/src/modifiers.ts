@@ -28,9 +28,11 @@ export async function stepModifier(db: Db, bellDay: CityDay, now: Date) {
 // purpose. At the freeze nobody can still move it after they've locked, and
 // every call on the card is judged against the same final count. No call locks
 // after its card freezes, so the bell counts the City bar's own calls
-// (neighbours only, never the cast) and records them once: a later Proof of
-// Neighbour can't change a border after the bell. A card still taking calls at
-// the bell (its freeze moved past it) has no final count, so it gets no row.
+// (neighbours only, never the cast) as the bar stood at the freeze: a Proof of
+// Neighbour stamped between the freeze and the bell doesn't count. It records
+// them once, so one stamped later can't change a border either. A card still
+// taking calls at the bell (its freeze moved past it) has no final count, so it
+// gets no row.
 async function recordMajorities(db: Db, day: CityDay, now: Date) {
   const cards = await db
     .select({ marketId: slateCards.marketId, status: markets.status, freezesAt: markets.freezesAt })
@@ -38,7 +40,7 @@ async function recordMajorities(db: Db, day: CityDay, now: Date) {
     .innerJoin(markets, eq(markets.id, slateCards.marketId))
     .where(eq(slateCards.cityDay, day));
   const final = cards.filter((c) => c.status !== "open" || c.freezesAt <= now);
-  const neighbours = await cityCalls(db, final.map((c) => c.marketId));
+  const neighbours = await cityCalls(db, final.map((c) => c.marketId), { atFreeze: true });
   const rows = final.map((c) => {
     const mine = neighbours.filter((n) => n.marketId === c.marketId);
     const yes = mine.filter((n) => n.side === "yes").length;
