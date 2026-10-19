@@ -219,13 +219,25 @@ describe("the live warm-up feed", () => {
     expect(urls.map((u) => new URL(u).pathname)).toEqual(["/events"]);
   });
 
-  it("a failed or empty window request is a failed poll; a failed lookup only waits", async () => {
-    await expect(polymarketWarmupFeed({ fetch: gamma({ events: bad }) }).fetch(recordedAt)).rejects.toThrow(/window request failed/);
-    await expect(polymarketWarmupFeed({ fetch: () => Promise.reject(new Error("offline")) }).fetch(recordedAt)).rejects.toThrow(/window request failed/);
-    await expect(polymarketWarmupFeed({ fetch: gamma({ events: () => ok([]) }) }).fetch(recordedAt)).rejects.toThrow(/no readable window/);
-    await expect(polymarketWarmupFeed({ fetch: gamma({ events: () => ok([{ slug: "x", markets: [{ id: "1", question: "?" }] }]) }) }).fetch(recordedAt)).rejects.toThrow(/no readable window/);
+  it("a failed or empty window request lists no window (a failed poll) but keeps the results; a failed lookup only waits", async () => {
     const logs: string[] = [];
-    const r = await polymarketWarmupFeed({ fetch: gamma({ lookup: bad }), log: (l) => logs.push(l) }).fetch(recordedAt, ["pm:5866083"]);
+    const log = (l: string) => logs.push(l);
+    // The series paused or changed shape, while the ended window's result is in.
+    const resolved = [{ externalId: "pm:5866083", outcome: "down", voided: false }];
+    expect(await polymarketWarmupFeed({ fetch: gamma({ events: bad }), log }).fetch(recordedAt, ["pm:5866083"])).toEqual({ windows: [], results: resolved });
+    expect(await polymarketWarmupFeed({ fetch: gamma({ events: () => ok([]) }), log }).fetch(recordedAt, ["pm:5866083"])).toEqual({ windows: [], results: resolved });
+    const unreadable = () => ok([{ slug: "x", markets: [{ id: "1", question: "?" }] }]);
+    expect(await polymarketWarmupFeed({ fetch: gamma({ events: unreadable }), log }).fetch(recordedAt, ["pm:5866083"])).toEqual({ windows: [], results: resolved });
+    expect(await polymarketWarmupFeed({ fetch: () => Promise.reject(new Error("offline")), log }).fetch(recordedAt, ["pm:5866083"])).toEqual({ windows: [], results: [] });
+    expect(logs).toEqual([
+      "polymarket warm-up: the window request failed",
+      "polymarket warm-up: no readable window in 0 events",
+      "polymarket warm-up: no readable window in 1 events",
+      "polymarket warm-up: looking up 1 ended windows failed",
+      "polymarket warm-up: the window request failed",
+    ]);
+    logs.length = 0;
+    const r = await polymarketWarmupFeed({ fetch: gamma({ lookup: bad }), log }).fetch(recordedAt, ["pm:5866083"]);
     expect(r.windows).toHaveLength(2);
     expect(r.results).toEqual([]);
     expect(logs).toEqual(["polymarket warm-up: looking up 1 ended windows failed"]);

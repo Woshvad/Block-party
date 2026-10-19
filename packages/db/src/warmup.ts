@@ -97,8 +97,10 @@ const validResult = (r: WarmupResult) =>
 
 // One poll of the warm-up feed: store this window and the next, settle the
 // ended windows whose results are in, then stamp their calls. One poller at
-// a time (an advisory lock); a second just skips. A failed fetch is
-// recorded, so the warm-up reads "feed down" until a good one.
+// a time (an advisory lock); a second just skips. A failed fetch, or one
+// that lists no window, is recorded as failed, so the warm-up reads "feed
+// down" until a good one. Results still count when no window is listed, and
+// calls on windows already resolved are stamped whatever the feed did.
 export async function pollWarmup(db: Db, feed: WarmupFeed, opts: { now?: Date } = {}) {
   // Checked first: the source goes into a query, and postgres.js can stall
   // the pool on an undefined parameter.
@@ -131,7 +133,9 @@ export async function pollWarmup(db: Db, feed: WarmupFeed, opts: { now?: Date } 
     if (!got || !Array.isArray(got.windows) || !Array.isArray(got.results)) throw new Error("the feed did not return windows and results");
   } catch (e) {
     await db.insert(warmupPolls).values({ source, ok: false, error: String((e as Error)?.message ?? e).slice(0, 500), at: now });
-    return { ok: false as const, skipped: false as const };
+    // Settling reads only what's stored, so a feed that's down doesn't hold
+    // up calls on windows that resolved before it went (or a settle cut short).
+    return { ok: false as const, skipped: false as const, settled: (await settleWarmups(db, { now })).settled };
   }
   const result = await db.transaction(async (tx) => {
     const [lock] = await tx.execute<{ ok: boolean }>(sql`SELECT pg_try_advisory_xact_lock(hashtext('warmup_poll')) AS ok`);
@@ -181,8 +185,11 @@ export async function pollWarmup(db: Db, feed: WarmupFeed, opts: { now?: Date } 
       if (r.voided) voided++;
       else resolved++;
     }
-    await tx.insert(warmupPolls).values({ source, ok: true, windows, at: now, ...(bad ? { error: `${bad} malformed item(s) skipped` } : {}) });
-    return { ok: true as const, skipped: false as const, windows, resolved, voided, bad };
+    // No window to call is a failed poll, whatever else came back.
+    const ok = windows > 0;
+    const error = [ok ? null : "no window listed", bad ? `${bad} malformed item(s) skipped` : null].filter(Boolean).join("; ");
+    await tx.insert(warmupPolls).values({ source, ok, windows, at: now, ...(error ? { error } : {}) });
+    return { ok, skipped: false as const, windows, resolved, voided, bad };
   });
   if (result.skipped) return result;
   return { ...result, settled: (await settleWarmups(db, { now })).settled };

@@ -124,7 +124,7 @@ describe("the warm-up feed", () => {
     const s = scripted();
     const u = await newcomer(t - 60 * MIN);
     s.fail = true;
-    expect(await pollWarmup(db, s.feed, { now: at(t) })).toEqual({ ok: false, skipped: false });
+    expect(await pollWarmup(db, s.feed, { now: at(t) })).toEqual({ ok: false, skipped: false, settled: 0 });
     expect((await client`SELECT ok, error FROM warmup_polls WHERE source = ${s.source}`)[0]).toEqual({ ok: false, error: "gamma is down" });
     expect((await warmupState(db, u, opts(s, t + 30_000))).feed).toEqual({ live: false, credit: "Sample window · Not real" });
     s.fail = false;
@@ -152,10 +152,12 @@ describe("the warm-up feed", () => {
         results: [{ externalId: "d", outcome: "up", voided: true }, { externalId: "e", outcome: "sideways", voided: false } as unknown as WarmupResult],
       }),
     };
-    expect(await pollWarmup(db, junk, { now: at(t) })).toMatchObject({ ok: true, windows: 0, bad: 7 });
+    // Nothing callable came back, so the poll failed: the feed reads down.
+    expect(await pollWarmup(db, junk, { now: at(t) })).toMatchObject({ ok: false, windows: 0, bad: 7 });
+    expect((await client`SELECT ok, error FROM warmup_polls WHERE source = ${s.source}`)[0]).toEqual({ ok: false, error: "no window listed; 7 malformed item(s) skipped" });
     expect((await client`SELECT count(*)::int AS n FROM warmup_windows WHERE source = ${s.source}`)[0]!.n).toBe(0);
     const shapeless = { source: s.source, fetch: async () => ({ windows: "nope" }) } as unknown as WarmupFeed;
-    expect(await pollWarmup(db, shapeless, { now: at(t + MIN) })).toEqual({ ok: false, skipped: false });
+    expect(await pollWarmup(db, shapeless, { now: at(t + MIN) })).toEqual({ ok: false, skipped: false, settled: 0 });
     await expect(pollWarmup(db, { fetch: async () => ({ windows: [], results: [] }) } as unknown as WarmupFeed)).rejects.toThrow(/needs a warm-up feed/);
   });
 
@@ -426,6 +428,29 @@ describe("settling and voids", () => {
     expect((await callOf(calls[0]!.id)).stamp).toBeNull();
     // Once it has ended, the same answer counts.
     expect(await pollWarmup(db, s.feed, { now: at(t + 15 * MIN) })).toMatchObject({ resolved: 1, settled: 3 });
+  });
+
+  it("the series stops listing windows: the poll fails, but the result it did get still settles the calls", async () => {
+    const t = fresh();
+    const s = scripted();
+    const { a, calls } = await threeIn(s, t);
+    s.listing = false;
+    s.result(t, "up");
+    expect(await pollWarmup(db, s.feed, { now: at(t + 16 * MIN) })).toMatchObject({ ok: false, windows: 0, resolved: 1, settled: 3 });
+    expect((await Promise.all(calls.map((x) => callOf(x.id)))).map((x) => x.stamp)).toEqual(["called_it", "called_it", "rekt"]);
+    // Still no window to call, so the card says the feed is down.
+    expect((await warmupState(db, a, opts(s, t + 16 * MIN))).feed.live).toBe(false);
+  });
+
+  it("the feed down doesn't hold up calls on a window that resolved before it went", async () => {
+    const t = fresh();
+    const s = scripted();
+    const { calls } = await threeIn(s, t);
+    // Resolved, but the settle that should have followed never ran (a Worker cut short, say).
+    await client`UPDATE warmup_windows SET status = 'resolved', outcome = 'down', resolved_at = ${iso(t + 16 * MIN)}::timestamptz WHERE source = ${s.source} AND starts_at = ${iso(t)}::timestamptz`;
+    s.fail = true;
+    expect(await pollWarmup(db, s.feed, { now: at(t + 17 * MIN) })).toEqual({ ok: false, skipped: false, settled: 3 });
+    expect((await Promise.all(calls.map((x) => callOf(x.id)))).map((x) => x.stamp)).toEqual(["rekt", "rekt", "called_it"]);
   });
 
   it("racing settlers stamp each call once: one mood, one Copium, one push", async () => {

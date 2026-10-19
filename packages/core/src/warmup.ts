@@ -117,7 +117,8 @@ export type WarmupResult = { externalId: string; outcome: WarmupSide | null; voi
 export interface WarmupFeed {
   readonly source: string;
   // The window `now` falls in and the next one, plus the results of
-  // `pending`: ended windows someone called that haven't settled yet.
+  // `pending`: ended windows someone called that haven't settled yet. No
+  // window listed is a failed poll (pollWarmup), but its results still count.
   fetch(now: Date, pending?: readonly string[]): Promise<{ windows: WarmupWindow[]; results: WarmupResult[] }>;
 }
 
@@ -150,9 +151,10 @@ type Fetch = (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boo
 const REQUEST_TIMEOUT_MS = 8_000;
 
 // The live feed, read-only and keyless like the Tower's. A failed or empty
-// window request throws, so the poll is recorded as failed and the warm-up
-// reads "feed down" (the Contrarian offers a City market instead). A failed
-// result lookup is logged and waits for the next poll.
+// window request lists no window, so the poll is recorded as failed and the
+// warm-up reads "feed down"; the results it looked up still come back, so a
+// series that's paused or changed shape doesn't strand the windows people
+// already called. A failed result lookup is logged and waits for the next poll.
 export function polymarketWarmupFeed(opts: { fetch?: Fetch; baseUrl?: string; timeoutMs?: number; log?: (line: string) => void } = {}): WarmupFeed {
   const get: Fetch = opts.fetch ?? ((url, init) => fetch(url, init));
   const base = opts.baseUrl ?? GAMMA_URL;
@@ -170,13 +172,16 @@ export function polymarketWarmupFeed(opts: { fetch?: Fetch; baseUrl?: string; ti
         getJson(`${base}/events?${slugs.map((s) => `slug=${s}`).join("&")}`),
         ids.length ? getJson(`${base}/markets?closed=true&limit=${WARMUP.lookupsPerPoll}&${ids.map((id) => `id=${encodeURIComponent(id)}`).join("&")}`) : Promise.resolve([]),
       ]);
-      if (!Array.isArray(listed)) throw new Error("polymarket warm-up: the window request failed");
+      if (!Array.isArray(closed)) log(`polymarket warm-up: looking up ${ids.length} ended windows failed`);
+      const results = Array.isArray(closed) ? (closed as GammaMarket[]).flatMap((m) => warmupResultOf(m) ?? []) : [];
+      if (!Array.isArray(listed)) {
+        log("polymarket warm-up: the window request failed");
+        return { windows: [], results };
+      }
       const windows = (listed as GammaEvent[]).flatMap((e) => e?.markets ?? []).flatMap((m) => toWarmupWindow(m) ?? []);
       // Nothing usable for the window we're in: the series has stopped, or
       // the API changed shape. Either way there's no window to call.
-      if (windows.length === 0) throw new Error(`polymarket warm-up: no readable window in ${listed.length} events`);
-      if (!Array.isArray(closed)) log(`polymarket warm-up: looking up ${ids.length} ended windows failed`);
-      const results = Array.isArray(closed) ? (closed as GammaMarket[]).flatMap((m) => warmupResultOf(m) ?? []) : [];
+      if (windows.length === 0) log(`polymarket warm-up: no readable window in ${listed.length} events`);
       return { windows, results };
     },
   };
