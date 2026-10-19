@@ -31,6 +31,7 @@ Still open after it (engineering; the owner's items are in section 3 below):
 - **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
 - **A staff rename for flagged @handles.** The handle trigger blocks it; staff restrict the resident instead.
 - **Promised but inert:** three alert toggles have no producer (the warm-up's has one now, behind its switch), and Contrarian Day and NOTHING Day have copy but no rules.
+- **The Tower's odds can be 5 minutes old.** Gamma answers with `Cache-Control: public, max-age=300` and Cloudflare serves it from cache, and the odds poll asks the same address every minute (seen 19 October: a HIT 68 seconds old). The warm-up's feed now puts the poll's time in its addresses; the Tower's feed (`polymarket.ts`) still doesn't, so its ticks and closed lookups can lag the plan's 30 to 60 seconds.
 - **Push wording can repeat within 5 days** for the other alerts: each has 2 wordings, so a third faded, snap or shift push in 5 days reuses one. The warm-up's has 4 for its 3 pushes.
 - **An asset pipeline** (compressed GLBs, unused models removed, immutable cache headers once the city has hosting).
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
