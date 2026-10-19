@@ -1,5 +1,7 @@
 import { isDinerShop } from "./dinerArchitecture";
 import { CITY_SIZE, GRID, type Lot, SQUARE, blockRect, fillCity, roads, zoneOf } from "./citygen";
+import { HOUSES, KIT, SHOPS, TOWERS } from "./kitModels";
+export { CAR_MODELS, KIT } from "./kitModels";
 
 // The lagoon row: roads crossing it become bridges.
 const LAGOON = blockRect(0, GRID.blocks - 1);
@@ -8,22 +10,11 @@ const overLagoon = (z: number) => Math.abs(z - LAGOON.z) < LAGOON.d / 2;
 
 export type Placement = { url: string; x: number; y?: number; z: number; rotY?: number; scale?: number | [number, number, number] };
 
-export const KIT = {
-  roads: (name: string) => `/assets/kenney/roads/${name}.glb`,
-  commercial: (name: string) => `/assets/kenney/commercial/${name}.glb`,
-  suburban: (name: string) => `/assets/kenney/suburban/${name}.glb`,
-  industrial: (name: string) => `/assets/kenney/industrial/${name}.glb`,
-  cars: (name: string) => `/assets/kenney/cars/${name}.glb`,
-};
-
 // The city dressed in Kenney's City Kit: road tiles (zebra crossings at every
 // junction), street lights, and the zoned lots turned into real buildings,
 // houses and trees. Pure: same city every time, and testable.
 
 const ROAD_TILE = GRID.road; // kit road tiles are 1×1, scaled to our road width
-const SHOPS = "abcdefghijklmn".split("").map((c) => `building-${c}`);
-const TOWERS = "abcde".split("").map((c) => `building-skyscraper-${c}`);
-const HOUSES = "abcdefghijklmnopqrstu".split("").map((c) => `building-type-${c}`);
 const pick = <T,>(xs: readonly T[], k: number) => xs[((k % xs.length) + xs.length) % xs.length]!;
 const hash = (x: number, z: number) => Math.abs(Math.floor(x * 73.1 + z * 19.7 + x * z * 3.3));
 const inSquare = (x: number, z: number) => Math.abs(x - SQUARE.x) < SQUARE.w / 2 && Math.abs(z - SQUARE.z) < SQUARE.d / 2;

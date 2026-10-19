@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { ISO, ZOOM, clampTarget, shortCount, startZoom, zoomLevel } from "./camera";
 import { DISTRICT_NAMES, GRID, LANDMARKS, type PlaceKey, SOON, SQUARE, blockRect, zoneOf } from "./citygen";
 import CityScape from "./CityScape";
-import { clearFailedModels } from "./Kit";
+import { clearFailedModels, kitOutdated } from "./Kit";
 import SceneBoundary from "./SceneBoundary";
 import CityAtmosphere from "./CityAtmosphere";
 import { PLACE_INFO } from "./places";
@@ -401,7 +401,7 @@ export default function CityBoard({ api, me, onOpenToday, onPlace, onOpenHall, o
       )}
       {!list && (
         <div className="stage" style={{ background: night ? "linear-gradient(#05070f, #1a2240 60%, #2a2f55)" : "linear-gradient(#8ec5f0, #cfe6f7 55%, #f4efe4)" }}>
-          <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels}>
+          <SceneBoundary what="the city map" note="Explore places still works." onRetry={clearFailedModels} outdated={kitOutdated}>
             {/* Hidden, it draws nothing ("never") but keeps everything it built. */}
             <Canvas shadows={tier.shadows} orthographic dpr={tier.dpr} frameloop={active ? "always" : "never"} camera={{ position: [60, 52, 60], zoom: 20, near: 0.1, far: 400 }} gl={{ antialias: tier.antialias, powerPreference: "high-performance" }} onCreated={watchContext}>
               <CityAtmosphere night={night} />

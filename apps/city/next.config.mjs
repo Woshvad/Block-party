@@ -35,6 +35,8 @@ function checkTelegramAppUrl(value, warn = console.warn) {
   if (!url || url.protocol !== "https:" || url.hostname !== "t.me") warn(`NEXT_PUBLIC_TG_APP_URL should be the Mini App's https://t.me/<bot>/<app> link, not ${value}`);
 }
 
+const IMMUTABLE = "public, max-age=31536000, immutable";
+
 /** @type {import('next').NextConfig} */
 const config = {
   outputFileTracingRoot: root,
@@ -47,6 +49,13 @@ const config = {
   // No server-side image optimization: it's the only thing that would run
   // sharp/libvips on our server, and the city ships its art pre-compressed.
   images: { unoptimized: true },
+  // The kit packs' folders are named after a hash of their files
+  // (scripts/assets.mjs), so an address there never changes what it holds:
+  // phones keep them for good. Next already does this for /_next/static, and
+  // public/_headers says the same to static hosts. Nothing unversioned here.
+  async headers() {
+    return [{ source: "/assets/kenney/:path*", headers: [{ key: "Cache-Control", value: IMMUTABLE }] }];
+  },
 };
 
 export default (phase, { warn } = {}) => {

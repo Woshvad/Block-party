@@ -31,6 +31,22 @@ export function failedAsset(e: unknown): string | null {
   return m ? m[1]! : null;
 }
 
+// --- What a failed scene shows -----------------------------------------------
+
+export type SceneFallbackCopy = { title: string; detail?: string; action?: "retry" | "reload" };
+
+// What a 3D view shows in its place, or null to draw it: no button on a
+// device without WebGL, Reload when the game was updated since the page
+// opened (no retry can fetch what the update took away), Try again for
+// anything else that failed.
+export function sceneFallback(what: string, note: string | undefined, scene: { webgl: boolean; failed: boolean; outdated: boolean }): SceneFallbackCopy | null {
+  const and = (first: string) => [first, note].filter(Boolean).join(" ");
+  if (!scene.webgl) return { title: `This device can't show ${what} in 3D.`, detail: note };
+  if (scene.failed && scene.outdated) return { title: "Block Party has been updated.", detail: and(`Reload to see ${what}.`), action: "reload" };
+  if (scene.failed) return { title: `Couldn't draw ${what}.`, detail: and("A download failed or the 3D view stopped."), action: "retry" };
+  return null;
+}
+
 // --- WebGL ----------------------------------------------------------------------
 
 type ProbeCanvas = { getContext(kind: string): unknown };

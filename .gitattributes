@@ -1,0 +1,4 @@
+# The city's kit assets are served byte for byte, and their folders are named
+# after a hash of those bytes (apps/city/scripts/assets.mjs): never convert
+# their line endings.
+apps/city/public/assets/** -text

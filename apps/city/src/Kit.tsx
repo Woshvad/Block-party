@@ -5,6 +5,7 @@ import * as THREE from "three";
 import { bake } from "./kitGeometry";
 export { bake } from "./kitGeometry";
 import type { Placement } from "./kitcity";
+import { KIT_LIVE, kitPackOf, kitReplaced } from "./kitModels";
 import { failedAsset, noteModelAsked, noteModelLoaded, takeFailedModels } from "./sceneHealth";
 import { type LoadedGltf, glowFor, shareModelImages } from "./kitTextures";
 
@@ -68,6 +69,16 @@ export function clearFailedModels(error?: unknown) {
   for (const url of urls) useGLTF.clear(url);
 }
 
+// Also for the scene's error: whether the model that failed is in a pack
+// folder a deploy has replaced since this page opened (see kitModels.ts), so
+// Try again can never fetch it and the scene offers a reload instead.
+export function kitOutdated(error?: unknown): Promise<boolean> {
+  return kitReplaced(error, async () => {
+    const res = await fetch(KIT_LIVE, { cache: "no-store" });
+    return res.ok ? res.json() : null;
+  });
+}
+
 function KitModel({ url, items, shadows, night }: { url: string; items: Placement[]; shadows: boolean; night: boolean }) {
   const gltf = useModel(url);
   const baked0 = useMemo(() => bake(gltf.scene), [gltf]);
@@ -77,11 +88,11 @@ function KitModel({ url, items, shadows, night }: { url: string; items: Placemen
     const source = Array.isArray(baked0.material) ? baked0.material : [baked0.material];
     const materials = source.map((original) => {
       const m = (original as THREE.MeshStandardMaterial).clone();
-      const paletteKit = url.startsWith("/assets/kenney/");
-      const glow = paletteKit && !/\/(roads|cars)\//.test(url) ? windowGlow(m.map) : null;
+      const pack = kitPackOf(url);
+      const glow = pack && pack !== "roads" && pack !== "cars" ? windowGlow(m.map) : null;
       if (glow) { m.emissiveMap = glow; m.emissive = new THREE.Color("#ffffff"); m.userData.cityWindowGlow = true; }
-      if (paletteKit) {
-        m.roughness = /\/roads\//.test(url) ? 0.96 : 0.72;
+      if (pack) {
+        m.roughness = pack === "roads" ? 0.96 : 0.72;
         m.envMapIntensity = 0.45;
       }
       return m;
