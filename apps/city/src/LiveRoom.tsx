@@ -23,7 +23,7 @@ import { type SocketStatus, openRoomSocket } from "./roomSocket";
 import { chatDraft } from "./chatDraft";
 import { haptic } from "./telegram";
 import { useToast } from "./useToast";
-import { type Board, type FeedKey, type FeedStatus, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard } from "./roomfeeds";
+import { type Board, type FeedKey, type FeedStatus, type RoofFeed, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard, roofBoards, roofRefreshIn } from "./roomfeeds";
 import MomentCard from "./MomentCard";
 import { momentBoard } from "./moments";
 
@@ -135,11 +135,14 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
 
 // The live boards for this room's screens: fetched on entry and every minute.
 // The odds come with the feed's status, so a paused feed dims the wall. A
-// Tower moment takes over the Watch Party's screen while it's on.
+// Tower moment takes over the Watch Party's screen while it's on. The Roof's
+// leaderboards only move at the bell, so they're fetched less often (see
+// roofRefreshIn).
 function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment | null): Partial<Record<FeedKey, Board>> {
   const [odds, setOdds] = useState<MarketRow[] | null>(null);
   const [feed, setFeed] = useState<FeedStatus | null>(null);
   const [hall, setHall] = useState<CityHall | null>(null);
+  const [roof, setRoof] = useState<RoofFeed>({ roof: null, failed: false });
   useEffect(() => {
     const wantsOdds = place === "tower" || place === "watch_party";
     const load = () => {
@@ -154,6 +157,23 @@ function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment 
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
   }, [api, place]);
+  useEffect(() => {
+    if (place !== "roof") return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
+      void api
+        .roof()
+        .then((r) => live && setRoof({ roof: r, failed: false }))
+        .catch(() => live && setRoof((f) => ({ ...f, failed: true })));
+      timer = setTimeout(load, roofRefreshIn(Date.now()));
+    };
+    load();
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [api, place]);
   const minute = Math.floor(now / 60_000);
   return useMemo(() => {
     const at = minute * 60_000;
@@ -161,9 +181,10 @@ function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment 
       ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed) } : {}),
       ...(moment ? { match: momentBoard(moment, feed?.credit ?? null) } : {}),
       ...(hall ? { hall: hallBoard(hall, at) } : {}),
+      ...(place === "roof" ? roofBoards(roof, at) : {}),
       diner: dinerBoard(new Date(at).toISOString().slice(0, 10)),
     };
-  }, [odds, feed, hall, minute, moment]);
+  }, [odds, feed, hall, roof, place, minute, moment]);
 }
 
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { CityHall, MarketRow } from "../src/api";
+import type { CityHall, MarketRow, Roof, RoofRightRow } from "../src/api";
 import { LAYOUTS } from "../src/interiors";
-import { type FeedStatus, wrap, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard } from "../src/roomfeeds";
+import { type FeedStatus, wrap, crewsBoard, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard, rightListBoard, roofBoards, roofRefreshIn, stackBoard } from "../src/roomfeeds";
 
 // What /v1/tower/feed says, per source (oddsCredit in @bp/core).
 const POLYMARKET_CREDIT = "Odds via Polymarket · Not affiliated";
@@ -107,6 +107,106 @@ describe("the Watch Party screen", () => {
   });
 });
 
+
+describe("the Roof's boards", () => {
+  // now is 12:00 UTC on 2026-10-10, so the last bell rang at 00:00 that day.
+  const bellAt = "2026-10-10T00:00:00.000Z";
+  const roof = (over: Partial<Roof> = {}): Roof => ({ bellAt, season: 3, rightList: { rows: [], bot: null }, seasonStack: { rows: [] }, crews: { bellDay: "2026-10-09", bellScores: [], league: null }, ...over });
+  const row = (rank: number, handle: string, perCall: number, extra: Partial<RoofRightRow> = {}): RoofRightRow => ({ rank, handle, npc: null, perCall, spread: 1.2, rusty: false, ...extra });
+  const nothing = (rank: number) => row(rank, "NOTHING-9000", -4.4, { npc: "NPC · AI", spread: 0.8 });
+  const bot = (rank: number) => ({ rank, perCall: -4.4, spread: 0.8 });
+  const got = (r: Roof) => ({ roof: r, failed: false });
+
+  it("loading, then failing with nothing to show: honest on every board", () => {
+    for (const b of Object.values(roofBoards({ roof: null, failed: false }, now))) {
+      expect(b.rows).toEqual([{ left: "Loading the boards…", tone: "plain" }]);
+      expect(b.dim).toBeFalsy();
+    }
+    for (const b of Object.values(roofBoards({ roof: null, failed: true }, now))) {
+      expect(b.rows).toEqual([{ left: "Can't reach the boards right now.", tone: "plain" }]);
+      expect([b.dim, b.foot]).toEqual([true, "Trying again soon."]);
+    }
+    expect(Object.values(roofBoards({ roof: null, failed: false }, now)).map((b) => b.title)).toEqual(["THE RIGHT LIST", "SEASON STACK", "CREWS"]);
+  });
+
+  it("empty boards say so and never invent a row", () => {
+    const b = roofBoards(got(roof()), now);
+    expect(b.right_list.rows).toEqual([{ left: "Nobody's on it yet. Calls settle, then the list fills.", tone: "plain" }]);
+    expect(b.right_list.foot).toBe("10 settled calls in a season to make the list.");
+    expect(b.stack.rows).toEqual([{ left: "Nobody's on the stack yet this season.", tone: "plain" }]);
+    expect(b.crews.rows.map((r) => r.left)).toEqual(["No Bell Scores from the last bell.", "The first League table lands at Sunday's bell."]);
+    for (const x of Object.values(b)) expect(x.dim).toBeFalsy();
+  });
+
+  it("the Right List: Aura per call ± spread as the plan writes it, the cast labelled, rusty marked, the line above NOTHING-9000", () => {
+    const b = rightListBoard(got(roof({ rightList: { rows: [row(1, "ada", 6.24), row(2, "The Contrarian", 1.1, { npc: "NPC · AI" }), row(3, "jo", 0.01, { rusty: true }), nothing(4), row(5, "kemi", -1.46)], bot: bot(4) } })), now);
+    expect(b.title).toBe("THE RIGHT LIST · SEASON 3");
+    expect(b.rows.map((r) => [r.left, r.right])).toEqual([
+      ["#1 @ada", "+6.2 per call ± 1.2"],
+      ["#2 The Contrarian · NPC · AI", "+1.1 per call ± 1.2"],
+      ["#3 @jo · rusty", "0.0 per call ± 1.2"],
+      ["#4 NOTHING-9000 · NPC · AI", "−4.4 per call ± 0.8"],
+      ["#5 @kemi", "−1.5 per call ± 1.2"],
+    ]);
+    expect(b.rows.map((r) => !!r.rule)).toEqual([false, false, false, true, false]);
+    expect(b.rows.every((r) => r.tone === "plain")).toBe(true);
+    expect(b.foot).toBe("Everyone above the line beat a bot that says no to everything.");
+  });
+
+  it("a bot ranked below the board comes last, under the top five, with its line", () => {
+    const rows = Array.from({ length: 10 }, (_, i) => row(i + 1, `r${i + 1}`, 9 - i));
+    const b = rightListBoard(got(roof({ rightList: { rows, bot: bot(40) } })), now);
+    expect(b.rows.map((r) => r.left)).toEqual(["#1 @r1", "#2 @r2", "#3 @r3", "#4 @r4", "#5 @r5", "#40 NOTHING-9000 · NPC · AI"]);
+    expect(b.rows[5]).toEqual({ left: "#40 NOTHING-9000 · NPC · AI", right: "−4.4 per call ± 0.8", tone: "plain", rule: true });
+    // Its row sent down with the rest (ranked 8th) still moves up under the top five.
+    const sent = rightListBoard(got(roof({ rightList: { rows: [...rows.slice(0, 7), nothing(8), ...rows.slice(7)], bot: bot(8) } })), now);
+    expect(sent.rows.map((r) => r.left).at(-1)).toBe("#8 NOTHING-9000 · NPC · AI");
+    expect(sent.rows.filter((r) => r.rule)).toHaveLength(1);
+  });
+
+  it("rows the API left out for this reader are gaps in the ranks, never renumbered", () => {
+    const b = rightListBoard(got(roof({ rightList: { rows: [row(1, "ada", 5), row(4, "jo", 2)], bot: null } })), now);
+    expect(b.rows.map((r) => r.left)).toEqual(["#1 @ada", "#4 @jo"]);
+  });
+
+  it("the Season Stack: GM won and lost, by handle", () => {
+    const b = stackBoard(got(roof({ seasonStack: { rows: [{ rank: 1, handle: "sol", profit: 1240 }, { rank: 2, handle: "ada", profit: 0 }, { rank: 3, handle: "jo", profit: -80 }] } })), now);
+    expect(b.title).toBe("SEASON STACK · SEASON 3");
+    expect(b.rows.map((r) => [r.left, r.right])).toEqual([["#1 @sol", "+1,240 GM"], ["#2 @ada", "0 GM"], ["#3 @jo", "−80 GM"]]);
+    expect(b.foot).toBe("GM won on City markets and duels. Real money is never ranked.");
+  });
+
+  it("the crews: the last bell's top Bell Scores, then each size group's League champions", () => {
+    const crews: Roof["crews"] = { bellDay: "2026-10-09", bellScores: [{ rank: 1, name: "Night Owls", score: 7.5 }, { rank: 2, name: "gm Gang", score: 4 }, { rank: 3, name: "Roof Rats", score: 2.25 }], league: { week: "2026-09-28", champions: [{ sizeGroup: "small", name: "Night Owls" }, { sizeGroup: "large", name: "Big Tent" }] } };
+    const b = crewsBoard(got(roof({ crews })), now);
+    expect(b.rows.map((r) => [r.left, r.right])).toEqual([
+      ["#1 Night Owls", "Bell Score 7.5"],
+      ["#2 gm Gang", "Bell Score 4"],
+      ["#3 Roof Rats", "Bell Score 2.25"],
+      ["Night Owls", "League champs · 3–10"],
+      ["Big Tent", "League champs · 26–50"],
+    ]);
+    expect(b.foot).toBe("Last bell's Bell Scores · League week of Sep 28");
+    const nobody = crewsBoard(got(roof({ crews: { ...crews, league: { week: "2026-09-28", champions: [] } } })), now);
+    expect(nobody.rows.at(-1)!.left).toBe("No League champions that week.");
+  });
+
+  it("boards from before the last bell dim and say so; a failed refresh of today's changes nothing", () => {
+    const old = roof({ bellAt: "2026-10-09T00:00:00.000Z", seasonStack: { rows: [{ rank: 1, handle: "sol", profit: 5 }] } });
+    for (const b of Object.values(roofBoards({ roof: old, failed: true }, now))) expect([b.dim, b.foot]).toEqual([true, "From before the last bell. Refreshing…"]);
+    expect(stackBoard(got(old), now).rows[0]!.left).toBe("#1 @sol"); // still there, dimmed
+    // They only move at the bell, so today's boards stand after a failed refresh.
+    expect(roofBoards({ roof: roof(), failed: true }, now)).toEqual(roofBoards(got(roof()), now));
+  });
+
+  it("fetches again every 5 minutes, and a minute and a half after each bell", () => {
+    expect(roofRefreshIn(now)).toBe(5 * 60_000);
+    const bell = Date.parse("2026-10-11T00:00:00Z");
+    expect(roofRefreshIn(bell - 60_000)).toBe(150_000);
+    expect(roofRefreshIn(bell + 30_000)).toBe(5 * 60_000);
+  });
+});
+
 describe("City Hall's noticeboard", () => {
   it("says there's no Mayor or Law rather than inventing one", () => {
     const b = hallBoard({ mayor: null, law: null, election: null }, now);
@@ -149,6 +249,7 @@ describe("room screens", () => {
     expect(feedsIn("watch_party")).toEqual(["match"]);
     expect(feedsIn("city_hall")).toEqual(["hall"]);
     expect(feedsIn("diner")).toEqual(["diner"]);
+    expect(feedsIn("roof")).toEqual(["crews", "right_list", "stack"]); // the Right List beside the Season Stack
     for (const d of Object.values(LAYOUTS).flatMap((l) => l.decor)) if (d.feed) expect(d.kind).toBe("screen");
   });
 });

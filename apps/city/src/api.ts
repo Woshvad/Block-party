@@ -211,6 +211,7 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     // 404: no paper that day. Anything else is a real failure, shown with a retry.
     dailyClose: (day: string) => request<{ bellDay: string; pages: Record<string, { key: string; values: Record<string, string | number> }[]> }>("GET", `/v1/daily-close/${encodeURIComponent(day)}`).catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))),
     rightList: () => request<{ season: number; rows: Record<string, unknown>[]; me: Record<string, unknown> | null }>("GET", "/v1/tower/right-list"),
+    roof: () => request<Roof>("GET", "/v1/roof"),
     bellStamp: () => request<Record<string, unknown>>("POST", "/v1/bell-stamp"),
     awayRecap: () => request<Record<string, unknown>>("GET", "/v1/away/recap"),
     oddsWall: () => request<MarketRow[]>("GET", "/v1/tower/odds-wall"),
@@ -455,6 +456,18 @@ export type Syndicate = { id: string; marketId: string | null; cityMarketId: str
 export type Duel = { id: string; marketId: string; challengerId: string; opponentId: string; challengerSide: Side; status: string; stakeChallenger: number; stakeOpponent: number; snapChallenger: number; snapOpponent: number; lastCall: boolean; retreatedBy: string | null; winnerId: string | null; createdAt: string };
 export type Grudge = { id: string; cityDay: string; newcomerId: string; inviterId: string; status: string; winnerId: string | null };
 export type CityMarket = { id: string; question: string; kind: string; place: string | null; threshold: number | null; locksAt: string; bellDay: string };
+
+// The Roof's screens, as GET /v1/roof gives them: handles, crew names and
+// scores only, less anyone this resident has blocked, is blocked by or has
+// muted. Ranks are the city's. bellAt is the bell the boards count up to.
+export type RoofRightRow = { rank: number; handle: string; npc: string | null; perCall: number; spread: number; rusty: boolean };
+export type Roof = {
+  bellAt: string;
+  season: number;
+  rightList: { rows: RoofRightRow[]; bot: { rank: number; perCall: number; spread: number } | null };
+  seasonStack: { rows: { rank: number; handle: string; profit: number }[] };
+  crews: { bellDay: string; bellScores: { rank: number; name: string; score: number }[]; league: { week: string; champions: { sizeGroup: string; name: string }[] } | null };
+};
 
 // A make-good: GM for every resident after the city let them down. closesAt
 // is when it stops being collectable (14 days after it went out).

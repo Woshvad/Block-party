@@ -1,13 +1,15 @@
-import { HASH_BROWN_ALPHA, nextBell } from "@bp/core";
-import type { CityHall, MarketRow } from "./api";
+import { HASH_BROWN_ALPHA, SIZE_GROUPS, nextBell } from "@bp/core";
+import type { CityHall, MarketRow, Roof } from "./api";
 import { until } from "./clock";
 
 // What the big screens in the rooms show: live boards built from the API.
 // Pure: the room fetches, these shape, Interior.tsx paints. Tested headless.
 
-export type FeedKey = "odds" | "match" | "hall" | "diner";
-export type BoardRow = { left: string; right?: string; tone?: "up" | "down" | "plain" };
-// dim: the data may be stale (the odds feed is paused), so the screen fades.
+export type FeedKey = "odds" | "match" | "hall" | "diner" | "right_list" | "stack" | "crews";
+// rule: a line across the board above this row (the Roof's NOTHING-9000 line).
+export type BoardRow = { left: string; right?: string; tone?: "up" | "down" | "plain"; rule?: boolean };
+// dim: the data may be stale (the odds feed is paused, or the Roof's boards
+// are from before the last bell), so the screen fades.
 export type Board = { title: string; rows: BoardRow[]; foot?: string; dim?: boolean };
 
 const ROWS = 6;
@@ -108,4 +110,111 @@ export function dinerBoard(cityDay: string): Board {
     rows: [...wrap(`"${HASH_BROWN_ALPHA[h % HASH_BROWN_ALPHA.length]!}"`, 26), "", "Ser, this is a diner."].map((left) => ({ left, tone: "plain" as const })),
     foot: "Pure fiction. Not advice. Never about anything real.",
   };
+}
+
+// --- The Roof ---------------------------------------------------------------------
+
+// The Roof's boards from /v1/roof, and how fetching them is going: nothing
+// yet, or failed with nothing to show. The boards only move at the bell, so
+// a failed refresh leaves the last answer standing until a bell passes it.
+export type RoofFeed = { roof: Roof | null; failed: boolean };
+
+const DAY_MS = 86_400_000;
+const lastBell = (now: number) => nextBell(new Date(now)).getTime() - DAY_MS;
+
+// When to fetch them again: every 5 minutes, and a minute and a half after
+// the bell, once its steps (scores, City markets, the League) have run.
+export function roofRefreshIn(now: number): number {
+  return Math.min(5 * 60_000, nextBell(new Date(now)).getTime() + 90_000 - now);
+}
+
+// Nothing to show yet, or nothing at all: the same on every Roof board.
+function roofWaiting(failed: boolean, title: string): Board {
+  return failed
+    ? { title, rows: [{ left: "Can't reach the boards right now.", tone: "plain" }], foot: "Trying again soon.", dim: true }
+    : { title, rows: [{ left: "Loading the boards…", tone: "plain" }] };
+}
+
+// Boards from before the last bell are out of date: dimmed, and the foot says so.
+function roofFoot(roof: Roof, now: number, foot: string): Pick<Board, "foot" | "dim"> {
+  return Date.parse(roof.bellAt) < lastBell(now) ? { foot: "From before the last bell. Refreshing…", dim: true } : { foot };
+}
+
+// "+6.2", "−1.4", "0.0": Aura per call, as the plan writes it.
+const signed = (v: number) => (Math.abs(v) < 0.05 ? "0.0" : `${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`);
+const gm = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toLocaleString("en-US")} GM`;
+const who = (handle: string, npc: string | null) => (npc ? `${handle} · ${npc}` : `@${handle}`);
+
+// The Right List: Aura per call ± its spread, the cast's rows labelled, rusty
+// residents marked, and NOTHING-9000's row with the line above it. When the
+// bot ranks below the board, its row comes last, under the top five.
+export function rightListBoard(feed: RoofFeed, now: number): Board {
+  const roof = feed.roof;
+  if (!roof) return roofWaiting(feed.failed, "THE RIGHT LIST");
+  const title = `THE RIGHT LIST · SEASON ${roof.season}`;
+  const { rows, bot } = roof.rightList;
+  const isBot = (r: { rank: number; npc: string | null }) => !!bot && !!r.npc && r.rank === bot.rank;
+  const onBoard = rows.slice(0, ROWS);
+  const shown =
+    !bot || onBoard.some(isBot)
+      ? onBoard
+      : [...rows.filter((r) => !isBot(r)).slice(0, ROWS - 1), { rank: bot.rank, handle: "NOTHING-9000", npc: "NPC · AI", perCall: bot.perCall, spread: bot.spread, rusty: false }];
+  const out: BoardRow[] = shown.map((r) => ({
+    left: `#${r.rank} ${who(r.handle, r.npc)}${r.rusty ? " · rusty" : ""}`,
+    right: `${signed(r.perCall)} per call ± ${r.spread.toFixed(1)}`,
+    tone: "plain",
+    ...(isBot(r) ? { rule: true } : {}),
+  }));
+  return {
+    title,
+    rows: out.length ? out : [{ left: "Nobody's on it yet. Calls settle, then the list fills.", tone: "plain" }],
+    ...roofFoot(roof, now, bot ? "Everyone above the line beat a bot that says no to everything." : "10 settled calls in a season to make the list."),
+  };
+}
+
+// The Season Stack: GM won or lost on City markets and Fade Duels this
+// season. Real money is never ranked, anywhere.
+export function stackBoard(feed: RoofFeed, now: number): Board {
+  const roof = feed.roof;
+  if (!roof) return roofWaiting(feed.failed, "SEASON STACK");
+  const title = `SEASON STACK · SEASON ${roof.season}`;
+  const rows: BoardRow[] = roof.seasonStack.rows.slice(0, ROWS).map((r) => ({ left: `#${r.rank} @${r.handle}`, right: gm(r.profit), tone: "plain" }));
+  return {
+    title,
+    rows: rows.length ? rows : [{ left: "Nobody's on the stack yet this season.", tone: "plain" }],
+    ...roofFoot(roof, now, "GM won on City markets and duels. Real money is never ranked."),
+  };
+}
+
+const GROUP_LABEL: Record<string, string> = Object.fromEntries(SIZE_GROUPS.map((g) => [g.key, `${g.min}–${g.max}`]));
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// "Oct 12" from "2026-10-12", the same in every time zone.
+const dayLabel = (day: string) => `${MONTHS[Number(day.slice(5, 7)) - 1] ?? ""} ${Number(day.slice(8, 10))}`;
+const score = (v: number) => String(Number(v.toFixed(2)));
+
+// The crews' board: the last bell's top 3 Bell Scores, then the League's
+// champions, one per size group (Sunday's bell writes the table). Banners,
+// never tokens or cash.
+export function crewsBoard(feed: RoofFeed, now: number): Board {
+  const roof = feed.roof;
+  if (!roof) return roofWaiting(feed.failed, "CREWS");
+  const { bellScores, league } = roof.crews;
+  const bell: BoardRow[] = bellScores.length
+    ? bellScores.slice(0, 3).map((s) => ({ left: `#${s.rank} ${s.name}`, right: `Bell Score ${score(s.score)}`, tone: "plain" }))
+    : [{ left: "No Bell Scores from the last bell.", tone: "plain" }];
+  const champs: BoardRow[] = !league
+    ? [{ left: "The first League table lands at Sunday's bell.", tone: "plain" }]
+    : league.champions.length
+      ? league.champions.slice(0, 3).map((c) => ({ left: c.name, right: `League champs · ${GROUP_LABEL[c.sizeGroup] ?? c.sizeGroup}`, tone: "plain" }))
+      : [{ left: "No League champions that week.", tone: "plain" }];
+  return {
+    title: "CREWS",
+    rows: [...bell, ...champs].slice(0, ROWS),
+    ...roofFoot(roof, now, league ? `Last bell's Bell Scores · League week of ${dayLabel(league.week)}` : "Bell Scores at every bell, the League at Sunday's."),
+  };
+}
+
+// All three, for the Roof's screens.
+export function roofBoards(feed: RoofFeed, now: number): Pick<Record<FeedKey, Board>, "right_list" | "stack" | "crews"> {
+  return { right_list: rightListBoard(feed, now), stack: stackBoard(feed, now), crews: crewsBoard(feed, now) };
 }
