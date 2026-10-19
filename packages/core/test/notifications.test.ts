@@ -6,6 +6,8 @@ import {
   FAREWELL,
   NEVER_SAY,
   NOTIFY,
+  type NotifyKind,
+  SHIFT,
   TEMPLATES,
   afterQuietHours,
   chooseDailyTemplate,
@@ -60,7 +62,7 @@ describe("templates", () => {
     expect(fillable("plain", {})).toBe(true);
   });
 
-  it("never repeats wording within 5 days while fresh ones exist", () => {
+  it("never repeats wording within 5 days: with none fresh, nothing", () => {
     const now = Date.UTC(2026, 9, 9);
     const used = new Map<string, number>();
     const seen: string[] = [];
@@ -70,9 +72,45 @@ describe("templates", () => {
       seen.push(t);
       used.set(t, now - 1000);
     }
-    // once every one was used recently, the least recent comes back
-    const all = new Map(TEMPLATES.daily.map((t, i) => [t, now - (TEMPLATES.daily.length - i) * 1000]));
-    expect(chooseTemplate("daily", all, now, 3, { streak: 3 })).toBe(TEMPLATES.daily[0]);
+    // Once every one was used in the last 5 days, none is picked (the push is
+    // held back), however stale the least recent.
+    const all = new Map(TEMPLATES.daily.map((t, i) => [t, now - NOTIFY.noRepeatDays * 86_400_000 + (i + 1) * 1000]));
+    for (let seed = 0; seed < 20; seed++) expect(chooseTemplate("daily", all, now, seed, { streak: 3 })).toBeNull();
+    expect(chooseDailyTemplate(["make_good", "clue"], new Map([...all, ...Object.values(DAILY_TOPIC_TEMPLATES).flat().map((t) => [t, now - 1000] as const)]), now, 1, { streak: 3 })).toBeNull();
+    // A line last used over 5 days ago is the one that comes back.
+    all.set(TEMPLATES.daily[4]!, now - NOTIFY.noRepeatDays * 86_400_000 - 1);
+    for (let seed = 0; seed < 20; seed++) expect(chooseTemplate("daily", all, now, seed, { streak: 3 })).toBe(TEMPLATES.daily[4]);
+  });
+
+  it("every kind has lines to go out as often as it fires, with no repeat in 5 days", () => {
+    // The most each fires in a city day: "shift done" once per Mod Shift, the
+    // daily ping and the rest once (an event alert can come more often; a
+    // repeat is then held back).
+    const most = (k: NotifyKind) => (k === "shift_done" ? SHIFT.perDay : 1);
+    // No line is shared by two kinds, so one kind's pushes never hold back another's.
+    const lines = Object.values(TEMPLATES).flat();
+    expect(new Set(lines).size).toBe(lines.length);
+    const values = { streak: 3, handle: "anon" };
+    const DAY = 86_400_000;
+    // The worst case: two at the very end of one city day and two at the
+    // very start of the day 5 later, 12 sends inside 5 days.
+    const worst = Array.from({ length: 20 }, (_, d) => (d % 2 ? [0, 1] : [1438, 1439]));
+    fc.assert(
+      fc.property(fc.array(fc.uniqueArray(fc.integer({ min: 0, max: 24 * 60 - 1 }), { minLength: 2, maxLength: 2 }), { minLength: 20, maxLength: 20 }), fc.nat(), (days, seed) => {
+        for (const kind of Object.keys(TEMPLATES) as NotifyKind[]) {
+          const used = new Map<string, number>();
+          for (const [d, minutes] of days.entries())
+            for (const m of [...minutes].sort((a, b) => a - b).slice(0, most(kind))) {
+              const at = Date.UTC(2026, 0, 1) + d * DAY + m * 60_000;
+              const t = chooseTemplate(kind, used, at, seed + d * 7 + m, values);
+              if (t === null || (used.get(t) ?? -Infinity) >= at - NOTIFY.noRepeatDays * DAY) return false;
+              used.set(t, at);
+            }
+        }
+        return true;
+      }),
+      { seed: 55, numRuns: 300, examples: [[worst, 0]] },
+    );
   });
 });
 

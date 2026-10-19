@@ -1,4 +1,4 @@
-import { DAILY_TOPIC_TEMPLATES, FAREWELL, NOTIFY } from "@bp/core";
+import { DAILY_TOPIC_TEMPLATES, FAREWELL, NOTIFY, TEMPLATES } from "@bp/core";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -546,5 +546,30 @@ describe("the crew group bot", () => {
     expect(await crewBotPostAllowed(db, crewId, "bell_in_15", "2029-02-01")).toBe(true);
     await setCrewBotMutes(db, lead, []);
     expect(await crewBotPostAllowed(db, crewId, "crew_card", "2029-02-01")).toBe(true);
+  });
+});
+
+// Last in the file, so it moves no other test's clock.
+describe("wording", () => {
+  it("with no fresh wording left, the push is held back, not repeated", async () => {
+    const u = await makeResident(db);
+    await setPrefs(db, u, { alerts: ["snap"] });
+    const t = fresh();
+    const { sender, to } = recorder();
+    const snapAt = async (at: number) => {
+      await notify(db, u, "snap", { handle: "frog" }, { now: new Date(at) });
+      await run(sender, new Date(at));
+    };
+    // Every Snap line, three a day (the cap)...
+    for (let i = 0; i < TEMPLATES.snap.length; i++) await snapAt(t + Math.floor(i / NOTIFY.dailyCap) * D + (i % NOTIFY.dailyCap) * 60_000);
+    expect(new Set(to(u)).size).toBe(TEMPLATES.snap.length);
+    // ...so the next, inside 5 days of them all, has nothing new to say.
+    await snapAt(t + 3 * D);
+    expect(to(u)).toHaveLength(TEMPLATES.snap.length);
+    expect((await rows(u)).at(-1)).toMatchObject({ status: "suppressed", reason: "repeat" });
+    // Five days after the first day's, those lines are free again.
+    await snapAt(t + 5 * D + H);
+    expect(to(u)).toHaveLength(TEMPLATES.snap.length + 1);
+    expect(to(u).slice(0, NOTIFY.dailyCap)).toContain(to(u).at(-1));
   });
 });

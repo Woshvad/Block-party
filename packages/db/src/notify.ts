@@ -12,9 +12,11 @@ import {
   NEVER_SAY,
   NOTIFY,
   type NotifyKind,
+  TEMPLATES,
   afterQuietHours,
   chooseDailyTemplate,
   chooseTemplate,
+  fillable,
   inQuietHours,
   isTimeZone,
   localParts,
@@ -252,7 +254,8 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
       const seed = parseInt(n.id.slice(0, 8), 16);
       const template =
         n.kind === "daily" ? chooseDailyTemplate(await dailyTopics(tx, n.userId, now), used, now.getTime(), seed, n.values) : chooseTemplate(n.kind as NotifyKind, used, now.getTime(), seed, n.values);
-      if (!template) return suppress("missing_values"); // never "@ faded your call"
+      // Never "@ faded your call", and never the same words twice in 5 days.
+      if (!template) return suppress(TEMPLATES[n.kind as NotifyKind].some((t) => fillable(t, n.values)) ? "repeat" : "missing_values");
       let text = render(template, n.values);
       if (farewell) text = `${text} ${FAREWELL}`;
       // Values (handles) can't smuggle in money talk, not even as buy_now or usdc-drop.

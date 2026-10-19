@@ -9,6 +9,7 @@ import {
   createDb,
   createMakeGood,
   ensureSystemAccounts,
+  markOpened,
   notify,
   queueAwayShiftPings,
   queueBellPings,
@@ -56,6 +57,12 @@ async function residentWith(prefs: Record<string, unknown>) {
   const u = await makeResident(db);
   await setPrefs(db, u, prefs);
   return u;
+}
+
+// Pushes as [when, text]: no wording comes back within 5 days of its last use.
+function noRepeatWithin5Days(sent: Array<[number, string]>) {
+  for (const [i, [at, text]] of sent.entries())
+    for (const [before, was] of sent.slice(0, i)) if (was === text) expect(at - before, text).toBeGreaterThan(NOTIFY.noRepeatDays * D);
 }
 
 // Three pushes already out today, so the cap is reached.
@@ -146,6 +153,25 @@ describe("a Mod Shift is done", () => {
     expect(to(changed)).toEqual([]);
     expect((await alerts(early, "shift_done"))[0]).toMatchObject({ status: "suppressed", reason: "done" });
     expect((await alerts(changed, "shift_done"))[0]).toMatchObject({ status: "suppressed", reason: "switched_off" });
+  });
+
+  it("both shifts a day for a week, never the same words twice in 5 days", async () => {
+    const t = fresh();
+    const u = await residentWith({ alerts: ["shift_done"] });
+    const { sender, to } = recorder();
+    const sent: Array<[number, string]> = [];
+    for (let d = 0; d < 7; d++)
+      for (const start of [12 * H, 13 * H]) {
+        await startShift(db, u, { now: new Date(t + d * D + start) });
+        const done = t + d * D + start + SHIFT.minutes * MIN;
+        await queueShiftPings(db, { now: new Date(done) });
+        await run(sender, done);
+        sent.push([done, to(u).at(-1)!]);
+        // Opened, so a week of them isn't a run of ignored pushes.
+        for (const r of await alerts(u, "shift_done")) if (r.status === "sent" && !r.opened_at) await markOpened(db, u, r.id, { now: new Date(done) });
+      }
+    expect(to(u)).toHaveLength(14);
+    noRepeatWithin5Days(sent);
   });
 
   it("counts toward the 3 a day, and a shift whose ping was missed for an hour gets none", async () => {
@@ -273,6 +299,22 @@ describe("an away shift is ready", () => {
     expect((await alerts(lapsed, "away_shift_ready"))[0]).toMatchObject({ status: "suppressed", reason: "expired" });
   });
 
+  it("every day for a week, never the same words twice in 5 days", async () => {
+    const t = fresh();
+    const u = await neighbour();
+    const { sender, to } = recorder();
+    const sent: Array<[number, string]> = [];
+    for (let d = 0; d < 7; d++) {
+      const bell = t + d * D;
+      await gmAt(u, bell - 4 * H);
+      await queueAwayShiftPings(db, { now: new Date(bell + 15 * MIN) });
+      await run(sender, bell + 8 * H);
+      sent.push([bell + 8 * H, to(u).at(-1)!]);
+    }
+    expect(to(u)).toHaveLength(7);
+    noRepeatWithin5Days(sent);
+  });
+
   it("counts toward the 3 a day", async () => {
     const t = fresh();
     const u = await neighbour({ alerts: ["away_shift_ready"], quietStart: 0, quietEnd: 0 }); // no quiet hours
@@ -334,6 +376,21 @@ describe("the bell in 2 hours", () => {
     // Outside those two hours before the bell, nothing at all.
     for (const at of [t + D + 22 * H + 30 * MIN, t + D + 12 * H, t + D + 23 * H + 59 * MIN]) expect(await queueBellPings(db, { now: new Date(at) })).toEqual({ checked: 0, queued: 0 });
     expect(await alerts(slow, "bell_2h")).toHaveLength(1);
+  });
+
+  it("every night for a week, never the same words twice in 5 days", async () => {
+    const t = fresh();
+    const u = await residentWith({ bell2h: true });
+    const { sender, to } = recorder();
+    const sent: Array<[number, string]> = [];
+    for (let d = 0; d < 7; d++) {
+      const ten = t + d * D + 22 * H;
+      await queueBellPings(db, { now: new Date(ten) });
+      await run(sender, ten);
+      sent.push([ten, to(u).at(-1)!]);
+    }
+    expect(to(u)).toHaveLength(7);
+    noRepeatWithin5Days(sent);
   });
 
   it("counts toward the 3 a day, and goes nowhere once switched off", async () => {
