@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CityHall, MarketRow, Roof, RoofRightRow } from "../src/api";
+import type { CityHall, CityMarket, MarketRow, Roof, RoofRightRow } from "../src/api";
 import { LAYOUTS } from "../src/interiors";
 import { type FeedStatus, wrap, crewsBoard, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard, rightListBoard, roofBoards, roofRefreshIn, stackBoard } from "../src/roomfeeds";
 
@@ -107,6 +107,31 @@ describe("the Watch Party screen", () => {
   });
 });
 
+describe("the Watch Party's City markets", () => {
+  const city = (id: string, inHours: number, place: string | null = "watch_party"): CityMarket => ({ id, question: `${id}: 60+ in the Hall at full time?`, kind: place ? "headcount" : "manual", place, threshold: place ? 60 : null, locksAt: new Date(now + inHours * 3_600_000).toISOString(), bellDay: "2026-10-10" });
+  const sports = Array.from({ length: 8 }, (_, i) => mk(`s${i}`, "sports", 50, i + 1));
+
+  it("share the screen under the matches: the Hall's own, still open, soonest first, two at most", () => {
+    const b = matchBoard(sports, now, live, [city("late", 5), city("roof", 1, "roof"), city("locked", -1), city("manual", 1, null), city("soon", 2), city("later", 6)]);
+    expect(b.rows).toHaveLength(6);
+    expect(b.rows.slice(0, 4).map((r) => r.left)).toEqual(["Q s0?", "Q s1?", "Q s2?", "Q s3?"]);
+    expect(b.rows.slice(4)).toEqual([
+      { left: "City · soon: 60+ in the Hall at full time?", right: "GM · locks in 2h 0m", tone: "plain" },
+      { left: "City · late: 60+ in the Hall at full time?", right: "GM · locks in 5h 0m", tone: "plain" },
+    ]);
+    expect(b.title).toBe("WATCH PARTY · ON TONIGHT");
+    expect(b.foot).toBe(POLYMARKET_CREDIT); // the credit is for the odds; City rows say GM
+  });
+
+  it("with no match on, the Hall's market still shows under the honest empty line", () => {
+    const b = matchBoard([], now, live, [city("soon", 2)]);
+    expect(b.rows.map((r) => r.left)).toEqual(["No match on right now. Grab a beanbag.", "City · soon: 60+ in the Hall at full time?"]);
+  });
+
+  it("without any, the screen is exactly what it was", () => {
+    expect(matchBoard(sports, now, live, [city("roof", 1, "roof")])).toEqual(matchBoard(sports, now, live));
+  });
+});
 
 describe("the Roof's boards", () => {
   // now is 12:00 UTC on 2026-10-10, so the last bell rang at 00:00 that day.

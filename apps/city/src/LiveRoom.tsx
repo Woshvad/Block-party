@@ -5,7 +5,7 @@ import { type TowerMoment, hasScreen } from "@bp/core";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
-import { ApiError, type Api, type CityHall, type Home, type Look, type MarketRow } from "./api";
+import { ApiError, type Api, type CityHall, type CityMarket, type Home, type Look, type MarketRow } from "./api";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import Interior from "./Interior";
 import { layoutFor, planFor } from "./interiors";
@@ -135,13 +135,14 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
 
 // The live boards for this room's screens: fetched on entry and every minute.
 // The odds come with the feed's status, so a paused feed dims the wall. A
-// Tower moment takes over the Watch Party's screen while it's on. The Roof's
-// leaderboards only move at the bell, so they're fetched less often (see
-// roofRefreshIn).
+// Tower moment takes over the Watch Party's screen while it's on; the Hall's
+// own City markets share it otherwise. The Roof's leaderboards only move at
+// the bell, so they're fetched less often (see roofRefreshIn).
 function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment | null): Partial<Record<FeedKey, Board>> {
   const [odds, setOdds] = useState<MarketRow[] | null>(null);
   const [feed, setFeed] = useState<FeedStatus | null>(null);
   const [hall, setHall] = useState<CityHall | null>(null);
+  const [city, setCity] = useState<CityMarket[]>([]);
   const [roof, setRoof] = useState<RoofFeed>({ roof: null, failed: false });
   useEffect(() => {
     const wantsOdds = place === "tower" || place === "watch_party";
@@ -151,6 +152,8 @@ function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment 
           if (o.status === "fulfilled") setOdds(o.value);
           setFeed((prev) => feedAfter(prev, o.status === "fulfilled", f.status === "fulfilled" ? f.value : null));
         });
+      // A failed refresh keeps the last list; the board drops each one as it locks.
+      if (place === "watch_party") void api.cityMarkets().then(setCity).catch(() => {});
       if (place === "city_hall") void api.cityHall().then(setHall).catch(() => {});
     };
     load();
@@ -178,13 +181,13 @@ function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment 
   return useMemo(() => {
     const at = minute * 60_000;
     return {
-      ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed) } : {}),
+      ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed, city) } : {}),
       ...(moment ? { match: momentBoard(moment, feed?.credit ?? null) } : {}),
       ...(hall ? { hall: hallBoard(hall, at) } : {}),
       ...(place === "roof" ? roofBoards(roof, at) : {}),
       diner: dinerBoard(new Date(at).toISOString().slice(0, 10)),
     };
-  }, [odds, feed, hall, roof, place, minute, moment]);
+  }, [odds, feed, hall, city, roof, place, minute, moment]);
 }
 
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
