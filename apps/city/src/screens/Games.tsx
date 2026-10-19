@@ -14,7 +14,7 @@ import { handleOf, useWho } from "../who";
 // City markets and the Season Stack, the Ratio of the Day, Tower Lights,
 // the Odds Wall, and Mod Shifts for GM.
 
-type Game = "shifts" | "city" | "ratio" | "duels" | "grudge" | "lights" | "wall";
+export type Game = "shifts" | "city" | "ratio" | "duels" | "grudge" | "lights" | "wall";
 const GAMES: [Game, string][] = [
   ["shifts", "🧹 Shifts"],
   ["city", "🏙️ City markets"],
@@ -25,8 +25,9 @@ const GAMES: [Game, string][] = [
   ["wall", "📈 Odds Wall"],
 ];
 
-export default function Games({ api, me, onBack, onChanged }: { api: Api; me: Me; onBack: () => void; onChanged: () => void }) {
-  const [g, setG] = useState<Game>("shifts");
+// `start`: the game to open on (the warm-up's fallback opens City markets).
+export default function Games({ api, me, onBack, onChanged, start }: { api: Api; me: Me; onBack: () => void; onChanged: () => void; start?: Game }) {
+  const [g, setG] = useState<Game>(start ?? "shifts");
   const act = useAction();
   return (
     <Page title="Games" onBack={onBack}>
