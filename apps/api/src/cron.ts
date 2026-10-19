@@ -5,6 +5,14 @@ import type { RoomsClient } from "./rooms-client";
 // One job's outcome, with its name so a failure in the logs says which one.
 export type CronResult = PromiseSettledResult<unknown> & { job: string };
 
+// Each minute's pushes: 25 a second at most (Telegram takes about 30 from a
+// bot), 6 in flight, and no new one after 45 seconds, so a slow Telegram
+// can't run one minute into the next. 600 a minute sends a 22:00 "Bell in 2h"
+// to about 18,000 residents inside its half hour (it was 200 a minute, one at
+// a time); past that the rest expire. Kept under 1,000 Telegram calls a run,
+// a Worker's subrequest limit.
+export const PUSH_RUN = { batch: 600, concurrency: 6, perSecond: 25, budgetMs: 45_000 } as const;
+
 // The minute cron: the bell, finished actions, finished Mod Shifts' pings,
 // Last Call, the Ratio prompt, real-trade settling, notifications, the daily,
 // away-shift and bell-in-2h pings every 15 minutes, the sweeps every 10
@@ -33,7 +41,7 @@ export async function runMinute(
     ratioPrompt: pickRatioPrompt(db, { now: at }),
     realTrades: settleRealTrades(db, { now: at }),
   };
-  if (deps.sender) jobs.notifications = runNotificationBatch(db, deps.sender, { batch: 200 });
+  if (deps.sender) jobs.notifications = runNotificationBatch(db, deps.sender, PUSH_RUN);
   if (at.getUTCMinutes() % 15 === 0) {
     jobs.dailyPings = queueDailyPings(db, { now: at });
     jobs.awayShiftPings = queueAwayShiftPings(db, { now: at });

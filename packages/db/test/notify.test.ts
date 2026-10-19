@@ -243,7 +243,7 @@ describe("sending", () => {
     await setPrefs(db, u, { alerts: ["faded"] });
     const t = fresh();
     const { sender, to } = recorder();
-    await notify(db, u, "faded", {}, { now: new Date(t) });
+    await notify(db, u, "faded", {}, { now: new Date(t - 60_000) }); // first in line, so it isn't capped out
     for (let i = 0; i < 3; i++) await notify(db, u, "daily", {}, { now: new Date(t) }); // no streak given
     await run(sender, new Date(t));
     expect((await rows(u)).find((r) => r.kind === "faded")).toMatchObject({ status: "suppressed", reason: "missing_values" });

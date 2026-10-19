@@ -176,16 +176,43 @@ async function dailyTopics(tx: Db, userId: string, now: Date): Promise<DailyTopi
 // send a push twice, and no lock is held while Telegram answers. A push whose
 // answer never comes back (the Worker died mid-send) keeps reason "sending":
 // it counts as sent for the limits and is never sent again.
-export async function runNotificationBatch(db: Db, sender: NotificationSender, opts: { now?: Date; batch?: number } = {}) {
-  const now = opts.now ?? new Date();
+//
+// What goes first is whatever stops being sendable soonest: "Bell in 2h"
+// within its half hour, ahead of pushes that have hours left before they go
+// stale. A big batch can have several pushes in flight (`concurrency`), paced
+// to at most `perSecond` sends (Telegram takes about 30 a second from a bot),
+// and stops taking new ones after `budgetMs`, so one minute's run is done
+// before the next starts.
+export async function runNotificationBatch(
+  db: Db,
+  sender: NotificationSender,
+  opts: { now?: Date; batch?: number; concurrency?: number; perSecond?: number; budgetMs?: number } = {},
+) {
+  const started = Date.now();
+  const now = clockOf(opts);
+  const batch = sizeOf(opts?.batch, 100);
+  const concurrency = boundedOf(opts?.concurrency, 1, 50) ?? 1;
+  const perSecond = boundedOf(opts?.perSecond, 1, 1000);
+  const budgetMs = boundedOf(opts?.budgetMs, 1, 10 * 60_000);
   const due = await db
     .select({ id: notifications.id })
     .from(notifications)
     .where(and(eq(notifications.status, "queued"), lte(notifications.scheduledFor, now)))
-    .orderBy(asc(notifications.scheduledFor))
-    .limit(opts.batch ?? 100);
+    .orderBy(sql`least(${notifications.expiresAt}, ${notifications.scheduledFor} + make_interval(hours => ${NOTIFY.staleAfterHours}))`, asc(notifications.id))
+    .limit(batch);
   const tally = { sent: 0, suppressed: 0, failed: 0, retry: 0, deferred: 0 };
-  for (const { id } of due) {
+
+  // The next moment a send may start, when paced.
+  let slot = started;
+  const paced = async () => {
+    if (!perSecond) return;
+    const at = Math.max(slot, Date.now());
+    slot = at + 1000 / perSecond;
+    const wait = at - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  };
+
+  const one = async (id: string) => {
     const claim = await db.transaction(async (tx) => {
       const [n] = await tx.select().from(notifications).where(and(eq(notifications.id, id), eq(notifications.status, "queued"))).for("no key update", { skipLocked: true });
       if (!n) return null;
@@ -264,12 +291,13 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
       await tx.update(notifications).set({ status: "sent", reason: "sending", template, text, localDay, sentAt: now }).where(eq(notifications.id, n.id));
       return { userId: n.userId, text, attempts: n.attempts };
     });
-    if (!claim) continue;
+    if (!claim) return;
     if (typeof claim === "string") {
       tally[claim]++;
-      continue;
+      return;
     }
 
+    await paced();
     const result = await sender.send(claim.userId, claim.text, id);
     // Not sent after all: the claim is undone, so it no longer counts.
     const unsent = { sentAt: null, template: null, text: null, localDay: null };
@@ -293,8 +321,33 @@ export async function runNotificationBatch(db: Db, sender: NotificationSender, o
         .where(eq(notifications.id, id));
       tally[attempts >= 3 ? "failed" : "retry"]++;
     }
-  }
+  };
+
+  // Each lane takes the next push from the batch. A failure stops them all
+  // from taking more, and is thrown once those in flight have finished.
+  let next = 0;
+  let failed: { error: unknown } | null = null;
+  const lane = async () => {
+    // loop-bound: each pass takes a row from the batch, never one another lane took; it ends with the batch, the budget or a failure.
+    while (next < due.length && !failed && !(budgetMs && Date.now() - started >= budgetMs)) {
+      const { id } = due[next++]!;
+      try {
+        await one(id);
+      } catch (error) {
+        failed ??= { error };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, due.length) }, lane));
+  if (failed) throw (failed as { error: unknown }).error;
   return tally;
+}
+
+// An optional whole number from lo to hi; junk is refused.
+function boundedOf(n: unknown, lo: number, hi: number): number | undefined {
+  if (n === undefined) return undefined;
+  if (!Number.isInteger(n) || (n as number) < lo || (n as number) > hi) throw new NotifyError("INVALID_INPUT", `a whole number from ${lo} to ${hi}`);
+  return n as number;
 }
 
 export async function markOpened(db: Db, userId: string, id: unknown, opts: { now?: Date } = {}) {
