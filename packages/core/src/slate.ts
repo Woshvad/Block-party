@@ -1,5 +1,5 @@
 import { type CityDay, daysBetween } from "./clock";
-import { type MarketCategory } from "./tower";
+import { type MarketCategory, type Side, TOWER } from "./tower";
 
 // The Daily Slate: one shared puzzle a day, the same six markets for everyone.
 
@@ -90,6 +90,29 @@ export function pickSlate(candidates: readonly SlateCandidate[], day: CityDay): 
 export const MODIFIERS = ["contrarian_day", "nothing_day", "blind_slate"] as const;
 export type Modifier = (typeof MODIFIERS)[number];
 export const modifierFor = (day: CityDay): Modifier => MODIFIERS[hash(`modifier:${day}`) % MODIFIERS.length]!;
+
+// What a modifier decides is cosmetic: a gold border, a banner tile, a hidden
+// bar. Never Aura, GM or real trades.
+
+// Contrarian Day: the city's majority on a card is the side most of the City
+// bar's calls took (neighbours only, never the cast). Under the City bar's 10
+// neighbours, or a tie, there's no majority, so no call is against it.
+export function cityMajority(yes: number, no: number): Side | null {
+  if (!Number.isInteger(yes) || !Number.isInteger(no) || yes < 0 || no < 0) return null;
+  if (yes + no < TOWER.cityBarMin || yes === no) return null;
+  return yes > no ? "yes" : "no";
+}
+
+// A call against the majority gets the gold border.
+export const againstCity = (side: Side, majority: Side | null): boolean => majority !== null && side !== majority;
+
+// NOTHING Day: your Slate beats NOTHING-9000's grid with more Aura than its
+// grid, counted the way the grid counts (an unsettled square is 0). A tie
+// isn't a win, and no call that day, or no grid from the bot, beats nothing.
+export const beatsBot = (mineCenti: number | null, botCenti: number | null): boolean => mineCenti !== null && botCenti !== null && mineCenti > botCenti;
+
+// The banner tile NOTHING Day pays: an earned-only home piece (home.ts), once each.
+export const NOTHING_DAY_TILE = "banner_tile_nothing";
 
 export const slateNumber = (day: CityDay) => daysBetween(SLATE.epoch, day) + 1;
 
