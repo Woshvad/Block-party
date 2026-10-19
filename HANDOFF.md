@@ -29,8 +29,8 @@ Still open after it (engineering; the owner's items are in section 3 below):
 
 - **Nothing has run inside Telegram or on a phone.** The BackButton, safe areas, start links and the low tier need a device check, and the frame-rate test is still to do. The `?perf` meter now counts every pass, shadows included, so its numbers are higher than the old 146 draw calls (main pass only).
 - **Account deletion, export and retention.** Residents, crews and items can't be deleted by design (database triggers). This needs the owner's privacy policy first.
-- ~~**A staff rename for flagged @handles.**~~ Done (README brick 44): Rename on flagged handles and names and on impersonation reports, a neutral handle unless staff type one, a notice on the resident's next open, and the old handle rests 30 days.
-  - **Still open:** a resident in a live room when they're renamed keeps the old name tag there until they next join a room (the room ticket carries the handle), and a rename has no appeal of its own.
+- ~~**A staff rename for flagged @handles.**~~ Done (README brick 44): Rename on flagged handles and names, on every report and by handle in Controls, a neutral handle unless staff type one, a notice on the resident's next open, the old handle rests 30 days, and the resident can appeal it once (other staff decide; overturning gives the handle back).
+  - **Still open:** a resident in a live room when they're renamed keeps the old name tag there until they next join a room (the room ticket carries the handle). After the 30 days, old `p-<handle>` links open whoever takes the handle next; the notice only promises they won't find the resident. The rename UI is checked by unit tests only, not yet in a browser.
 - **Promised but inert:** four alert toggles have no producer, and Contrarian Day and NOTHING Day have copy but no rules.
 - **An asset pipeline** (compressed GLBs, unused models removed, immutable cache headers once the city has hosting).
 - **A load test** on Workers and Hyperdrive: a Saturday bell, a 60-socket room, a reconnect storm after a deploy.
