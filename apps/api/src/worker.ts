@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { type PrivyVerifier, createPrivyVerifier, mockProvider, openAiModeration, parseBlockedWords, polymarketProvider, sampleMarkets } from "@bp/core";
+import { type PrivyVerifier, createPrivyVerifier, mockProvider, openAiModeration, parseBlockedWords, polymarketProvider, sampleMarkets, warmupFeedFor } from "@bp/core";
 import { type Db, createDb } from "@bp/db";
 import { createApp } from "./app";
 import { configProblems } from "./config-check";
@@ -31,6 +31,8 @@ type Env = {
   FEATURE_TOWER_LIGHTS?: string;
   // "on" only after the legal opinion.
   FEATURE_REAL_MONEY?: string;
+  // "on" only after Polymarket's written OK on free calls and a legal check.
+  FEATURE_WARMUP?: string;
   // Staff's blocked words, comma- or newline-separated.
   BLOCKED_WORDS?: string;
   // The city's https address: pushes then carry an Open button.
@@ -47,6 +49,9 @@ const senderFor = (env: Env, db: Db) => telegramSender({ db, botToken: env.TELEG
 
 // ODDS_SOURCE: "polymarket" (the live feed, read-only) or "mock" (a sample feed); unset, no odds.
 const oddsFor = (env: Env) => (env.ODDS_SOURCE === "polymarket" ? polymarketProvider() : env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined);
+
+// The warm-up's windows, from the same source as the odds, and only while FEATURE_WARMUP is on.
+const warmupFor = (env: Env) => (env.FEATURE_WARMUP === "on" ? warmupFeedFor(env.ODDS_SOURCE) : undefined);
 
 // Why this Worker won't run, if anything: the secrets, plus the bindings
 // nothing works without.
@@ -90,6 +95,7 @@ async function setUp(env: Env): Promise<Setup> {
     }
   }
   const odds = oddsFor(env);
+  const warmup = warmupFor(env);
   const app = createApp({
     db,
     telegramBotToken: env.TELEGRAM_BOT_TOKEN,
@@ -104,11 +110,12 @@ async function setUp(env: Env): Promise<Setup> {
     ...(privyVerify ? { privyVerify } : {}),
     notifier: senderFor(env, db),
     ...(odds ? { odds } : {}),
+    ...(warmup ? { warmup } : {}),
     ...(env.RECEIPT_SECRET ? { receiptSecret: env.RECEIPT_SECRET } : {}),
     // The pepper alone turns nothing on: the PoN routes answer 503 until a
     // phone or crypto-proof provider is configured too.
     ...(env.PON_PEPPER ? { ponPepper: env.PON_PEPPER } : {}),
-    features: { duels: env.FEATURE_DUELS === "on", towerLights: env.FEATURE_TOWER_LIGHTS === "on", realMoney: env.FEATURE_REAL_MONEY === "on" },
+    features: { duels: env.FEATURE_DUELS === "on", towerLights: env.FEATURE_TOWER_LIGHTS === "on", realMoney: env.FEATURE_REAL_MONEY === "on", warmup: env.FEATURE_WARMUP === "on" },
     countryHeader: "cf-ipcountry",
   });
   return { problems, app };
@@ -164,8 +171,9 @@ export default {
     const odds = oddsFor(env);
     const moderation = moderationFor(env);
     const rooms = roomsFor(env);
+    const warmup = warmupFor(env);
     try {
-      const deps = { sender: senderFor(env, db), ...(odds ? { odds } : {}), ...(moderation ? { moderation } : {}), ...(rooms ? { rooms } : {}) };
+      const deps = { sender: senderFor(env, db), ...(odds ? { odds } : {}), ...(warmup ? { warmup } : {}), ...(moderation ? { moderation } : {}), ...(rooms ? { rooms } : {}) };
       const failed = logCronFailures(await runMinute(db, at, deps));
       if (failed > 0) throw new Error(`${failed} cron job(s) failed`);
     } finally {

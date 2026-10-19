@@ -56,7 +56,7 @@ export function makeApp(over: Partial<AppConfig> = {}) {
     ticketSecret: TICKET_SECRET,
     notifier: fakeNotifier,
     receiptSecret: "p".repeat(40),
-    features: { duels: true, towerLights: true },
+    features: { duels: true, towerLights: true, warmup: true },
     countryHeader: "cf-ipcountry",
     ...over,
   });

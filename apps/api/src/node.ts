@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { type OddsProvider, mockProvider, openAiModeration, parseBlockedWords, polymarketProvider, sampleMarkets } from "@bp/core";
+import { type OddsProvider, mockProvider, openAiModeration, parseBlockedWords, polymarketProvider, sampleMarkets, warmupFeedFor } from "@bp/core";
 import { createDb, schemaStatus } from "@bp/db";
 import { loadEnv } from "@bp/db/src/env";
 import { createApp } from "./app";
@@ -30,6 +30,8 @@ if (!schema.upToDate) {
 // ODDS_SOURCE: "polymarket" (the live feed, read-only) or "mock" (a sample feed); unset, no odds.
 const ODDS: OddsProvider | undefined =
   process.env.ODDS_SOURCE === "polymarket" ? polymarketProvider() : process.env.ODDS_SOURCE === "mock" ? mockProvider(() => sampleMarkets(new Date())) : undefined;
+// The warm-up's windows, from the same source, only while FEATURE_WARMUP is on (as on Workers).
+const WARMUP_FEED = process.env.FEATURE_WARMUP === "on" ? warmupFeedFor(process.env.ODDS_SOURCE) : undefined;
 // The AI moderation check once OPENAI_API_KEY is set, as on Workers.
 const MODERATION = process.env.OPENAI_API_KEY ? openAiModeration({ apiKey: process.env.OPENAI_API_KEY }) : undefined;
 const app = createApp({
@@ -40,8 +42,9 @@ const app = createApp({
   // Dev and load tests only: trust a header for the client IP (Cloudflare's cf-connecting-ip in production).
   ...(process.env.CLIENT_IP_HEADER ? { clientIpHeader: process.env.CLIENT_IP_HEADER } : {}),
   ...(ODDS ? { odds: ODDS } : {}),
+  ...(WARMUP_FEED ? { warmup: WARMUP_FEED } : {}),
   // The same switches as on Workers, off unless set to "on".
-  features: { duels: process.env.FEATURE_DUELS === "on", towerLights: process.env.FEATURE_TOWER_LIGHTS === "on", realMoney: process.env.FEATURE_REAL_MONEY === "on" },
+  features: { duels: process.env.FEATURE_DUELS === "on", towerLights: process.env.FEATURE_TOWER_LIGHTS === "on", realMoney: process.env.FEATURE_REAL_MONEY === "on", warmup: process.env.FEATURE_WARMUP === "on" },
   // The live rooms (pnpm --filter @bp/rooms dev), wired as on Workers.
   ...(process.env.ROOMS_URL && process.env.TICKET_SECRET
     ? { rooms: httpRoomsClient({ url: process.env.ROOMS_URL, secret: need("INTERNAL_SECRET") }), roomsUrl: process.env.ROOMS_URL, ticketSecret: process.env.TICKET_SECRET }
@@ -63,7 +66,7 @@ if (process.env.LOCAL_CRON === "1") {
     if (running) return; // a slow minute never overlaps the next
     running = true;
     try {
-      const deps = { ...(odds ? { odds } : {}), ...(MODERATION ? { moderation: MODERATION } : {}), ...(rooms ? { rooms } : {}) };
+      const deps = { ...(odds ? { odds } : {}), ...(WARMUP_FEED ? { warmup: WARMUP_FEED } : {}), ...(MODERATION ? { moderation: MODERATION } : {}), ...(rooms ? { rooms } : {}) };
       logCronFailures(await runMinute(db, new Date(), deps));
     } finally {
       running = false;
