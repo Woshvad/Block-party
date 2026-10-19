@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { cityPlacements, lotPlacements } from "../src/kitcity";
 import { fillCity } from "../src/citygen";
-import { CAR_MODELS, KIT, KIT_PACK_NAMES, kitDir, kitPackOf, kitUrls } from "../src/kitModels";
+import { CAR_MODELS, KIT, KIT_LIVE, KIT_PACK_NAMES, kitDir, kitPackOf, kitReplaced, kitUrls } from "../src/kitModels";
 import { KIT_PACKS } from "../src/kitPacks";
 
 // The kit's files on disk, as the addresses the city asks for them by.
@@ -121,6 +121,7 @@ type AssetTools = {
   tidyGlb: (b: Buffer, palette?: Buffer) => Buffer;
   packHash: (dir: string) => string;
   packsModule: (packs: Record<string, string>) => string;
+  packsJson: (packs: Record<string, string>) => string;
 };
 const assetTools = async () => (await import(/* @vite-ignore */ new URL("../scripts/assets.mjs", import.meta.url).href)) as AssetTools;
 const SIZE: Record<number, number> = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
@@ -279,6 +280,16 @@ describe("caching the kit for good", () => {
     expect(written).toBe(packsModule(Object.fromEntries(Object.entries(KIT_PACKS).sort())));
   });
 
+  it("the live list of pack folders, for a page opened before a deploy, is exactly kitPacks.ts", async () => {
+    const { packsJson } = await assetTools();
+    const path = join(PUBLIC, ...KIT_LIVE.split("/").filter(Boolean));
+    expect(existsSync(path), `${KIT_LIVE} is missing: run pnpm --filter @bp/city assets`).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe(packsJson(Object.fromEntries(Object.entries(KIT_PACKS).sort())));
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(KIT_PACKS);
+    // Outside the packs' folders, so it isn't cached for good (checked below).
+    expect(kitPackOf(KIT_LIVE)).toBeNull();
+  });
+
   it("any change to a pack's files changes its hash", async () => {
     const { packHash } = await assetTools();
     const dir = mkdtempSync(join(tmpdir(), "kit-pack-"));
@@ -320,8 +331,9 @@ describe("caching the kit for good", () => {
     expect(files.some((u) => matches("/assets/kenney/*", u))).toBe(true);
     for (const r of immutable)
       for (const url of files.filter((u) => matches(r.path, u))) expect(versioned.some((v) => url.startsWith(v)), `${url} is immutable but not versioned`).toBe(true);
-    // Never the page, the manifest, the icons or the headers themselves.
-    for (const url of ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/_headers", "/assets/kenney"]) expect(immutable.some((r) => matches(r.path, url)), url).toBe(false);
+    // Never the page, the manifest, the icons, the headers themselves, or the
+    // live list of pack folders (a page that's out of date has to see the new one).
+    for (const url of ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png", "/_headers", "/assets/kenney", KIT_LIVE]) expect(immutable.some((r) => matches(r.path, url)), url).toBe(false);
   });
 
   it("next.config.mjs sends the same when Next serves the city", async () => {
@@ -332,5 +344,47 @@ describe("caching the kit for good", () => {
     const fromHeaders = headerRules().filter((r) => r.headers.includes(IMMUTABLE) && r.path !== "/_next/static/*").map((r) => r.path);
     expect(immutable.map((r) => r.source.replace(/:path\*$/, "*"))).toEqual(fromHeaders);
     for (const r of immutable) expect(r.headers).toEqual([{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }]);
+  });
+});
+
+// How three's loader reports a download, as the scene's error boundary gets it.
+const loadError = (url: string, why = `fetch for "https://city.example${url}" responded with 404: Not Found`) => new Error(`Could not load ${url}: ${why}`);
+const without = (pack: string) => Object.fromEntries(Object.entries(KIT_PACKS).filter(([p]) => p !== pack));
+
+describe("a page opened before a deploy that changed a pack", () => {
+  it("knows a model whose pack folder the deploy replaced, which only a reload can fetch", async () => {
+    const live = { ...KIT_PACKS, roads: "roads-00000000" };
+    expect(await kitReplaced(loadError(KIT.roads("road-straight")), async () => live)).toBe(true);
+    // A pack the deploy dropped altogether.
+    expect(await kitReplaced(loadError(KIT.roads("road-straight")), async () => without("roads"))).toBe(true);
+    // A pack the deploy left alone: a download that failed, which Try again can fetch.
+    expect(await kitReplaced(loadError(KIT.cars("taxi")), async () => live)).toBe(false);
+    expect(await kitReplaced(loadError(KIT.roads("road-straight"), "Failed to fetch"), async () => ({ ...KIT_PACKS }))).toBe(false);
+  });
+
+  it("asks for the live list only when a kit model at this page's version failed", async () => {
+    let asked = 0;
+    const live = async () => {
+      asked++;
+      return without("roads");
+    };
+    for (const error of [loadError("/icons/icon-192.png"), loadError("/assets/kenney/roads-00000000/road-straight.glb"), new Error("WebGL context lost"), `Could not load ${KIT.roads("road-straight")}: no`, null, undefined])
+      expect(await kitReplaced(error, live), String(error)).toBe(false);
+    expect(asked).toBe(0);
+  });
+
+  it("anything wrong with the live list counts as no, and Try again stays", async () => {
+    const error = loadError(KIT.roads("road-straight"));
+    const lists: (() => Promise<unknown>)[] = [
+      async () => null, // not served (the boundary's fetch gives null for a 404)
+      async () => "<!doctype html><title>Block Party</title>", // a host that answers every address with the page
+      async () => [KIT_PACKS.roads],
+      async () => 42,
+      () => Promise.reject(new TypeError("Failed to fetch")), // offline
+      () => {
+        throw new SyntaxError("Unexpected token '<'");
+      },
+    ];
+    for (const live of lists) expect(await kitReplaced(error, live), String(live)).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { KIT_PACKS } from "./kitPacks";
+import { failedAsset } from "./sceneHealth";
 
 // Every Kenney kit model the city can ask for, by pack. KIT only takes these
 // names, so a model the code asks for has to be on this list, and the kit
@@ -32,6 +33,29 @@ export const kitDir = (pack: KitPack) => `/assets/kenney/${KIT_PACKS[pack]}/`;
 // The pack a kit model's address is in, or null for anything else.
 export function kitPackOf(url: string): KitPack | null {
   return KIT_PACK_NAMES.find((pack) => url.startsWith(kitDir(pack))) ?? null;
+}
+
+// The pack folders a deploy serves, as a list a page can read: the assets
+// script writes it with kitPacks.ts, and unlike the packs it's never cached
+// for good.
+export const KIT_LIVE = "/assets/kit-packs.json";
+
+// A deploy that changes a pack ships only its new folder. A page opened
+// before it still asks for the old one, and no retry can fetch that: only a
+// reload brings the new build with the new addresses. Whether that's why a
+// model failed: the loader error names a model in one of this page's pack
+// folders, and the live list (read by `live`) has another folder for that
+// pack, or none. Anything wrong with the list counts as no.
+export async function kitReplaced(error: unknown, live: () => Promise<unknown>): Promise<boolean> {
+  const url = failedAsset(error);
+  const pack = url ? kitPackOf(url) : null;
+  if (!pack) return false;
+  try {
+    const now = await live();
+    return typeof now === "object" && now !== null && !Array.isArray(now) && (now as Record<string, unknown>)[pack] !== KIT_PACKS[pack];
+  } catch {
+    return false;
+  }
 }
 
 const kit = <P extends KitPack>(pack: P) => (name: KitModel<P>) => `${kitDir(pack)}${name}.glb`;

@@ -10,7 +10,10 @@
 // Then each pack's folder becomes <pack>-<hash of its files> and
 // src/kitPacks.ts is rewritten to match, so a changed file always gets a new
 // address and every address under /assets/kenney/ can be cached for good
-// (public/_headers, next.config.mjs). Running it twice changes nothing. No
+// (public/_headers, next.config.mjs). The old folder goes, so the same list
+// is also written to public/assets/kit-packs.json: a page opened before the
+// deploy reads it when a model fails, sees its folder is gone and offers a
+// reload (kitReplaced in src/kitModels.ts). Running it twice changes nothing. No
 // dependencies: a GLB is a JSON chunk and a binary chunk, rewritten here by
 // hand.
 
@@ -168,10 +171,11 @@ export function tidyGlb(buf, palette) {
   return writeGlb(json, out);
 }
 
-// Where the packs live (public/assets/kenney/<pack>-<hash>), and the file
-// that tells the city their folder names.
+// Where the packs live (public/assets/kenney/<pack>-<hash>), the file that
+// tells the city their folder names, and the same list as served (KIT_LIVE).
 export const KENNEY = fileURLToPath(new URL("../public/assets/kenney/", import.meta.url));
 const PACKS_FILE = fileURLToPath(new URL("../src/kitPacks.ts", import.meta.url));
+const LIVE_FILE = fileURLToPath(new URL("../public/assets/kit-packs.json", import.meta.url));
 
 // A pack folder's version: the start of a SHA-256 over every file in it,
 // path and bytes, in a fixed order. Any change to any file changes it.
@@ -220,6 +224,7 @@ function main() {
     packs[packName(folder)] = versioned;
   }
   writeFileSync(PACKS_FILE, packsModule(packs));
+  writeFileSync(LIVE_FILE, packsJson(packs));
   console.log(`kit models: ${(before / 1e6).toFixed(2)} MB -> ${(after / 1e6).toFixed(2)} MB`);
   for (const [pack, folder] of Object.entries(packs)) console.log(`  ${pack}: /assets/kenney/${folder}/`);
 }
@@ -235,5 +240,7 @@ ${lines.join("\n")}
 } as const;
 `;
 }
+
+export const packsJson = (packs) => `${JSON.stringify(packs, null, 2)}\n`;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

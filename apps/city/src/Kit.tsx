@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { bake } from "./kitGeometry";
 export { bake } from "./kitGeometry";
 import type { Placement } from "./kitcity";
-import { kitPackOf } from "./kitModels";
+import { KIT_LIVE, kitPackOf, kitReplaced } from "./kitModels";
 import { failedAsset, noteModelAsked, noteModelLoaded, takeFailedModels } from "./sceneHealth";
 import { type LoadedGltf, glowFor, shareModelImages } from "./kitTextures";
 
@@ -67,6 +67,16 @@ export function clearFailedModels(error?: unknown) {
   const named = failedAsset(error);
   if (named) urls.add(named);
   for (const url of urls) useGLTF.clear(url);
+}
+
+// Also for the scene's error: whether the model that failed is in a pack
+// folder a deploy has replaced since this page opened (see kitModels.ts), so
+// Try again can never fetch it and the scene offers a reload instead.
+export function kitOutdated(error?: unknown): Promise<boolean> {
+  return kitReplaced(error, async () => {
+    const res = await fetch(KIT_LIVE, { cache: "no-store" });
+    return res.ok ? res.json() : null;
+  });
 }
 
 function KitModel({ url, items, shadows, night }: { url: string; items: Placement[]; shadows: boolean; night: boolean }) {
