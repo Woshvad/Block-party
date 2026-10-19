@@ -138,6 +138,10 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     guest: async () => signedIn(await request<AuthResult>("POST", "/v1/auth/guest", { ageAck: true })),
     telegram: async (initData: string, ageAck: boolean) => signedIn(await request<AuthResult>("POST", "/v1/auth/telegram", { initData, ageAck })),
     me: () => request<Me>("GET", "/v1/me"),
+    seeHandleNotice: (id: string) => request<{ ok: true }>("POST", `/v1/resident/handle-notice/${encodeURIComponent(id)}/seen`),
+    // The rename that gave you your handle, with its appeal (or null), and the appeal itself.
+    myHandleRename: () => request<MyHandleRename | null>("GET", "/v1/resident/handle-rename"),
+    appealRename: (renameId: string, text: string) => request<unknown>("POST", `/v1/resident/handle-renames/${encodeURIComponent(renameId)}/appeal`, { text }),
     pickForMe: () => request<ResidentDraft>("GET", "/v1/resident/pick-for-me"),
     handleAvailable: (handle: string) => request<{ available: boolean }>("GET", `/v1/handles/${encodeURIComponent(handle)}/available`),
     moveIn: (draft: ResidentDraft) => request<Resident>("POST", "/v1/resident", draft),
@@ -329,6 +333,12 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     altFlags: () => request<Record<string, unknown>[]>("GET", "/v1/staff/alt-flags"),
     staffModeration: () => request<Array<{ id: string; kind: string; ref: string; authorId: string | null; text: string; status: string; categories: string[]; createdAt: string }>>("GET", "/v1/staff/moderation"),
     reviewModeration: (id: string, verdict: "restore" | "remove") => request<Record<string, unknown>>("POST", `/v1/staff/moderation/${encodeURIComponent(id)}/review`, { verdict }),
+    // Rename a resident's @handle: a neutral one unless newHandle is given; from (required) is the handle staff saw.
+    renameHandle: (userId: string, b: { newHandle?: string; reason: string; from: string; reportId?: string }) =>
+      request<HandleRename>("POST", `/v1/staff/residents/${encodeURIComponent(userId)}/handle`, b),
+    staffRenameAppeals: () => request<StaffRenameAppeal[]>("GET", "/v1/staff/handle-appeals"),
+    decideRenameAppeal: (id: string, overturn: boolean, note: string) =>
+      request<{ overturned: boolean; rename: HandleRename | null }>("POST", `/v1/staff/handle-appeals/${encodeURIComponent(id)}/decide`, { overturn, note }),
     staffMakeGoods: () => request<StaffMakeGood[]>("GET", "/v1/staff/make-goods"),
     createMakeGood: (b: { reason: string; amount: number }) => request<StaffMakeGood>("POST", "/v1/staff/make-goods", b),
     countrySwitch: (code: string, on: boolean) => request<Record<string, unknown>>("PUT", `/v1/staff/countries/${encodeURIComponent(code)}`, { on }),
@@ -345,7 +355,15 @@ export type ResidentDraft = { handle: string; name: string; look: Look; traits: 
 export type Resident = ResidentDraft & { userId: string; backstory: string; starterItem: string; hideCandleColor?: boolean };
 
 // telegramId: the Telegram account this session belongs to, if any.
-export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null; telegramId?: string | null };
+// handleNotice: staff renamed their @handle and they haven't tapped OK yet.
+export type Me = { userId: string; status: "guest" | "claimed"; gm: number; resident: Resident | null; crew: { id: string; name: string; role: string } | null; telegramId?: string | null; handleNotice?: HandleNotice | null };
+// appealable: false for the rename that gave a handle back after an appeal.
+export type HandleNotice = { id: string; from: string; to: string; reason: string; at: string; appealable?: boolean };
+// For Me: the rename that gave them their handle, while it can be appealed or has been.
+export type RenameAppeal = { status: "open" | "upheld" | "overturned"; at: string; note: string | null; decidedAt: string | null };
+export type MyHandleRename = { id: string; from: string; to: string; reason: string; at: string; appealUntil: string; appeal: RenameAppeal | null };
+export type StaffRenameAppeal = { id: string; renameId: string; userId: string; text: string; createdAt: string; from: string; to: string; reason: string; renamedBy: string; renamedAt: string };
+export type HandleRename = { id: string; userId: string; from: string; to: string; reason: string; at: string; heldUntil: string; reportId: string | null };
 
 export const apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8787";
 

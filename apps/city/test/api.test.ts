@@ -68,6 +68,33 @@ describe("api client", () => {
     expect(await api.me().catch((e) => [e.constructor.name, e.status, e.code])).toEqual(["ApiError", 0, "TIMEOUT"]);
   });
 
+  it("staff rename a handle, and the resident's OK on the notice, go where the API expects", async () => {
+    const s = server(() => json(200, { ok: true }));
+    const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: s.f });
+    await api.renameHandle("u/1", { reason: "Your handle named a real person.", from: "old_one" });
+    expect([s.seen[0]!.url, s.seen[0]!.init.method]).toEqual(["http://x/v1/staff/residents/u%2F1/handle", "POST"]);
+    expect(JSON.parse(String(s.seen[0]!.init.body))).toEqual({ reason: "Your handle named a real person.", from: "old_one" });
+    await api.seeHandleNotice("n1");
+    expect([s.seen[1]!.url, s.seen[1]!.init.method, s.seen[1]!.init.body]).toEqual(["http://x/v1/resident/handle-notice/n1/seen", "POST", undefined]);
+  });
+
+  it("a rename's appeal, and staff's decision on it, go where the API expects", async () => {
+    const s = server(() => json(200, { ok: true }));
+    const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: s.f });
+    await api.myHandleRename();
+    await api.appealRename("r/1", "Alice is my real first name.");
+    await api.staffRenameAppeals();
+    await api.decideRenameAppeal("a/1", true, "It's a real first name, so it's yours.");
+    expect(s.seen.map((x) => [x.url, x.init.method])).toEqual([
+      ["http://x/v1/resident/handle-rename", "GET"],
+      ["http://x/v1/resident/handle-renames/r%2F1/appeal", "POST"],
+      ["http://x/v1/staff/handle-appeals", "GET"],
+      ["http://x/v1/staff/handle-appeals/a%2F1/decide", "POST"],
+    ]);
+    expect(JSON.parse(String(s.seen[1]!.init.body))).toEqual({ text: "Alice is my real first name." });
+    expect(JSON.parse(String(s.seen[3]!.init.body))).toEqual({ overturn: true, note: "It's a real first name, so it's yours." });
+  });
+
   it("takes a 204 as done, and only a 204 may be empty", async () => {
     const s = server(() => new Response(null, { status: 204 }));
     const api = createApi({ base: "http://x", store: memoryTokenStore("t"), fetch: s.f });

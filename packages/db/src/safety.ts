@@ -436,8 +436,8 @@ type Takeable = { id?: string; kind: string; ref: string; text: string };
 // swapped for the placeholder above, and a resident's display name for their
 // @handle, but only while it still says what was flagged (a newer pitch or a
 // rename is checked on its own). Room lines live in the rooms Worker, so the API takes
-// those down. A handle can't change (a database guard), so a flagged handle
-// stays up and staff deal with the resident instead.
+// those down. A flagged handle stays up until staff rename it (renameHandle),
+// which also clears it from the queue.
 export async function takeDownFlagged(db: Db, item: Takeable) {
   const { kind, ref, text } = item;
   if (typeof ref !== "string" || typeof text !== "string") return;

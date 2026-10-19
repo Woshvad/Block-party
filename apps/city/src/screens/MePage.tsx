@@ -1,5 +1,5 @@
 "use client";
-import { ALERT_KINDS, GM, GOALS, RENT, TRAITS } from "@bp/core";
+import { ALERT_KINDS, GM, GOALS, HANDLE_RENAME, RENT, TRAITS } from "@bp/core";
 import { useEffect, useState } from "react";
 import { actionKeysFor } from "../actionKeys";
 import { type Api, type Me } from "../api";
@@ -7,6 +7,7 @@ import { toggleTrait } from "../draft";
 import { profileLink } from "../launch";
 import { label, plural } from "../palette";
 import { type GraphicsPick, cityView, deviceTier, savePick, savedPick } from "../quality";
+import { appealProblem, appealState } from "../renameNotice";
 import { PROFILE_SHARE_TEXT } from "../share";
 import ShareButton from "../ShareButton";
 import { ifConfirmed } from "../telegram";
@@ -14,7 +15,8 @@ import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
 
 // You: your name, traits and goal; your moods and Copium; Proof of Neighbour;
-// notifications; any restriction (and its appeal); Hodl Days and rent; sign out.
+// notifications; a staff rename of your handle and any restriction (each with
+// its appeal); Hodl Days and rent; sign out.
 
 const ALERT_WORDS: Record<string, string> = {
   shift_done: "A shift is done",
@@ -33,6 +35,9 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
   const pon = useLoad(() => api.pon(), [api]);
   const prefs = useLoad(() => api.prefs(), [api]);
   const restr = useLoad(() => api.restrictions(), [api]);
+  // Staff renamed your @handle: why, and your appeal, while you can make one.
+  const renamed = useLoad(() => api.myHandleRename(), [api]);
+  const [renameAppeal, setRenameAppeal] = useState("");
   const today = useLoad(() => api.today(), [api]);
   const [name, setName] = useState(r.name);
   const [traits, setTraits] = useState<string[]>(r.traits);
@@ -279,6 +284,39 @@ export default function MePage({ api, me, onBack, onChanged }: { api: Api; me: M
           Now: {cityView() === "list" ? "List" : deviceTier().quality === "low" ? "Light" : "Full"}. Full and Light apply the next time the app opens; List applies straight away.
         </p>
       </section>
+
+      {renamed.data && (
+        <section className="card">
+          <h2>Your handle</h2>
+          <p>
+            Staff renamed you from @{renamed.data.from} to @{renamed.data.to} on {new Date(renamed.data.at).toLocaleDateString()}. Why: {renamed.data.reason}
+          </p>
+          {renamed.data.appeal ? (
+            <p className="muted">{appealState(renamed.data.appeal)}</p>
+          ) : (
+            <>
+              <label className="field">
+                Appeal (until {new Date(renamed.data.appealUntil).toLocaleDateString()})
+                <textarea rows={3} maxLength={HANDLE_RENAME.appealMaxChars} value={renameAppeal} onChange={(e) => setRenameAppeal(e.target.value)} placeholder="Why staff got it wrong" />
+              </label>
+              {renameAppeal.trim() && appealProblem(renameAppeal) && <p className="muted">{appealProblem(renameAppeal)}</p>}
+              <button
+                className="btn"
+                disabled={!!appealProblem(renameAppeal) || act.pending}
+                onClick={() =>
+                  act.run(() => api.appealRename(renamed.data!.id, renameAppeal), "Appeal sent: a person will look at it").then((sent) => {
+                    if (sent === undefined) return;
+                    setRenameAppeal("");
+                    void renamed.reload();
+                  })
+                }
+              >
+                Send appeal
+              </button>
+            </>
+          )}
+        </section>
+      )}
 
       {restr.data && restr.data.length > 0 && (
         <section className="card">

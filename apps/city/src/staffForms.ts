@@ -1,4 +1,4 @@
-import { MODERATION } from "@bp/core";
+import { HANDLE_RENAME, MODERATION, ResidentInputError, renameReason, validateHandle } from "@bp/core";
 
 // The staff console's rules, kept out of the .tsx so they can be tested.
 
@@ -51,10 +51,84 @@ export function itemState(item: Pick<ModerationItem, "kind" | "status" | "catego
 // The buttons a queued item gets. Flagged text is already down: staff put it
 // back or keep it down. Text the AI check never read is still up: staff pass
 // it or take it down. A room line can't come back once taken down, and a
-// handle can't be changed, so those get only what can actually happen.
+// flagged handle stays shown until it's renamed (Rename, which also clears it
+// from the queue), so those get only what can actually happen.
 export function reviewChoices(item: Pick<ModerationItem, "kind" | "status">): Array<{ verdict: "restore" | "remove"; label: string }> {
-  if (item.kind === "resident_handle") return [{ verdict: "restore", label: "It's fine" }, { verdict: "remove", label: "Handled (restrict them in Controls)" }];
+  if (item.kind === "resident_handle") return [{ verdict: "restore", label: "It's fine" }, { verdict: "remove", label: "Handled another way" }];
   if (item.status === "error") return [{ verdict: "restore", label: "It's fine" }, { verdict: "remove", label: "Take it down" }];
   if (item.kind === "room") return [{ verdict: "remove", label: "Keep it down" }];
   return [{ verdict: "restore", label: "Put it back" }, { verdict: "remove", label: "Keep it down" }];
+}
+
+// --- Renaming a flagged @handle -------------------------------------------------
+
+// Who a Rename button renames: a flagged handle's or display name's resident
+// (the item's ref; a name taken down shows the @handle, so a handle saying the
+// same thing needs renaming too), or whoever a report is about, whatever its
+// reason: residents report a slur of a handle as harassment or "other" too,
+// and without the AI check a handle never reaches the Flagged tab.
+export function renameTarget(item: Pick<ModerationItem, "kind" | "ref">): string | null {
+  return item.kind === "resident_handle" || item.kind === "resident_name" ? item.ref : null;
+}
+export const reportRenames = (r: { targetUserId?: unknown }) => typeof r.targetUserId === "string" && r.targetUserId !== "";
+
+// Controls' Rename a resident, for a handle seen anywhere else: the @handle
+// typed in, ready to look up, or null while it can't be one.
+export function handleToFind(input: string): string | null {
+  const h = input.trim().replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,15}$/.test(h) ? h : null;
+}
+
+// Who a queued item's card names. A display name or handle is the resident's
+// it's on (the ref), even when staff typed it in a rename: then the author is
+// that staff member (so they can't review it), named apart as who chose it.
+// Anything else is its author's.
+export function itemPeople(item: Pick<ModerationItem, "kind" | "ref" | "authorId">): { resident: string | null; chosenBy: string | null } {
+  const resident = renameTarget(item) ?? item.authorId;
+  return { resident, chosenBy: item.authorId && item.authorId !== resident ? item.authorId : null };
+}
+
+// The handle a Rename on a queued item goes from (the API needs it): a
+// flagged handle's own text, as that's what staff are judging, so if they've
+// been renamed since nothing happens; for a flagged name, their handle as the
+// console loaded it (null until it has).
+export function itemRenameFrom(item: Pick<ModerationItem, "kind" | "text">, loaded: string | null): string | null {
+  return item.kind === "resident_handle" ? item.text : loaded;
+}
+
+// What a rename still needs before the API will take it, in words, or null
+// when it's ready. An empty handle means a neutral one. The same rules the
+// API checks (core's handle rules, the reason's limits); it also checks the
+// handle is free and staff's blocked words.
+export function renameProblem(f: { newHandle: string; reason: string }): string | null {
+  if (f.newHandle.trim()) {
+    try {
+      validateHandle(f.newHandle);
+    } catch (e) {
+      if (e instanceof ResidentInputError) return `New handle: ${e.reason}.`;
+      throw e;
+    }
+  }
+  if (renameReason(f.reason) === null) return `The reason the resident reads needs ${HANDLE_RENAME.reasonMinChars} to ${HANDLE_RENAME.reasonMaxChars} characters.`;
+  return null;
+}
+
+// Deciding a resident's appeal against a rename: the note is theirs to read
+// (and an overturn's reason), so it has a rename reason's limits, as the API.
+export function renameDecisionProblem(note: string): string | null {
+  return renameReason(note) === null ? `The note they read needs ${HANDLE_RENAME.reasonMinChars} to ${HANDLE_RENAME.reasonMaxChars} characters.` : null;
+}
+
+// The confirm before renaming. Telegram's own dialog takes up to 256 characters.
+export function renameConfirm(f: { from: string; newHandle: string }): string {
+  const h = f.newHandle.trim().replace(/^@/, "");
+  return `Rename @${f.from} to ${h ? `@${h}` : "a neutral handle"}? They see your reason next time they open the app. Old profile links stop finding them, and no one else can take the old handle for ${HANDLE_RENAME.holdDays} days.`;
+}
+
+// The request: trimmed, and only what's filled in, but always `from`, the
+// handle staff were looking at: the API needs it, so a resident someone else
+// renamed a moment ago isn't renamed twice.
+export function renameBody(f: { newHandle: string; reason: string }, from: string, reportId?: string) {
+  const h = f.newHandle.trim().replace(/^@/, "");
+  return { reason: f.reason.trim(), from, ...(h ? { newHandle: h } : {}), ...(reportId ? { reportId } : {}) };
 }

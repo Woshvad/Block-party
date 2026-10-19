@@ -1,6 +1,6 @@
-import { MODERATION } from "@bp/core";
+import { HANDLE_RENAME, MODERATION } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { RESTRICT_FOR, itemPlace, itemState, resolveProblem, reviewChoices } from "../src/staffForms";
+import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameDecisionProblem, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../src/staffForms";
 
 describe("closing a report from the staff console", () => {
   const note = "spam links ok"; // 13 characters: enough for a note, too short for a reason
@@ -41,7 +41,7 @@ describe("the flagged queue", () => {
     expect(verdicts("crew_name", "flagged")).toEqual(["restore", "remove"]);
     expect(verdicts("room", "flagged")).toEqual(["remove"]); // a room line can't come back
     expect(reviewChoices({ kind: "resident_name", status: "flagged" }).map((c) => c.label)).toEqual(["Put it back", "Keep it down"]); // it shows as the @handle
-    expect(reviewChoices({ kind: "resident_handle", status: "flagged" })[1]!.label).toBe("Handled (restrict them in Controls)"); // a handle can't change
+    expect(reviewChoices({ kind: "resident_handle", status: "flagged" }).map((c) => c.label)).toEqual(["It's fine", "Handled another way"]); // Rename is its own button
     expect(verdicts("board", "error")).toEqual(["restore", "remove"]);
     expect(reviewChoices({ kind: "board", status: "error" })[1]!.label).toBe("Take it down"); // still up: nothing was taken down yet
   });
@@ -53,5 +53,77 @@ describe("where a flagged item stands", () => {
     expect(itemState({ kind: "resident_name", status: "flagged", categories: ["hate"] })).toBe("flagged: hate; taken down");
     expect(itemState({ kind: "resident_handle", status: "flagged", categories: ["hate"] })).toBe("flagged: hate; still shown");
     expect(itemState({ kind: "pitch", status: "error", categories: [] })).toBe("the AI check couldn't read it; still up");
+  });
+});
+
+describe("renaming a flagged @handle", () => {
+  const reason = "Your handle named a real person.";
+
+  it("shows on flagged handles and display names, and on every report about a resident", () => {
+    expect(renameTarget({ kind: "resident_handle", ref: "u1" })).toBe("u1");
+    expect(renameTarget({ kind: "resident_name", ref: "u2" })).toBe("u2"); // a name taken down shows the @handle
+    for (const kind of ["board", "crew", "dm", "room", "pitch", "crew_name", "make_good"]) expect(renameTarget({ kind, ref: "x" }), kind).toBeNull();
+    // A slur of a handle gets reported as harassment or "other" too, and without
+    // the AI check it never reaches Flagged.
+    for (const reason of ["impersonation", "scam", "harassment", "spam", "under_18", "unwanted_romance", "other", undefined]) {
+      const report = { reason, targetUserId: "u3" };
+      expect(reportRenames(report), String(reason)).toBe(true);
+    }
+    for (const targetUserId of [undefined, null, ""]) expect(reportRenames({ targetUserId })).toBe(false);
+  });
+
+  it("Controls finds a resident to rename by the handle staff saw anywhere", () => {
+    expect(handleToFind(" @Cool_Guy ")).toBe("Cool_Guy");
+    expect(handleToFind("neighbour_04821")).toBe("neighbour_04821");
+    for (const bad of ["", "@", "  ", "a b", "x".repeat(16), "roof-rat", "@@x"]) expect(handleToFind(bad), bad).toBeNull();
+  });
+
+  it("a flagged handle or name's card names the resident it's on, even when staff chose it in a rename", () => {
+    // A handle staff typed is queued with them as its author, so they can't review it.
+    expect(itemPeople({ kind: "resident_handle", ref: "resident", authorId: "staff" })).toEqual({ resident: "resident", chosenBy: "staff" });
+    expect(itemPeople({ kind: "resident_handle", ref: "resident", authorId: "resident" })).toEqual({ resident: "resident", chosenBy: null });
+    expect(itemPeople({ kind: "resident_name", ref: "resident", authorId: "resident" })).toEqual({ resident: "resident", chosenBy: null });
+    expect(itemPeople({ kind: "board", ref: "msg", authorId: "poster" })).toEqual({ resident: "poster", chosenBy: null });
+    expect(itemPeople({ kind: "room", ref: "roof#1", authorId: null })).toEqual({ resident: null, chosenBy: null });
+  });
+
+  it("renames from the flagged handle itself, or from a flagged name's handle once it has loaded", () => {
+    expect(itemRenameFrom({ kind: "resident_handle", text: "rude_one" }, "newer_one")).toBe("rude_one"); // renamed since: the API says so
+    expect(itemRenameFrom({ kind: "resident_handle", text: "rude_one" }, null)).toBe("rude_one");
+    expect(itemRenameFrom({ kind: "resident_name", text: "Rude Name" }, "their_handle")).toBe("their_handle");
+    expect(itemRenameFrom({ kind: "resident_name", text: "Rude Name" }, null)).toBeNull(); // not loaded: no Rename yet
+  });
+
+  it("needs a readable reason; an empty handle means a neutral one, a typed one follows the handle rules", () => {
+    expect(renameProblem({ newHandle: "", reason })).toBeNull();
+    expect(renameProblem({ newHandle: " @Fresh_Start ", reason })).toBeNull();
+    expect(renameProblem({ newHandle: "", reason: "too short" })).toBe(`The reason the resident reads needs ${HANDLE_RENAME.reasonMinChars} to ${HANDLE_RENAME.reasonMaxChars} characters.`);
+    expect(renameProblem({ newHandle: "", reason: "x".repeat(HANDLE_RENAME.reasonMaxChars + 1) })).toMatch(/reason/);
+    expect(renameProblem({ newHandle: "ab", reason })).toBe("New handle: 3 to 15 letters, digits or _.");
+    expect(renameProblem({ newHandle: "admin", reason })).toBe("New handle: reserved.");
+    expect(renameProblem({ newHandle: "x__y", reason })).toBe("New handle: no double underscores.");
+  });
+
+  it("deciding an appeal needs a note the resident can read, as long as a rename's reason", () => {
+    expect(renameDecisionProblem("We looked again: it's a real first name.")).toBeNull();
+    for (const bad of ["", "too short", "x".repeat(HANDLE_RENAME.reasonMaxChars + 1)]) {
+      expect(renameDecisionProblem(bad)).toBe(`The note they read needs ${HANDLE_RENAME.reasonMinChars} to ${HANDLE_RENAME.reasonMaxChars} characters.`);
+    }
+  });
+
+  it("the confirm says what happens, inside Telegram's 256 characters", () => {
+    const longest = renameConfirm({ from: "a".repeat(15), newHandle: "b".repeat(15) });
+    expect(longest).toContain("@aaaaaaaaaaaaaaa to @bbbbbbbbbbbbbbb?");
+    expect(longest).toMatch(/reason next time they open the app/);
+    expect(longest).toMatch(/Old profile links stop finding them/); // not "stop working": someone may take the handle later
+    expect(longest).toMatch(new RegExp(`${HANDLE_RENAME.holdDays} days`));
+    expect(longest.length).toBeLessThanOrEqual(256);
+    expect(renameConfirm({ from: "old", newHandle: "  " })).toMatch(/^Rename @old to a neutral handle\?/);
+    expect(renameConfirm({ from: "old", newHandle: "@new_one" })).toMatch(/^Rename @old to @new_one\?/);
+  });
+
+  it("sends only what's filled in, trimmed, and always the handle staff saw", () => {
+    expect(renameBody({ newHandle: "  ", reason: `  ${reason} ` }, "old_one")).toEqual({ reason, from: "old_one" });
+    expect(renameBody({ newHandle: " @Fresh ", reason }, "old_one", "r1")).toEqual({ reason, newHandle: "Fresh", from: "old_one", reportId: "r1" });
   });
 });

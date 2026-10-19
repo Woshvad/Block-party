@@ -8,6 +8,7 @@ import { type Screen, boot, screenFor } from "./boot";
 import { boardMode } from "./boardMode";
 import { type Launch, type LaunchKind, NO_LAUNCH, TELEGRAM_APP_URL, freshStart, inviteLink, onlyKinds, readLaunch, sessionMemory, startKind, withoutLaunch } from "./launch";
 import type { PageId } from "./screens/More";
+import { noticeToShow } from "./renameNotice";
 import { initTelegram, launchData, startParam, telegram } from "./telegram";
 import { useToast } from "./useToast";
 
@@ -30,6 +31,7 @@ const RealMoney = dynamic(() => import("./screens/RealMoney"), { ssr: false });
 const Staff = dynamic(() => import("./screens/Staff"), { ssr: false });
 const ReceiptSheet = dynamic(() => import("./ReceiptSheet"), { ssr: false });
 const Person = dynamic(() => import("./Person"), { ssr: false });
+const HandleNotice = dynamic(() => import("./HandleNotice"), { ssr: false });
 
 const DEV = process.env.NODE_ENV === "development";
 
@@ -205,6 +207,14 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
   const [room, setRoom] = useState<string | null>(null);
   const [page, setPage] = useState<PageId | null>(null);
   const [invite, setInvite] = useState<string | null>(null);
+  // Staff renamed their @handle: a notice on this open, until they tap Got it.
+  const [noticesSeen, setNoticesSeen] = useState<ReadonlySet<string>>(() => new Set());
+  const renamed = noticeToShow(me.handleNotice, noticesSeen);
+  const renameSeen = (id: string) => {
+    setNoticesSeen((seen) => new Set(seen).add(id));
+    // If this doesn't reach the city, the notice comes back the next time the app opens.
+    void api.seeHandleNotice(id).catch(() => {});
+  };
 
   // Opened from a link: a crew invite opens Crew with the code filled in; a
   // push the player tapped is marked opened.
@@ -299,6 +309,16 @@ function Home({ api, me: first }: { api: Api; me: Me }) {
       {!pageView && tab === "tower" && <Tower api={api} onBunker={(place) => setTrip({ place, ridesFree: false })} />}
       <AppNavigation active={page ? "more" : tab} onSelect={go} />
       <LinkedSheets api={api} me={me} onSelf={() => setPage("me")} />
+      {renamed && (
+        <HandleNotice
+          notice={renamed}
+          onOk={() => renameSeen(renamed.id)}
+          onAppeal={() => {
+            renameSeen(renamed.id);
+            setPage("me");
+          }}
+        />
+      )}
     </>
   );
 }

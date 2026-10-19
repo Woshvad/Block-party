@@ -1,14 +1,14 @@
 "use client";
-import { MAKE_GOOD } from "@bp/core";
+import { HANDLE_RENAME, MAKE_GOOD } from "@bp/core";
 import { useState } from "react";
 import type { Api } from "../api";
 import { makeGoodConfirm, makeGoodProblem } from "../makeGoods";
 import { label } from "../palette";
-import { RESTRICT_FOR, itemPlace, itemState, resolveProblem, reviewChoices } from "../staffForms";
+import { RESTRICT_FOR, handleToFind, itemPeople, itemPlace, itemRenameFrom, itemState, renameBody, renameConfirm, renameDecisionProblem, renameProblem, renameTarget, reportRenames, resolveProblem, reviewChoices } from "../staffForms";
 import { ifConfirmed } from "../telegram";
 import { Loading, Page, useAction } from "../ui";
 import { useLoad } from "../useLoad";
-import { handleOf, useWho } from "../who";
+import { handleOf, lookUpAgain, renamedTo, useWho, who } from "../who";
 
 // The staff console. The role is granted in the database only, and the API
 // checks it on every call; for anyone else each panel just says "staff only".
@@ -31,7 +31,12 @@ export default function Staff({ api, onBack }: { api: Api; onBack: () => void })
       </div>
       {tab === "reports" && <Reports api={api} act={act} />}
       {tab === "flagged" && <Flagged api={api} act={act} />}
-      {tab === "appeals" && <Appeals api={api} act={act} />}
+      {tab === "appeals" && (
+        <>
+          <Appeals api={api} act={act} />
+          <RenameAppeals api={api} act={act} />
+        </>
+      )}
       {tab === "markets" && <Markets api={api} act={act} />}
       {tab === "make_goods" && <MakeGoods api={api} act={act} />}
       {tab === "alts" && <Alts api={api} />}
@@ -129,6 +134,7 @@ function Reports({ api, act }: { api: Api; act: Act }) {
                 Restrict{kind[id] ? `: ${forLabel}` : ""}
               </button>
             </div>
+            {reportRenames(r) && <Rename api={api} act={act} userId={target} reportId={id} onDone={() => void reports.reload()} />}
           </section>
         );
       })}
@@ -140,28 +146,99 @@ function Reports({ api, act }: { api: Api; act: Act }) {
 // up), oldest first, waiting for a person to decide.
 function Flagged({ api, act }: { api: Api; act: Act }) {
   const items = useLoad(() => api.staffModeration(), [api]);
-  useWho(api, (items.data ?? []).map((i) => i.authorId ?? "").filter(Boolean));
+  useWho(api, (items.data ?? []).flatMap((i) => [i.authorId ?? "", renameTarget(i) ?? ""]).filter(Boolean));
   if (!items.data) return <Loading error={items.error} retry={items.reload} />;
   return (
     <>
       {items.data.length === 0 && <p className="muted">Nothing flagged.</p>}
-      {items.data.map((item) => (
-        <section className="card" key={item.id}>
-          <p>
-            <b>{itemPlace(item)}</b>
-            {item.authorId ? ` by ${handleOf(item.authorId)}` : ""} · {itemState(item)}
-          </p>
-          <p className="notice">"{item.text}"</p>
-          {item.authorId && <p className="muted">Resident id: {item.authorId}</p>}
-          <div className="btnrow">
-            {reviewChoices(item).map((c) => (
-              <button key={c.verdict} className={c.verdict === "remove" ? "btn danger" : "btn light"} onClick={() => act.run(() => api.reviewModeration(item.id, c.verdict), c.label).then(() => items.reload())}>
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </section>
-      ))}
+      {items.data.map((item) => {
+        const people = itemPeople(item);
+        return (
+          <section className="card" key={item.id}>
+            <p>
+              <b>{itemPlace(item)}</b>
+              {people.resident ? ` by ${handleOf(people.resident)}` : ""}
+              {people.chosenBy ? ` (${handleOf(people.chosenBy)} chose it in a rename)` : ""} · {itemState(item)}
+            </p>
+            <p className="notice">"{item.text}"</p>
+            {people.resident && <p className="muted">Resident id: {people.resident}</p>}
+            <div className="btnrow">
+              {reviewChoices(item).map((c) => (
+                <button key={c.verdict} className={c.verdict === "remove" ? "btn danger" : "btn light"} onClick={() => act.run(() => api.reviewModeration(item.id, c.verdict), c.label).then(() => items.reload())}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            {renameTarget(item) && <Rename api={api} act={act} userId={renameTarget(item)!} from={itemRenameFrom(item, loadedHandle(renameTarget(item)!))} onDone={() => void items.reload()} />}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+// Their handle as the console loaded it, or null until it has.
+function loadedHandle(userId: string): string | null {
+  const w = who(userId);
+  return w && !w.npc ? w.handle : null;
+}
+
+// Rename a resident's @handle: empty for a neutral one, a reason they read,
+// then a confirm. The handle shown here goes along as `from` (the API needs
+// it), so if another staff member renamed them a moment ago nothing happens
+// twice; until it's known there's nothing to rename from, so the button asks
+// for it again. A rename clears the old handle's flags, and closes the report
+// it was made from.
+function Rename({ api, act, userId, from: given, reportId, onDone }: { api: Api; act: Act; userId: string; from?: string | null; reportId?: string; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ newHandle: "", reason: "" });
+  const from = given === undefined ? loadedHandle(userId) : given;
+  const problem = renameProblem(f);
+  if (!from)
+    return (
+      <div className="btnrow">
+        <button className="btn light" onClick={() => void lookUpAgain(api, [userId])}>
+          Rename: load their handle
+        </button>
+      </div>
+    );
+  if (!open)
+    return (
+      <div className="btnrow">
+        <button className="btn light" onClick={() => setOpen(true)}>
+          Rename @{from}…
+        </button>
+      </div>
+    );
+  const rename = () =>
+    ifConfirmed(renameConfirm({ from, newHandle: f.newHandle }), () =>
+      act.run(() => api.renameHandle(userId, renameBody(f, from, reportId)), (r) => `Renamed to @${r.to}`).then((r) => {
+        if (!r) return;
+        renamedTo(userId, r.to);
+        setF({ newHandle: "", reason: "" });
+        setOpen(false);
+        onDone();
+      }),
+    );
+  return (
+    <>
+      <label className="field">
+        New handle (leave empty for a neutral one)
+        <input value={f.newHandle} maxLength={16} autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setF({ ...f, newHandle: e.target.value })} placeholder="neighbour_12345" />
+      </label>
+      <label className="field">
+        Reason the resident reads
+        <input value={f.reason} maxLength={HANDLE_RENAME.reasonMaxChars} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="Your handle named a real person." />
+      </label>
+      {(f.reason.trim() || f.newHandle.trim()) && problem && <p className="muted">{problem}</p>}
+      <div className="btnrow">
+        <button className="btn danger" disabled={!!problem || act.pending} onClick={rename}>
+          Rename
+        </button>
+        <button className="btn light" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
     </>
   );
 }
@@ -188,6 +265,48 @@ function Appeals({ api, act }: { api: Api; act: Act }) {
               </button>
               <button className="btn light" disabled={!note[id]?.trim()} onClick={() => act.run(() => api.decideAppeal(id, false, note[id]!), "Upheld").then(() => appeals.reload())}>
                 Uphold
+              </button>
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+// Residents' appeals against renames, each with the rename it's about. Give
+// it back renames them to their old handle (a new notice tells them); keep
+// leaves it. Either way they read the note. An appeal against your own rename
+// goes to someone else.
+function RenameAppeals({ api, act }: { api: Api; act: Act }) {
+  const appeals = useLoad(() => api.staffRenameAppeals(), [api]);
+  const [note, setNote] = useState<Record<string, string>>({});
+  useWho(api, (appeals.data ?? []).map((a) => a.renamedBy));
+  if (!appeals.data) return <Loading error={appeals.error} retry={appeals.reload} />;
+  return (
+    <>
+      {appeals.data.length === 0 && <p className="muted">No open rename appeals.</p>}
+      {appeals.data.map((a) => {
+        const problem = renameDecisionProblem(note[a.id] ?? "");
+        const decide = (overturn: boolean) =>
+          act.run(() => api.decideRenameAppeal(a.id, overturn, note[a.id]!.trim()), overturn ? `Gave @${a.from} back` : `Kept @${a.to}`).then((r) => r && appeals.reload());
+        return (
+          <section className="card" key={a.id}>
+            <p>
+              <b>Rename</b> @{a.from} → @{a.to} by {handleOf(a.renamedBy)}: {a.reason}
+            </p>
+            <p className="notice">"{a.text}"</p>
+            <label className="field">
+              Note (they read it)
+              <input value={note[a.id] ?? ""} maxLength={HANDLE_RENAME.reasonMaxChars} onChange={(e) => setNote({ ...note, [a.id]: e.target.value })} />
+            </label>
+            {note[a.id]?.trim() && problem && <p className="muted">{problem}</p>}
+            <div className="btnrow">
+              <button className="btn" disabled={!!problem || act.pending} onClick={() => ifConfirmed(`Give @${a.from} back to them? They read your note.`, () => void decide(true))}>
+                Give @{a.from} back
+              </button>
+              <button className="btn light" disabled={!!problem || act.pending} onClick={() => void decide(false)}>
+                Keep @{a.to}
               </button>
             </div>
           </section>
@@ -340,8 +459,22 @@ function Controls({ api, act }: { api: Api; act: Act }) {
   const [country, setCountry] = useState("");
   const [ratio, setRatio] = useState("");
   const [r, setR] = useState({ userId: "", kind: "chat_mute", hours: "24", reason: "" });
+  // Rename a resident by the handle staff saw, wherever they saw it.
+  const [find, setFind] = useState("");
+  const [found, setFound] = useState<{ userId: string; handle: string } | null>(null);
+  const lookFor = handleToFind(find);
   return (
     <>
+      <section className="card">
+        <h2>Rename a resident</h2>
+        <div className="row">
+          <input className="ask" value={find} maxLength={16} autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => (setFind(e.target.value), setFound(null))} placeholder="@handle" />
+          <button className="btn" disabled={!lookFor || act.pending} onClick={() => act.run(() => api.resident(lookFor!)).then((p) => p && setFound({ userId: p.userId, handle: p.handle }))}>
+            Find
+          </button>
+        </div>
+        {found && <Rename key={found.userId} api={api} act={act} userId={found.userId} from={found.handle} onDone={() => (setFound(null), setFind(""))} />}
+      </section>
       <section className="card">
         <h2>Real trades by country</h2>
         <div className="row">
