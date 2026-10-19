@@ -1,5 +1,5 @@
 import { HANDLE_RENAME, type RandomInt, ResidentInputError, containsBlockedWord, cryptoRandomInt, handleHeldUntil, neutralHandle, renameReason, validateHandle } from "@bp/core";
-import { and, eq, isNull, max, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, max, ne, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { enqueueModeration, isStaff } from "./safety";
 import { handleNotices, handleRenames, moderationItems, reports, residents } from "./schema";
@@ -145,11 +145,17 @@ export async function renameHandle(
           // Two renames before they look: they last knew the first one's old handle.
           set: { renameId: row!.id, fromHandle: sql`CASE WHEN ${handleNotices.seenAt} IS NULL THEN ${handleNotices.fromHandle} ELSE excluded.from_handle END`, seenAt: null },
         });
-      // The old handle's flags are dealt with: they leave the staff queue.
-      await tx
-        .update(moderationItems)
-        .set({ reviewedAt: now, reviewedBy: me, review: "removed" })
-        .where(and(eq(moderationItems.kind, "resident_handle"), eq(moderationItems.ref, userId), isNull(moderationItems.reviewedAt), ne(moderationItems.status, "clean")));
+      // The old handle's flags are dealt with: they leave the staff queue. An
+      // item the AI check is reading right now is skipped, not waited for: the
+      // batch holds it while it waits on the provider, and may then take the
+      // display name down, which needs the resident row this rename holds.
+      // Its verdict is on the old handle, so a Rename from it finds them renamed.
+      const open = tx
+        .select({ id: moderationItems.id })
+        .from(moderationItems)
+        .where(and(eq(moderationItems.kind, "resident_handle"), eq(moderationItems.ref, userId), isNull(moderationItems.reviewedAt), ne(moderationItems.status, "clean")))
+        .for("no key update", { skipLocked: true });
+      await tx.update(moderationItems).set({ reviewedAt: now, reviewedBy: me, review: "removed" }).where(inArray(moderationItems.id, open));
       if (reportId) {
         await tx
           .update(reports)

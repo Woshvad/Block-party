@@ -287,6 +287,47 @@ describe("moderation around a rename", () => {
     await renameHandle(db, mod, v, { reason: REASON, from: await handleOf(v) });
     expect((await getResident(db, v))!.name).toBe("Kept Name");
   });
+
+  it("a rename doesn't wait on the handle's item while the AI check reads it, so the two can't deadlock", async () => {
+    const mod = await staffer();
+    const old = uniq();
+    const u = await residentAs(old, "Rude Name");
+    const [held] = await client`INSERT INTO moderation_items (kind, ref, author_id, text) VALUES ('resident_handle', ${u}, ${u}, ${old}) RETURNING id`;
+    // The minute's batch has claimed the handle's item and waits on the provider.
+    const batch = await client.reserve();
+    let renaming: Promise<string> = Promise.resolve("not started");
+    try {
+      await batch`BEGIN`;
+      await batch`SELECT id FROM moderation_items WHERE id = ${held!.id} FOR NO KEY UPDATE`;
+      const [{ pid }] = (await batch`SELECT pg_backend_pid() AS pid`) as unknown as [{ pid: number }];
+      let done = false;
+      renaming = renameHandle(db, mod, u, { reason: REASON, from: old })
+        .then(
+          () => "OK",
+          (e) => (e instanceof HandleRenameError ? e.code : String(e?.cause?.code ?? e)),
+        )
+        .finally(() => (done = true));
+      const deadline = Date.now() + 10_000;
+      // loop-bound: the 10-second deadline.
+      while (!done && Date.now() < deadline) {
+        const [w] = await client`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`;
+        if (w!.n > 0) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      // Then the provider flags the display name, and the batch takes it down
+      // to the handle (takeDownFlagged), which needs the resident's row.
+      await batch`UPDATE residents SET name = handle WHERE user_id = ${u} AND name = 'Rude Name'`;
+      await batch`COMMIT`;
+    } finally {
+      await batch`ROLLBACK`.catch(() => {});
+      batch.release();
+    }
+    expect(await renaming).toBe("OK");
+    const r = await getResident(db, u);
+    expect([r!.handle === old, r!.name]).toEqual([false, r!.handle]);
+    // The batch's item is left to the batch, which is about to record its verdict.
+    expect((await client`SELECT reviewed_at FROM moderation_items WHERE id = ${held!.id}`)[0]!.reviewed_at).toBeNull();
+  });
 });
 
 describe("races", () => {
