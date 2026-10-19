@@ -92,6 +92,12 @@ describe("the Roof's boards", () => {
     ]);
     expect(mine.rightList.bot).toMatchObject({ rank: 5 });
 
+    // The cast can be muted like anyone: then the bot's row and its line go too.
+    await muteUser(db, other!, BOT);
+    const muted = await roofBoards(db, other!, { now: after });
+    expect(muted.rightList.bot).toBeNull();
+    expect(muted.rightList.rows.map((r) => r.handle)).not.toContain("NOTHING-9000");
+
     // Never an id, for anyone in it or reading it (the rows' keys are pinned above).
     const json = JSON.stringify([everyone, mine]);
     for (const u of [reader, other, a, b, c, d, e, BOT]) expect(json).not.toContain(u!);
