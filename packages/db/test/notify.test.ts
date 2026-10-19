@@ -1,4 +1,4 @@
-import { FAREWELL, NOTIFY, TEMPLATES } from "@bp/core";
+import { DAILY_TOPIC_TEMPLATES, FAREWELL, NOTIFY } from "@bp/core";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -117,7 +117,8 @@ describe("sending", () => {
     await run(sender, new Date(t + 20 * H));
     await run(sender, new Date(t + 20 * H));
     expect(to(u)).toHaveLength(1);
-    expect(TEMPLATES.daily).toContain(to(u)[0]);
+    // They haven't searched for today's clue, so the daily ping leads with it.
+    expect(DAILY_TOPIC_TEMPLATES.clue).toContain(to(u)[0]);
   });
 
   it("3 a day at most, by local day, all kinds together", async () => {

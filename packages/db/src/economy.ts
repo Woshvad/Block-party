@@ -44,6 +44,8 @@ export class EconomyError extends Error {
   }
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function lockResident(tx: Db, userId: string) {
   await tx.execute(sql`SELECT 1 FROM users WHERE id = ${userId} FOR NO KEY UPDATE`);
   const [r] = await tx.select({ createdAt: residents.createdAt }).from(residents).where(eq(residents.userId, userId));
@@ -268,6 +270,31 @@ export async function currentShift(db: Db, userId: string, opts: { now?: Date } 
   };
 }
 
+// Why this resident can't take an away shift right now, or null if they can.
+// Collecting it and the "ready" ping both ask here, so they never disagree.
+async function awayShiftBlock(tx: Db, userId: string, now: Date, day: string): Promise<EconomyError | null> {
+  const [u] = await tx.select({ pon: users.proofOfNeighbourAt }).from(users).where(eq(users.id, userId));
+  if (!u?.pon) return new EconomyError("NOT_PON", "away shifts need Proof of Neighbour");
+  const [recent] = await tx
+    .select({ at: dailyGm.saidAt })
+    .from(dailyGm)
+    .where(and(eq(dailyGm.userId, userId), gte(dailyGm.saidAt, new Date(now.getTime() - 24 * 3_600_000)), sql`${dailyGm.saidAt} <= ${now.toISOString()}::timestamptz`))
+    .limit(1);
+  if (!recent) return new EconomyError("NO_RECENT_GM", "say gm first; away shifts pay only within 24 hours of a gm");
+  const today = await shiftsOn(tx, userId, day);
+  if (today.some((s) => s.kind === "away")) return new EconomyError("DAILY_CAP", "one away shift a day");
+  if (today.length >= SHIFT.perDay) return new EconomyError("DAILY_CAP", `${SHIFT.perDay} shifts a day`);
+  return null;
+}
+
+// Whether this resident could collect an away shift right now (anything that
+// isn't a resident's id simply can't).
+export async function awayShiftReady(db: Db, userId: unknown, opts: { now?: Date } = {}): Promise<boolean> {
+  const now = opts?.now ?? new Date();
+  if (typeof userId !== "string" || !UUID.test(userId) || !(now instanceof Date) || Number.isNaN(now.getTime())) return false;
+  return (await awayShiftBlock(db, userId, now, cityDay(now))) === null;
+}
+
 // The away shift: Proof of Neighbour only, needs a gm in the last 24 hours,
 // collected by hand, and takes one of the 2 daily slots at half pay.
 export async function collectAwayShift(db: Db, userId: string, opts: { now?: Date } = {}) {
@@ -275,17 +302,9 @@ export async function collectAwayShift(db: Db, userId: string, opts: { now?: Dat
   const day = cityDay(now);
   return db.transaction(async (tx) => {
     await lockResident(tx, userId);
-    const [u] = await tx.select({ pon: users.proofOfNeighbourAt }).from(users).where(eq(users.id, userId));
-    if (!u?.pon) throw new EconomyError("NOT_PON", "away shifts need Proof of Neighbour");
-    const [recent] = await tx
-      .select({ at: dailyGm.saidAt })
-      .from(dailyGm)
-      .where(and(eq(dailyGm.userId, userId), gte(dailyGm.saidAt, new Date(now.getTime() - 24 * 3_600_000)), sql`${dailyGm.saidAt} <= ${now.toISOString()}::timestamptz`))
-      .limit(1);
-    if (!recent) throw new EconomyError("NO_RECENT_GM", "say gm first; away shifts pay only within 24 hours of a gm");
+    const block = await awayShiftBlock(tx, userId, now, day);
+    if (block) throw block;
     const today = await shiftsOn(tx, userId, day);
-    if (today.some((s) => s.kind === "away")) throw new EconomyError("DAILY_CAP", "one away shift a day");
-    if (today.length >= SHIFT.perDay) throw new EconomyError("DAILY_CAP", `${SHIFT.perDay} shifts a day`);
     const [s] = await tx
       .insert(shifts)
       .values({ userId, cityDay: day, slot: today.length + 1, kind: "away", startedAt: now, endsAt: now, pay: SHIFT.awayPay })
