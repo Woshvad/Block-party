@@ -215,14 +215,21 @@ export function polymarketProvider(
     return res?.ok ? await res.json().catch(() => null) : null;
   };
 
+  // Gamma's answers are cached for 5 minutes by their whole address
+  // (Cache-Control: max-age=300), and the poll asks the same things minute
+  // after minute: without the poll's own time in each address, the ticks and
+  // the closed lookups could lag the plan's 30 to 60 seconds by up to 5
+  // minutes. One fresh request per address per poll, as before.
+  const fresh = (now: Date) => `poll=${now.getTime()}`;
+
   // Gamma's closed or trading markets with these ids, 100 a request. A
   // request that fails is logged and just waits for the next poll.
-  async function lookUp(ids: readonly string[], closed: boolean, what: string): Promise<GammaMarket[]> {
+  async function lookUp(ids: readonly string[], closed: boolean, what: string, now: Date): Promise<GammaMarket[]> {
     const chunks: string[][] = [];
     for (let i = 0; i < ids.length; i += IDS_PER_LOOKUP) chunks.push(ids.slice(i, i + IDS_PER_LOOKUP));
     const found = await Promise.all(
       chunks.map(async (chunk) => {
-        const body = await getJson(`${base}/markets?closed=${closed}&limit=${IDS_PER_LOOKUP}&${chunk.map((id) => `id=${encodeURIComponent(id)}`).join("&")}`);
+        const body = await getJson(`${base}/markets?closed=${closed}&limit=${IDS_PER_LOOKUP}&${chunk.map((id) => `id=${encodeURIComponent(id)}`).join("&")}&${fresh(now)}`);
         if (!Array.isArray(body)) {
           log(`polymarket: looking up ${chunk.length} ${what} failed`);
           return [];
@@ -239,7 +246,7 @@ export function polymarketProvider(
     const asked = byGammaId(knownToLookUp([...all.values()], now));
     if (all.size > asked.size) log(`polymarket: ${all.size} known markets, looking up ${asked.size} this poll`);
     const out: FeedMarket[] = [];
-    for (const m of await lookUp([...asked.keys()], true, "known markets")) {
+    for (const m of await lookUp([...asked.keys()], true, "known markets", now)) {
       const k = asked.get(String(m?.id));
       if (!k) continue;
       const outcome = closedOutcome(m);
@@ -260,7 +267,7 @@ export function polymarketProvider(
     const live = byGammaId(known.filter((k) => k.live).slice(0, MAX_LIVE_LOOKUPS));
     if (live.size === 0) return [];
     const out: FeedMarket[] = [];
-    for (const m of await lookUp([...live.keys()], false, "live markets")) {
+    for (const m of await lookUp([...live.keys()], false, "live markets", now)) {
       const k = live.get(String(m?.id));
       const f = k && feedMarketOf(m, k.category, k.ladder, now, MIN_PRICE, skipped);
       if (f) out.push(f);
@@ -277,7 +284,7 @@ export function polymarketProvider(
       const [listed, closed, live] = await Promise.all([
         Promise.all(
           (Object.entries(POLYMARKET_TAGS) as [MarketCategory, string][]).map(async ([category, tag]) => {
-            const body = await getJson(`${base}/events?tag_slug=${tag}&active=true&closed=false&order=volume24hr&ascending=false&limit=20`);
+            const body = await getJson(`${base}/events?tag_slug=${tag}&active=true&closed=false&order=volume24hr&ascending=false&limit=20&${fresh(now)}`);
             if (!Array.isArray(body)) {
               failed++;
               return [];

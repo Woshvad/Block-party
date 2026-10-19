@@ -187,6 +187,19 @@ describe("Polymarket provider on recorded payloads", () => {
     expect(lookups[0]!.searchParams.getAll("id")).toEqual(["5046295", "5551089", "4266840", "5227663", "5330080"]);
   });
 
+  it("puts the poll's time in every address, so Gamma's 5-minute cache can't serve an old answer", async () => {
+    const urls: string[] = [];
+    const p = polymarketProvider({ fetch: gamma({ urls }), log: () => {} });
+    await p.fetch(recordedAt, [known("5046295"), known("5330080", { live: true })]);
+    const later = new Date(recordedAt.getTime() + 60_000);
+    await p.fetch(later, [known("5046295"), known("5330080", { live: true })]);
+    const polls = urls.map((u) => new URL(u).searchParams.get("poll"));
+    // The listing, the closed lookup and the live lookup, both polls.
+    expect(new Set(urls.map((u) => `${new URL(u).pathname}?closed=${new URL(u).searchParams.get("closed")}`)).size).toBe(3);
+    expect(polls.every((t) => t === String(recordedAt.getTime()) || t === String(later.getTime()))).toBe(true);
+    expect(polls.filter((t) => t === String(later.getTime()))).toHaveLength(urls.length / 2);
+  });
+
   it("a market's result wins over a stale listing of it; nothing known means no lookup", async () => {
     const urls: string[] = [];
     const p = polymarketProvider({ fetch: gamma({ urls, lookup: (ids) => ok(ids.includes("5330080") ? [{ ...resolvedYes, id: "5330080" }] : []) }), log: () => {} });
