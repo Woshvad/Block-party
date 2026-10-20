@@ -1,5 +1,5 @@
 import { HASH_BROWN_ALPHA, SIZE_GROUPS, nextBell } from "@bp/core";
-import type { CityHall, CityMarket, MarketRow, Roof } from "./api";
+import type { CityHall, CityMarket, InPlayRow, MarketRow, Roof } from "./api";
 import { until } from "./clock";
 
 // What the big screens in the rooms show: live boards built from the API.
@@ -73,18 +73,24 @@ const hallMarkets = (city: readonly CityMarket[], now: number) =>
     .slice(0, CITY_ROWS);
 const cityRow = (m: CityMarket, now: number): BoardRow => ({ left: `City · ${clip(m.question, 44)}`, right: `GM · locks in ${until(m.locksAt, now)}`, tone: "plain" });
 
-// The Watch Party Hall's big screen: tonight's matches, meaning those that
-// start before the bell. With none tonight it shows what's coming up, and
-// says so: a match next month is never "on tonight". The Hall's City markets
-// share the screen, under the matches, as the plan has them.
-export function matchBoard(markets: readonly MarketRow[], now: number, feed: FeedStatus | null, city: readonly CityMarket[] = []): Board {
+// A match in play: its live price, which takes in-play calls here (half the Aura).
+const IN_PLAY_ROWS = 3;
+const liveRow = (m: InPlayRow): BoardRow => ({ left: `LIVE · ${clip(m.question, 45)}`, right: `${m.price}% YES · in play`, tone: "plain" });
+
+// The Watch Party Hall's big screen: the matches in play first (three at
+// most), then tonight's, meaning those that start before the bell. With none
+// tonight it shows what's coming up, and says so: a match next month is never
+// "on tonight". The Hall's City markets share the screen, under the matches,
+// as the plan has them.
+export function matchBoard(markets: readonly MarketRow[], now: number, feed: FeedStatus | null, city: readonly CityMarket[] = [], inPlay: readonly InPlayRow[] = []): Board {
   const sports = open(markets, now).filter((m) => m.category === "sports");
   const bell = nextBell(new Date(now)).getTime();
   const tonight = sports.filter((m) => Date.parse(m.freezesAt) <= bell);
   const shown = tonight.length ? tonight : sports;
-  const title = tonight.length ? "WATCH PARTY · ON TONIGHT" : sports.length ? "WATCH PARTY · COMING UP" : "WATCH PARTY";
+  const live = inPlay.slice(0, IN_PLAY_ROWS).map(liveRow);
+  const title = live.length ? "WATCH PARTY · LIVE NOW" : tonight.length ? "WATCH PARTY · ON TONIGHT" : sports.length ? "WATCH PARTY · COMING UP" : "WATCH PARTY";
   const ours = hallMarkets(city, now).map((m) => cityRow(m, now));
-  const rows = shown.slice(0, ROWS - ours.length).map((m) => oddsRow(m, now));
+  const rows = [...live, ...shown.slice(0, Math.max(0, ROWS - ours.length - live.length)).map((m) => oddsRow(m, now))];
   return { title, rows: [...(rows.length ? rows : [{ left: "No match on right now. Grab a beanbag.", tone: "plain" as const }]), ...ours], ...feedFoot(feed, now) };
 }
 

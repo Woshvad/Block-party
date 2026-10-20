@@ -157,6 +157,7 @@ import {
   runNotificationBatch,
   queueDailyPings,
   feedStatus,
+  inPlayMarkets,
   makeCall,
   marketView,
   myCall,
@@ -1063,9 +1064,15 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/tower/feed", auth, async (c) => c.json(await feedStatus(db, opts())));
   app.get("/v1/tower/tickets", auth, async (c) => c.json(await myTickets(db, c.get("userId"), opts())));
   app.get("/v1/tower/markets/:id", auth, async (c) => c.json(await marketView(db, c.get("userId"), uuid(c, "id"), opts())));
+  // The Watch Party Hall's matches in play, at their live price. In-play
+  // calls go to /v1/tower/calls with inPlay: true, from inside the Hall.
+  app.get("/v1/tower/in-play", auth, async (c) => c.json(await inPlayMarkets(db)));
   app.post("/v1/tower/calls", auth, async (c) => {
     const b = await body(c);
-    return c.json(await makeCall(db, c.get("userId"), { marketId: b.marketId, side: b.side, chance: b.chance, seenPrice: b.seenPrice, via: b.via, viaUserId: b.viaUserId }, opts()), 201);
+    return c.json(
+      await makeCall(db, c.get("userId"), { marketId: b.marketId, side: b.side, chance: b.chance, seenPrice: b.seenPrice, via: b.via, viaUserId: b.viaUserId, inPlay: b.inPlay }, opts()),
+      201,
+    );
   });
   app.get("/v1/tower/calls/:id", auth, async (c) => {
     const k = await myCall(db, c.get("userId"), uuid(c, "id"));
@@ -1080,6 +1087,7 @@ export function createApp(cfg: AppConfig) {
       lockedPrice: k.lockedPrice,
       lockedAt: k.lockedAt,
       half: k.half,
+      inPlay: k.inPlay,
       via: k.via,
       stamp: r?.stamp ?? null,
       aura: r?.aura ?? null,

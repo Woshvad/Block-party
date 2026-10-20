@@ -5,7 +5,7 @@ import { type TowerMoment, hasScreen } from "@bp/core";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
-import { ApiError, type Api, type CityHall, type CityMarket, type Home, type Look, type MarketRow, type Roof } from "./api";
+import { ApiError, type Api, type CityHall, type CityMarket, type Home, type InPlayRow, type Look, type MarketRow, type Roof } from "./api";
 import ChibiCrowd, { type ChibiPerson } from "./chibi/Crowd";
 import Interior from "./Interior";
 import { layoutFor, planFor } from "./interiors";
@@ -25,6 +25,7 @@ import { haptic } from "./telegram";
 import { useToast } from "./useToast";
 import { type Board, type FeedKey, type FeedStatus, type RoofFeed, dinerBoard, feedAfter, hallBoard, matchBoard, oddsBoard, roofBoards, roofRefreshIn } from "./roomfeeds";
 import MomentCard from "./MomentCard";
+import InPlayStrip from "./InPlayStrip";
 import { momentBoard } from "./moments";
 
 const CallSheet = dynamic(() => import("./CallSheet"), { ssr: false });
@@ -136,9 +137,10 @@ function Follow({ d, children, scale }: { d: Drawn; children: React.ReactNode; s
 // The live boards for this room's screens: fetched on entry and every minute.
 // The odds come with the feed's status, so a paused feed dims the wall. A
 // Tower moment takes over the Watch Party's screen while it's on; the Hall's
-// own City markets share it otherwise. The Roof's leaderboards only move at
-// the bell, so they're fetched less often (see roofRefreshIn).
-function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment | null): Partial<Record<FeedKey, Board>> {
+// own City markets share it otherwise, under the matches in play. The Roof's
+// leaderboards only move at the bell, so they're fetched less often (see
+// roofRefreshIn).
+function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment | null, inPlay: readonly InPlayRow[]): Partial<Record<FeedKey, Board>> {
   const [odds, setOdds] = useState<MarketRow[] | null>(null);
   const [feed, setFeed] = useState<FeedStatus | null>(null);
   const [hall, setHall] = useState<CityHall | null>(null);
@@ -189,13 +191,38 @@ function useRoomFeeds(api: Api, place: string, now: number, moment: TowerMoment 
   return useMemo(() => {
     const at = minute * 60_000;
     return {
-      ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed, city) } : {}),
+      ...(odds ? { odds: oddsBoard(odds, at, feed), match: matchBoard(odds, at, feed, city, inPlay) } : {}),
       ...(moment ? { match: momentBoard(moment, feed?.credit ?? null) } : {}),
       ...(hall ? { hall: hallBoard(hall, at) } : {}),
       ...(place === "roof" ? roofBoards(roof, at) : {}),
       diner: dinerBoard(new Date(at).toISOString().slice(0, 10)),
     };
-  }, [odds, feed, hall, city, roof, place, minute, moment]);
+  }, [odds, feed, hall, city, roof, place, minute, moment, inPlay]);
+}
+
+// The Watch Party Hall's matches in play, every 30 seconds while you're there.
+// A failed refresh clears them: a live price nobody can refresh is no price
+// to call at.
+const IN_PLAY_REFRESH_MS = 30_000;
+function useInPlay(api: Api, place: string): InPlayRow[] {
+  const [rows, setRows] = useState<InPlayRow[]>([]);
+  useEffect(() => {
+    setRows([]);
+    if (place !== "watch_party") return;
+    let live = true;
+    const load = () =>
+      void api
+        .inPlay()
+        .then((r) => live && setRows(r))
+        .catch(() => live && setRows([]));
+    load();
+    const t = setInterval(load, IN_PLAY_REFRESH_MS);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [api, place]);
+  return rows;
 }
 
 export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api; place: string; onLeave: () => void; me?: string; crewId?: string | null }) {
@@ -239,7 +266,9 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   // The Watch Party's big moments (only a place with a screen gets them),
   // less any you've closed; a market's call sheet opened from one.
   const [hiddenMoments, setHiddenMoments] = useState<string[]>([]);
-  const [calling, setCalling] = useState<string | null>(null);
+  // A market's call sheet, opened from a moment or (in play) from the strip.
+  const [calling, setCalling] = useState<{ id: string; inPlay: boolean } | null>(null);
+  const inPlay = useInPlay(api, place);
   const moments = hasScreen(place) ? liveMoments(room, now).filter((m) => !hiddenMoments.includes(m.id)) : [];
   // A buzz when a new one lands (not when closing one uncovers an older one).
   const newestMoment = hasScreen(place) ? room.moments[0]?.id : undefined;
@@ -248,7 +277,7 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
   }, [newestMoment]);
 
   const layout = useMemo(() => layoutFor(place), [place]);
-  const feeds = useRoomFeeds(api, place, now, moments[0] ?? null);
+  const feeds = useRoomFeeds(api, place, now, moments[0] ?? null, inPlay);
   // What blocks walking here: the place's layout, or a home's floor furniture.
   const plan = useMemo<Plan>(() => {
     const p = planFor(place);
@@ -431,11 +460,12 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
           onReact={(emote) => {
             if (send({ t: "emote", emote })) haptic("light");
           }}
-          onCall={setCalling}
+          onCall={(id) => setCalling({ id, inPlay: false })}
           onDismiss={(id) => setHiddenMoments((h) => [...h, id].slice(-20))}
         />
       )}
-      {calling && <CallSheet api={api} marketId={calling} onClose={() => setCalling(null)} onCalled={() => {}} />}
+      {!clean && <InPlayStrip rows={inPlay} onCall={(id) => setCalling({ id, inPlay: true })} />}
+      {calling && <CallSheet api={api} marketId={calling.id} inPlay={calling.inPlay} onClose={() => setCalling(null)} onCalled={() => {}} />}
       {err && <div className="toast bad" role="alert">{err.message}</div>}
       {napMsg && <div className="toast" role="status">{napMsg}</div>}
       {person && <Person api={api} userId={person} place={place} onClose={() => setPerson(null)} />}

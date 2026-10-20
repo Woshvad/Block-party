@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { TOWER, auraCenti, chanceOnSide, median, mockPrice, mockProvider, oddsCredit, sideOpen, sliderStart, ticketsAfter, vibeGap } from "../src";
+import { TOWER, auraCenti, chanceOnSide, median, mockLivePrice, mockPrice, mockProvider, oddsCredit, sampleMarkets, sideOpen, sliderStart, ticketsAfter, vibeGap } from "../src";
 
 describe("Aura", () => {
   it("matches the plan's worked examples", () => {
@@ -128,6 +128,47 @@ describe("the mock feed", () => {
     const after = await p.fetch(new Date("2029-01-01T23:00Z"));
     expect(typeof after[0]!.resolved).toBe("boolean");
     expect(after[1]).toMatchObject({ resolved: null, voided: true });
+  });
+
+  it("plays a match on from kickoff until it settles, at a price that carries on from the freeze", async () => {
+    const match = { ...spec, externalId: "match", category: "sports" as const, inPlay: true };
+    const p = mockProvider(() => [match, { ...match, externalId: "plain", inPlay: undefined }, { ...match, externalId: "off", voided: true }]);
+    const before = await p.fetch(new Date("2029-01-01T19:59Z"));
+    expect(before.some((m) => m.inPlay)).toBe(false);
+    // At kickoff the live price is where the frozen one stopped.
+    const kickoff = await p.fetch(spec.freezesAt);
+    expect(kickoff.find((m) => m.externalId === "match")).toMatchObject({ inPlay: true, price: mockPrice(match, spec.freezesAt) });
+    // Later it moves on its own, and only the match plays on.
+    const prices = new Set<number>();
+    for (let min = 1; min <= 90; min += 10) {
+      const fs = await p.fetch(new Date(spec.freezesAt.getTime() + min * 60_000));
+      expect(fs.filter((m) => m.inPlay).map((m) => m.externalId)).toEqual(["match"]);
+      prices.add(fs.find((m) => m.externalId === "match")!.price);
+      expect(mockLivePrice(match, new Date(spec.freezesAt.getTime() + min * 60_000))).toBe(fs.find((m) => m.externalId === "match")!.price);
+    }
+    expect(prices.size).toBeGreaterThan(1);
+    // Settled: a result, no longer in play.
+    const after = await p.fetch(new Date("2029-01-01T22:00Z"));
+    expect(after.find((m) => m.externalId === "match")).toMatchObject({ resolved: expect.any(Boolean) });
+    expect(after.some((m) => m.inPlay)).toBe(false);
+  });
+
+  it("the sample feed has a pickup game in play most of the day, the same for every poller", async () => {
+    const p = mockProvider(() => sampleMarkets(new Date()));
+    let playing = 0;
+    for (let min = 0; min < 24 * 60; min += 15) {
+      const at = new Date(Date.UTC(2029, 0, 1) + min * 60_000);
+      const fs = await mockProvider(() => sampleMarkets(at)).fetch(at);
+      const live = fs.filter((m) => m.inPlay && m.externalId.startsWith("sample:pickup:"));
+      expect(live.length).toBeLessThanOrEqual(1);
+      if (live.length) playing++;
+      // Every pickup game is a sports match, never a ladder.
+      for (const m of fs.filter((x) => x.externalId.startsWith("sample:pickup:"))) expect(m).toMatchObject({ category: "sports", ladder: null });
+    }
+    expect(playing / 96).toBeGreaterThan(0.6); // two hours in every three
+    const at = new Date("2029-01-01T07:10:00Z");
+    expect(sampleMarkets(at).map((s) => s.externalId)).toEqual(sampleMarkets(new Date("2029-01-01T07:50:00Z")).map((s) => s.externalId));
+    expect(p.source).toBe("mock");
   });
 
   it("is credited as sample odds, never as Polymarket's", () => {

@@ -786,3 +786,18 @@ body:has(.home-clean) .app-navigation { display: none; }
 @keyframes moment-ring { 0% { opacity:.9; transform:scale(.4); } 100% { opacity:0; transform:scale(14); } }
 @media (prefers-reduced-motion: reduce) { .moment-card, .moment-burst::before, .moment-burst::after { animation:none; } .moment-card { transition:none; } }
 @media(max-width:899px){.social-room-demo .moment-card ~ .social-preview-notice { top:430px; }}
+/* The Watch Party Hall's matches in play: over the room, under the top bar (a big moment covers it while it shows). */
+.inplay-strip { position:fixed; z-index:6; top:calc(var(--safe-top) + 72px); left:16px; right:16px; max-width:420px; margin:auto; padding:10px 12px; border-radius:18px; background:#15233bf2; color:#f3f7ff; box-shadow:0 10px 30px #0b162a40; }
+.social-room-connection ~ .inplay-strip { top:calc(var(--safe-top) + 130px); }
+.inplay-eyebrow { display:flex; align-items:center; gap:6px; margin:0 0 6px; font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:#ffb4a6; }
+.inplay-dot { width:8px; height:8px; border-radius:50%; background:#ff5a45; }
+.inplay-strip ul { margin:0; padding:0; list-style:none; display:grid; gap:4px; }
+.inplay-strip li { display:flex; align-items:center; gap:10px; min-height:44px; }
+.inplay-q { flex:1; min-width:0; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.inplay-price { font-size:15px; font-variant-numeric:tabular-nums; }
+.inplay-strip button { min-height:40px; padding:0 14px; border:0; border-radius:12px; background:#f2d04b; color:#1d2433; font:inherit; font-size:13px; font-weight:800; cursor:pointer; }
+.inplay-strip button:focus-visible { outline:3px solid #f2d04b; outline-offset:2px; }
+.callsheet .inplay-note { margin:8px 0 0; font-size:12px; }
+@media(min-width:900px){ .inplay-strip { left:24px; right:auto; width:380px; margin:0; } }
+@media (prefers-reduced-motion: no-preference) { .inplay-dot { animation:inplay-pulse 1.6s ease-in-out infinite; } }
+@keyframes inplay-pulse { 50% { opacity:.35; } }

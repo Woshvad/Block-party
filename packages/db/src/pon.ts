@@ -141,6 +141,23 @@ export async function recordVisit(db: Db, input: { userId: string; room: string;
   if (open && input.at >= open.joinedAt) await db.update(roomVisits).set({ leftAt: input.at }).where(eq(roomVisits.id, open.id));
 }
 
+// Whether a resident is in a place at `at` (any copy of it), by the visits the
+// rooms report. As everywhere else, a visit counts for its first
+// PON.openVisitCapHours at most, so one whose end never arrived doesn't keep
+// them there for good.
+export async function inRoom(db: Db, userId: string, place: string, at: Date): Promise<boolean> {
+  const cap = `${PON.openVisitCapHours} hours`;
+  const [r] = await db.execute<{ here: boolean }>(sql`
+    SELECT EXISTS (
+      SELECT 1 FROM room_visits v
+      WHERE v.user_id = ${userId} AND split_part(v.room, '#', 1) = ${place}
+        AND v.joined_at <= ${at.toISOString()}::timestamptz
+        AND v.joined_at > ${at.toISOString()}::timestamptz - ${cap}::interval
+        AND (v.left_at IS NULL OR v.left_at >= ${at.toISOString()}::timestamptz)
+    ) AS here`);
+  return !!r?.here;
+}
+
 // Distinct residents you've been in the same room copy with for a minute or more.
 // Every visit counts for its first 6 hours at most (PON.openVisitCapHours, the
 // same cap as a visit whose end never arrived), so two visits can only overlap

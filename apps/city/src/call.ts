@@ -29,12 +29,22 @@ export function callsOpen(m: { status: string; inFeed?: boolean; freezesAt: stri
   return m.status === "open" && m.inFeed !== false && Date.parse(m.freezesAt) > now;
 }
 
+// Whether a match takes in-play calls (in the Watch Party Hall): frozen at
+// kickoff, and carried in play, at a live price, by the latest poll.
+export function inPlayOpen(m: { status: string; inPlay?: boolean }): boolean {
+  return m.status === "frozen" && m.inPlay === true;
+}
+
 // What this call would score either way, in whole Aura (the API keeps hundredths).
-export function auraIf(world: number, chance: number): { yes: number; no: number } {
-  return { yes: auraCenti(true, world, chance) / 100, no: auraCenti(false, world, chance) / 100 };
+// half: an in-play call (or one close to the freeze) scores half.
+export function auraIf(world: number, chance: number, half = false): { yes: number; no: number } {
+  return { yes: auraCenti(true, world, chance, half) / 100, no: auraCenti(false, world, chance, half) / 100 };
 }
 
 export const TIER_LABEL: Record<string, string> = { lock: "Lock", coin_flip: "Coin flip", spicy: "Spicy", long_shot: "Long shot" };
+
+// An in-play call waits longer: 2 minutes, then the next tick.
+export const IN_PLAY_PENDING_LABEL = "locks in about 2 minutes, if the price holds";
 
 export const CALL_STATE_LABEL: Record<string, string> = {
   pending: "waiting for the next tick",

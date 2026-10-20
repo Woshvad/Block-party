@@ -133,6 +133,34 @@ describe("the Watch Party's City markets", () => {
   });
 });
 
+describe("the Watch Party's matches in play", () => {
+  const playing = (id: string, price: number) => ({ id, question: `${id} wins?`, price, kickoffAt: new Date(now - 3_600_000).toISOString(), settlesBy: new Date(now + 3_600_000).toISOString() });
+  const sports = Array.from({ length: 8 }, (_, i) => mk(`s${i}`, "sports", 50, i + 1));
+  const city = { id: "c", question: "60+ in the Hall at full time?", kind: "headcount", place: "watch_party", threshold: 60, locksAt: new Date(now + 2 * 3_600_000).toISOString(), bellDay: "2026-10-10" } satisfies CityMarket;
+
+  it("come first, live, three at most, then tonight's matches and the Hall's market", () => {
+    const b = matchBoard(sports, now, live, [city], [playing("Arsenal", 63), playing("Lakers", 41), playing("Chiefs", 55), playing("Celtics", 70)]);
+    expect(b.title).toBe("WATCH PARTY · LIVE NOW");
+    expect(b.rows).toHaveLength(6);
+    expect(b.rows.slice(0, 3)).toEqual([
+      { left: "LIVE · Arsenal wins?", right: "63% YES · in play", tone: "plain" },
+      { left: "LIVE · Lakers wins?", right: "41% YES · in play", tone: "plain" },
+      { left: "LIVE · Chiefs wins?", right: "55% YES · in play", tone: "plain" },
+    ]);
+    expect(b.rows.slice(3).map((r) => r.left)).toEqual(["Q s0?", "Q s1?", "City · 60+ in the Hall at full time?"]);
+  });
+
+  it("with nothing else on, a live match is enough: no empty line", () => {
+    const b = matchBoard([], now, live, [], [playing("Arsenal", 63)]);
+    expect(b.rows.map((r) => r.left)).toEqual(["LIVE · Arsenal wins?"]);
+    expect(b.title).toBe("WATCH PARTY · LIVE NOW");
+  });
+
+  it("without any, the screen is exactly what it was", () => {
+    expect(matchBoard(sports, now, live, [city], [])).toEqual(matchBoard(sports, now, live, [city]));
+  });
+});
+
 describe("the Roof's boards", () => {
   // now is 12:00 UTC on 2026-10-10, so the last bell rang at 00:00 that day.
   const bellAt = "2026-10-10T00:00:00.000Z";

@@ -152,7 +152,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     slate: () => request<Slate>("GET", "/v1/slate").catch((e) => (e instanceof ApiError && e.status === 404 ? null : Promise.reject(e))),
     feed: () => request<{ paused: boolean; lastTickAt: string | null; credit: string | null }>("GET", "/v1/tower/feed"),
     market: (id: string) => request<MarketView>("GET", `/v1/tower/markets/${encodeURIComponent(id)}`),
-    call: (c: { marketId: string; side: Side; chance: number; seenPrice: number }) => request<CallMade>("POST", "/v1/tower/calls", c),
+    // inPlay: a call on a match after kickoff, from inside the Watch Party Hall.
+    call: (c: { marketId: string; side: Side; chance: number; seenPrice: number; inPlay?: boolean }) => request<CallMade>("POST", "/v1/tower/calls", c),
     myCall: (id: string) => request<CallStatus>("GET", `/v1/tower/calls/${encodeURIComponent(id)}`),
     // Public: anyone with the link can read a receipt (see packages/core/src/receipt.ts).
     receipt: (token: string) => request<Receipt>("GET", `/v1/receipts/${encodeURIComponent(token)}`),
@@ -223,6 +224,8 @@ export function createApi(opts: { base: string; store: TokenStore; fetch?: typeo
     bellStamp: () => request<Record<string, unknown>>("POST", "/v1/bell-stamp"),
     awayRecap: () => request<Record<string, unknown>>("GET", "/v1/away/recap"),
     oddsWall: () => request<MarketRow[]>("GET", "/v1/tower/odds-wall"),
+    // The Watch Party Hall's matches in play, at their live price.
+    inPlay: () => request<InPlayRow[]>("GET", "/v1/tower/in-play"),
 
     // --- People
     who: (ids: string[]) => request<Who[]>("GET", `/v1/residents?ids=${ids.map(encodeURIComponent).join(",")}`),
@@ -419,12 +422,15 @@ export type MarketView = {
   status: string;
   inFeed: boolean;
   infoOnly: boolean;
+  // A match past kickoff that still trades: `world` is its live price, and
+  // in the Watch Party Hall it takes in-play calls.
+  inPlay?: boolean;
   freezesAt: string;
   world: number;
   city: number | null;
   vibeGap: number | null;
   onSlate: boolean;
-  mine: { id: string; side: Side; chance: number; status: CallState; lockedPrice: number | null } | null;
+  mine: { id: string; side: Side; chance: number; status: CallState; lockedPrice: number | null; inPlay?: boolean } | null;
   source: string;
 };
 export type CallMade = { id: string; status: CallState; side: Side; chance: number; onSlate: boolean; ticket: boolean };
@@ -433,6 +439,8 @@ export type CallMade = { id: string; status: CallState; side: Side; chance: numb
 export type CallStatus = { id: string; marketId: string; side: Side; chance: number; status: CallState; lockedPrice: number | null; receiptLink?: string | null };
 export type CallState = "pending" | "locked" | "price_moved" | "expired";
 export type MarketRow = { id: string; question: string; category: string; price: number; freezesAt: string; infoOnly: boolean };
+// A match in play: its live price, and when it kicked off.
+export type InPlayRow = { id: string; question: string; price: number; kickoffAt: string; settlesBy: string };
 export type Whereabouts = { area: string; arrived: boolean; arriveAt: string | null; from: string | null };
 // searched: your own search today (today's place is never sent otherwise).
 export type Hunt = {

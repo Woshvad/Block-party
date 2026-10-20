@@ -12,6 +12,11 @@ export const TOWER = {
   crewBarMin: 3, // crewmates before the Crew bar shows
   feedPausedAfterSeconds: 180, // no good poll for this long: "odds paused"
   pendingExpiresSeconds: 300, // a call still waiting for a tick after this is dropped
+  // The Watch Party Hall's in-play calls, on a match after kickoff: free calls
+  // that lock at the first tick at least 2 minutes after you confirm (still
+  // within maxSlip of what you saw), for half the Aura.
+  inPlayDelaySeconds: 120,
+  inPlayHours: 4, // a match is looked up for its live price this long after kickoff, at most
 } as const;
 
 export const MARKET_CATEGORIES = ["crypto", "sports", "politics", "culture", "other"] as const;
@@ -82,16 +87,23 @@ export type FeedMarket = {
   resolved: boolean | null; // null: not yet; true/false: YES/NO happened
   voided: boolean;
   closed?: boolean; // trading has stopped: frozen from now on, until the result is final
+  // A sports market past kickoff that still trades: `price` is its live
+  // price, for the Watch Party Hall's in-play calls only. The market stays
+  // frozen for everything else (the Floor, the Slate, duels, real money).
+  inPlay?: boolean;
 };
 
 // A market the database holds that isn't final yet, as we last stored it.
-export type KnownMarket = Omit<FeedMarket, "resolved" | "voided" | "closed"> & {
+export type KnownMarket = Omit<FeedMarket, "resolved" | "voided" | "closed" | "inPlay"> & {
   // Something rides on it (a call, a duel, a Slate card): its result is
   // looked up before any other market's.
   held?: boolean;
   // It must stay callable while it trades, listed or not: a card on today's
   // Slate, or a call waiting to lock.
   live?: boolean;
+  // A sports market frozen at kickoff in the last few hours (TOWER.inPlayHours):
+  // its live price is looked up for the Watch Party Hall's in-play calls.
+  inPlay?: boolean;
 };
 
 export interface OddsProvider {
@@ -124,6 +136,7 @@ export type MockMarketSpec = {
   start: number; // starting price
   outcome?: boolean; // what happens at settlesBy (default: decided by the walk)
   voided?: boolean;
+  inPlay?: boolean; // a match: it trades on from kickoff until it settles, for the Hall's in-play calls
 };
 
 // Prices take a seeded walk of ±3 points a minute, so any moment's price is a
@@ -139,6 +152,12 @@ export function mockPrice(spec: MockMarketSpec, at: Date): number {
   return p;
 }
 
+// A match's price in play: the same walk, carried on past kickoff, until it settles.
+export function mockLivePrice(spec: MockMarketSpec, at: Date): number {
+  const end = at < spec.settlesBy ? at : spec.settlesBy;
+  return mockPrice({ ...spec, freezesAt: spec.settlesBy }, end);
+}
+
 export function mockProvider(specs: () => readonly MockMarketSpec[]): OddsProvider {
   return {
     source: "mock",
@@ -148,6 +167,8 @@ export function mockProvider(specs: () => readonly MockMarketSpec[]): OddsProvid
         .map((s) => {
           const price = mockPrice(s, now);
           const settled = now >= s.settlesBy;
+          // Between kickoff and the result, a match trades on, in play.
+          const inPlay = !!s.inPlay && !s.voided && now >= s.freezesAt && !settled;
           return {
             externalId: s.externalId,
             question: s.question,
@@ -155,9 +176,10 @@ export function mockProvider(specs: () => readonly MockMarketSpec[]): OddsProvid
             ladder: s.ladder ?? null,
             freezesAt: s.freezesAt,
             settlesBy: s.settlesBy,
-            price,
+            price: inPlay ? mockLivePrice(s, now) : price,
             resolved: settled && !s.voided ? (s.outcome ?? price >= 50) : null,
             voided: settled && !!s.voided,
+            ...(inPlay ? { inPlay: true } : {}),
           };
         });
     },
@@ -198,8 +220,27 @@ export function sampleMarkets(now: Date, days = 3): MockMarketSpec[] {
         freezesAt: new Date(dayStart + 15 * 3_600_000 + i * 600_000),
         settlesBy: new Date(dayStart + 16 * 3_600_000 + i * 600_000),
         start,
+        ...(category === "sports" ? { inPlay: true } : {}),
       });
     }
+  }
+  // A pickup game kicks off at half past every third hour and plays for two,
+  // so the Watch Party Hall has a match in play most of the day, whenever
+  // someone's trying it. Fixed per slot, so every poller sees the same ones.
+  const slot = 3 * 3_600_000;
+  const first = Math.floor(now.getTime() / slot) * slot + 30 * 60_000;
+  for (let k = -1; k <= 1; k++) {
+    const kickoff = first + k * slot;
+    out.push({
+      externalId: `sample:pickup:${new Date(kickoff).toISOString()}`,
+      question: "Pickup game at the Hall: home side wins?",
+      category: "sports",
+      openAt: new Date(kickoff - 2 * 3_600_000),
+      freezesAt: new Date(kickoff),
+      settlesBy: new Date(kickoff + 2 * 3_600_000),
+      start: 50,
+      inPlay: true,
+    });
   }
   return out;
 }

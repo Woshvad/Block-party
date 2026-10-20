@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type FeedMarket, type OddsProvider, renderClose, weekStart } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createCrew, createDb, createInvite, dailyClose, ensureSystemAccounts, makeCall, npcCalls, pollOdds, publishSlate, redeemInvite, runBell } from "../src";
+import { createCrew, createDb, createInvite, dailyClose, ensureSystemAccounts, makeCall, npcCalls, pollOdds, publishSlate, recordVisit, redeemInvite, runBell } from "../src";
 import { makeResident } from "./helpers";
 
 const { db, client, close } = createDb(process.env.TEST_DATABASE_URL!, { max: 30 });
@@ -73,6 +73,17 @@ describe("the Daily Close", () => {
     const mayor = await makeResident(db);
     await client`INSERT INTO mayor_terms (week, mayor_user_id, law_id, law_chosen_at) VALUES (${weekStart(day)}, ${mayor}, 'gas_holiday', now()) ON CONFLICT (week) DO UPDATE SET mayor_user_id = EXCLUDED.mayor_user_id, law_id = 'gas_holiday', law_chosen_at = now()`;
     const [mh] = await client`SELECT handle FROM residents WHERE user_id = ${mayor}`;
+
+    // In the Watch Party Hall someone calls the Long Shot in play, after
+    // kickoff: not one of the neighbours who called it at 8%.
+    const fan = await makeResident(db);
+    await recordVisit(db, { userId: fan, room: "watch_party#1", event: "start", at: new Date(d0 + 16 * H) });
+    ms[5]!.inPlay = true;
+    await pollOdds(db, f.provider, { now: new Date(d0 + 16 * H + MIN) });
+    const live = await makeCall(db, fan, { marketId: ids[5], side: "yes", chance: 30, seenPrice: 8, inPlay: true }, { now: new Date(d0 + 16 * H + MIN + 1000) });
+    await pollOdds(db, f.provider, { now: new Date(d0 + 16 * H + 4 * MIN) });
+    expect((await client`SELECT status FROM calls WHERE id = ${live.id}`)[0]!.status).toBe("locked");
+    ms[5]!.inPlay = undefined;
 
     ms[0]!.resolved = false; // the Lock misses
     ms[1]!.resolved = true; // the city was right

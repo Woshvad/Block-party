@@ -1,6 +1,6 @@
 import { chanceOnSide } from "@bp/core";
 import { describe, expect, it } from "vitest";
-import { auraIf, callsOpen, clampChance, sliderRange } from "../src/call";
+import { auraIf, callsOpen, clampChance, inPlayOpen, sliderRange } from "../src/call";
 import { countdown, until } from "../src/clock";
 
 const SIDES = ["yes", "no"] as const;
@@ -69,5 +69,23 @@ describe("callsOpen", () => {
     expect(callsOpen({ status: "open", inFeed: false, freezesAt: later }, now)).toBe(false); // the feed dropped it: stale price
     expect(callsOpen({ status: "frozen", inFeed: true, freezesAt: later }, now)).toBe(false);
     expect(callsOpen({ status: "open", inFeed: true, freezesAt: "2026-10-12T09:59:00Z" }, now)).toBe(false);
+  });
+});
+
+describe("in-play calls", () => {
+  it("take calls only on a frozen match the feed carries in play", () => {
+    expect(inPlayOpen({ status: "frozen", inPlay: true })).toBe(true);
+    expect(inPlayOpen({ status: "frozen", inPlay: false })).toBe(false); // stopped trading
+    expect(inPlayOpen({ status: "frozen" })).toBe(false);
+    expect(inPlayOpen({ status: "open", inPlay: true })).toBe(false); // before kickoff: an ordinary call
+    expect(inPlayOpen({ status: "resolved", inPlay: true })).toBe(false);
+  });
+
+  it("score half either way, as the API does", () => {
+    const full = auraIf(40, 70);
+    const half = auraIf(40, 70, true);
+    expect(half.yes).toBe(Math.trunc((full.yes * 100) / 2) / 100);
+    expect(half.no).toBe(Math.trunc((full.no * 100) / 2) / 100);
+    expect(half.yes).toBeGreaterThan(0);
   });
 });

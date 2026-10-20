@@ -5,7 +5,7 @@ Written 11 October 2026, when the frontend moved to a new developer. This file c
 ## Read this first: the state of the repo
 
 - **Repo:** https://github.com/isaac-richie/Block-party, branch `feat/backend-bricks` (the default). The repo is **public**, so never commit `.env` or the product plan.
-- **Everything since 11 October is on the fork** https://github.com/Woshvad/Block-party, whose default branch `main` holds all of it. It builds up in three branches, each on top of the last: `fix/review-findings` (the review), `feat/lagos-ideas` (ideas from Lagos Life) and `feat/backlog` (the backlog pass, 19 October). None has a pull request on the upstream repo yet.
+- **Everything since 11 October is on the fork** https://github.com/Woshvad/Block-party, whose default branch `main` holds all of it. It builds up in four branches, each on top of the last: `fix/review-findings` (the review), `feat/lagos-ideas` (ideas from Lagos Life), `feat/backlog` (the backlog pass, 19 October) and `feat/hall-live-calls` (in-play calls in the Watch Party Hall, 20 October). None has a pull request on the upstream repo yet.
 - **Everything is committed.** The latest two commits are the room-access backend (`roomAccess`, `POST /internal/rooms/access`, visitor homes, binder and headcount routes) and the frontend polish pass (navigation, Today, onboarding, social and crew, the trophy wall and TV, the city atmosphere, water, the diner quarter, and the `*-preview` routes).
 - **`apps/api/src/app.ts` was rebuilt once.** On 10 October it was accidentally emptied while uncommitted, then rebuilt from the dev server's compiled cache. Its compiled output matches the lost version byte for byte, and it typechecks again. Any comments the room-access developer wrote in the room-ticket route and `/internal/rooms/access` were lost, so they should re-read both.
 - **Local settings:** the shared `.env` at the repo root (every script, the dev server and the test suites read it, after any `.env` in their own package; no symlinks needed) has `ODDS_SOURCE=polymarket`, so the local API polls live Polymarket. Use `mock` to work offline.
@@ -78,6 +78,28 @@ Tests: on the merged branch, typecheck, every package's suite and the city build
 - **The warm-up's "Welcome back" grant,** which belongs to the Launch phase.
 - **Crew-bot posts.** They need a Telegram group link, and the API takes no bot updates yet.
 
+## In-play calls in the Watch Party Hall (20 October 2026)
+
+The last MVP item from the plan that wasn't built (README brick 47). The branch is `feat/hall-live-calls`, on top of `feat/backlog`, and its migration is 0058.
+
+- **What it does:** after kickoff a match stays frozen everywhere (the Floor, the Slate, duels, real money), but the feed keeps its live price. In the Hall, a resident can make a free call at that price. It locks on the first tick at least 2 minutes after they confirm, within 2 points of what they saw, for half the Aura, and takes a Tower ticket like any off-slate call.
+- **Kept apart:** the City and Crew bars, the Vibe Gap and the paper's Long Shot callers are the city's view before kickoff, so in-play calls stay out of them. No Tail or Fade, never on the Slate, never backed for real.
+- **The database** refuses an in-play call that locks inside 2 minutes or at full Aura, one on the Slate or as a Tail, and anything in play but a frozen sports match with a live price.
+- **The sample feed** has a pickup game every 3 hours, so the Hall has a match in play most of the day in development and staging.
+
+Tests: core 754, db 1,051, API 762, city 412 (rooms unchanged at 61), each with the new rules mutation-checked (every one of 22 mutants turned a test red).
+
+**Checked in a browser** against the local API and rooms:
+- walking into the Hall, and the in-play strip at the live price
+- the call sheet's half-Aura numbers and its 2-minute line
+- a call that waited 2 minutes and locked at the next tick (64%, from 65% seen)
+- clean view hiding the strip
+- from the open list below: map labels at full zoom-in, by day and at night, are legible and don't overlap; the Diner, Roof and Watch Party screens draw in their rooms (their 3D text is too small to read in a screenshot, and the boards' contents are unit-tested)
+
+**Still open from it:**
+- **Big moments during a match.** Swings are still only looked for before kickoff, though matches in play now have the ticks for it.
+- **On a phone in Telegram,** none of it has been tried yet.
+
 ## Ideas from Lagos Life (17 October 2026)
 
 Lagos Life, a browser life-sim set in Lagos, launched on 1 October 2026 and grew fast. Its dated updates up to 15 October were reviewed, and the ideas that fit Block Party without a business decision were built. They're on the branch `feat/lagos-ideas`, built on `fix/review-findings`, and pushed to the fork. The migrations are 0050 to 0053. What needs the owner (selling ad space, sponsored places, a games hub) is in [PARKED.md](PARKED.md).
@@ -142,18 +164,18 @@ Done since this file was first written:
 Still open:
 
 - [ ] **Performance on a real mid-range phone inside Telegram.** This hasn't been measured; PERFORMANCE_BASELINE.md says how to do it. Desktop is already near the top of the budget, so check before adding more geometry.
-- [ ] **Not yet checked:** map labels at full zoom-in and at night, and the Watch Party, Diner and Roof screens in the browser (`/room-social-preview` has samples of the Roof's and the Watch Party's).
+- [x] **Checked in a browser** (20 October): map labels at full zoom-in, by day and at night, and the Watch Party, Diner and Roof screens in their rooms.
 
 ### 2. From the plan, not started
 
-- [x] **The BTC 15-minute windows.** The 15-minute warm-up has its own feed of them, apart from the curated markets (README brick 44). Built and tested behind `FEATURE_WARMUP`, which stays off.
+- [x] **The BTC 15-minute windows.** The 15-minute warm-up has its own feed of them, apart from the curated markets (README brick 46). Built and tested behind `FEATURE_WARMUP`, which stays off.
 - [ ] **Welcome back (Launch):** after 14+ days away, a Hodl Day, a comeback tag, a warm-up and a crew ping. None of it is built; the warm-up's one-a-day rule would take a comeback day once the rest exists.
 - [ ] **A free 10-minute City market** for the warm-up's fallback, as the plan has it. City markets are staff-written, take GM and a Tower ticket and settle at the bell, so for now the warm-up has no fallback: it says when the next window opens, or that the feed is quiet.
 - [ ] **The warm-up before moving in, inside Telegram.** A guest in a browser meets the Contrarian on the guest panel, but a Telegram arrival goes straight to Create-a-Resident and meets him in the Tower after. The guest panel's line also needs its browser check: the map tools move up by an estimate of its height.
 - [ ] **Copium Pharmacy** opens first as a counter in the Gwei Diner (Launch). Hackerspace runs as "Builder Night" in the Bot Café (Launch), so it has no building of its own on purpose.
 - [ ] **Launch places have no interiors yet:** Club Liquidity, Touch Grass Park, the Blockspace Canvas game and the Bot Café.
 - [x] **The Roof's leaderboards:** three screens (the Right List with NOTHING-9000's line, the Season Stack, the crews') from `GET /v1/roof`, and the Watch Party's screen shows the Hall's own City markets.
-- [ ] **Free in-play calls in the Watch Party Hall** (MVP in the plan, on the big screen beside the room-only City markets). In the Hall, a free call on a match can be made after kickoff: it locks at the first tick at least 2 minutes after you confirm, for half the Aura. Backing for real still closes at kickoff. Not built: sports markets freeze at kickoff everywhere, so the Hall's screen shows only pre-kickoff odds and its City markets.
+- [x] **Free in-play calls in the Watch Party Hall** (README brick 47, 20 October). In the Hall, a free call on a match after kickoff locks at the first tick at least 2 minutes after you confirm, for half the Aura. Backing for real still closes at kickoff.
 - [x] **The Season Stack ranks Proof of Neighbour residents only,** on the Roof and in Games, as the plan's risks table has it for every leaderboard and as the Right List already did.
 
 ### 3. Waiting on the owner (see PARKED.md)

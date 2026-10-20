@@ -31,6 +31,7 @@ import { areFrens } from "./chat";
 import { grantOwedStreakDays } from "./daily";
 import { moodState } from "./moods";
 import { notify } from "./notify";
+import { inRoom } from "./pon";
 import { isBlockedEitherWay } from "./safety";
 import { ratioHeadline } from "./ratio";
 import { isOnSlate, slateModifier } from "./slate";
@@ -51,7 +52,8 @@ export class TowerError extends Error {
       | "NOTHING_TO_TAIL"
       | "TOO_MANY_TAILS"
       | "BLOCKED"
-      | "FEED_PAUSED",
+      | "FEED_PAUSED"
+      | "NOT_IN_HALL",
     message: string,
   ) {
     super(message);
@@ -113,6 +115,54 @@ const validFeed = (m: FeedMarket) =>
   !Number.isNaN(m.freezesAt.getTime()) &&
   m.settlesBy >= m.freezesAt;
 
+// A match in play (FeedMarket.inPlay): it stays frozen at its kickoff price
+// for everything else, and its live price and tick serve the Watch Party
+// Hall's in-play calls. Each locks on the first tick at least
+// TOWER.inPlayDelaySeconds after it was made, within maxSlip of what its
+// caller saw, for half the Aura; otherwise the price moved and the ticket
+// comes back. Only a match we froze at kickoff plays on: a feed can't open
+// one in play. null: not one of those.
+async function playOn(tx: Db, source: string, m: FeedMarket, now: Date, lockedFor: Set<string>) {
+  const [market] = await tx
+    .select()
+    .from(markets)
+    .where(and(eq(markets.source, source), eq(markets.externalId, m.externalId)))
+    .for("no key update");
+  if (!market || (market.status !== "frozen" && market.status !== "open") || market.category !== "sports" || market.ladder !== null || now < market.freezesAt) return null;
+  // The first poll past kickoff can find it still open: it freezes here, as it would have anyway.
+  await tx.update(markets).set({ status: "frozen", inFeed: false, inPlay: true, livePrice: m.price }).where(eq(markets.id, market.id));
+  const out = { marketId: market.id, ticked: 0, locked: 0, moved: 0 };
+  // A repeat poll for the same moment (two crons racing) adds nothing.
+  const [last] = await tx.select({ at: marketTicks.at }).from(marketTicks).where(eq(marketTicks.marketId, market.id)).orderBy(desc(marketTicks.id)).limit(1);
+  if (last && last.at >= now) return out;
+  const [tick] = await tx.insert(marketTicks).values({ marketId: market.id, price: m.price, at: now }).returning();
+  out.ticked++;
+  const waiting = await tx
+    .select()
+    .from(calls)
+    .where(
+      and(
+        eq(calls.marketId, market.id),
+        eq(calls.status, "pending"),
+        eq(calls.inPlay, true),
+        lte(calls.createdAt, new Date(now.getTime() - TOWER.inPlayDelaySeconds * 1000)),
+      ),
+    )
+    .for("no key update");
+  for (const c of waiting) {
+    if (Math.abs(tick!.price - c.seenPrice) <= TOWER.maxSlip) {
+      await tx.update(calls).set({ status: "locked", tickId: tick!.id, lockedPrice: tick!.price, lockedAt: now, half: true }).where(eq(calls.id, c.id));
+      if (!NPC_IDS.includes(c.userId)) lockedFor.add(c.userId);
+      out.locked++;
+    } else {
+      await tx.update(calls).set({ status: "price_moved" }).where(eq(calls.id, c.id));
+      if (c.ticket) await refundTicket(tx, c.userId, now);
+      out.moved++;
+    }
+  }
+  return out;
+}
+
 // One poll: store every open market's tick, then settle the calls waiting on
 // it. One poller at a time (an advisory lock); a second one just skips.
 export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Date } = {}) {
@@ -125,7 +175,8 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
   // became of the ones it no longer lists. `held`: a call (and so any duel)
   // or a Slate card rides on it, so its result comes first. `live`: it must
   // keep its price while it trades, listed or not (a card on today's Slate,
-  // a call waiting to lock).
+  // a call waiting to lock). `inPlay`: a match frozen at kickoff in the last
+  // few hours, whose live price the Watch Party Hall's in-play calls need.
   // (Spelled out: in a one-table select drizzle writes columns unqualified,
   // and inside these subqueries "id" would then mean calls.id.)
   const today = cityDay(now);
@@ -142,6 +193,9 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
         OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id))`,
       live: sql<boolean>`(markets.status = 'open' AND (EXISTS (SELECT 1 FROM calls c WHERE c.market_id = markets.id AND c.status = 'pending')
         OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id AND s.city_day = ${today})))`,
+      inPlay: sql<boolean>`(markets.status = 'frozen' AND markets.category = 'sports' AND markets.ladder IS NULL
+        AND markets.freezes_at <= ${now.toISOString()}::timestamptz
+        AND markets.freezes_at > ${new Date(now.getTime() - TOWER.inPlayHours * 3_600_000).toISOString()}::timestamptz)`,
     })
     .from(markets)
     .where(and(eq(markets.source, provider.source), inArray(markets.status, ["open", "frozen"])))
@@ -162,10 +216,21 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
     let moved = 0;
     let bad = 0;
     const carried: string[] = []; // the open markets this poll carried
+    const playing: string[] = []; // the matches this poll carried in play
     const lockedFor = new Set<string>(); // residents with a call locked: owed today's streak day
     for (const m of feed) {
       if (!validFeed(m)) {
         bad++;
+        continue;
+      }
+      if (m.inPlay) {
+        const r = await playOn(tx, provider.source, m, now, lockedFor);
+        if (r) {
+          playing.push(r.marketId);
+          ticked += r.ticked;
+          locked += r.locked;
+          moved += r.moved;
+        }
         continue;
       }
       const status = statusFor(m, now);
@@ -208,6 +273,9 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
             resolvedAt: status === "resolved" || status === "void" ? now : null,
             ...(status === "open" ? { price: m.price } : {}),
             inFeed: status === "open",
+            // In play only when a poll carries it so (see playOn).
+            inPlay: false,
+            livePrice: null,
           })
           .where(eq(markets.id, market.id))
           .returning();
@@ -224,7 +292,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       const waiting = await tx
         .select()
         .from(calls)
-        .where(and(eq(calls.marketId, market.id), eq(calls.status, "pending"), lt(calls.createdAt, now)))
+        .where(and(eq(calls.marketId, market.id), eq(calls.status, "pending"), eq(calls.inPlay, false), lt(calls.createdAt, now)))
         .for("no key update");
       for (const c of waiting) {
         if (Math.abs(tick!.price - c.seenPrice) <= TOWER.maxSlip) {
@@ -253,8 +321,15 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       .update(markets)
       .set({ inFeed: false })
       .where(and(eq(markets.status, "open"), eq(markets.inFeed, true), notInArray(markets.id, carried)));
-    // Calls that can never lock: their market froze or ended first, or the feed
-    // went quiet for too long. Tickets come back.
+    // Matches this poll didn't carry in play (over, stopped trading, or the
+    // lookup failed): no live price, so no in-play calls until one comes back.
+    await tx
+      .update(markets)
+      .set({ inPlay: false, livePrice: null })
+      .where(and(eq(markets.inPlay, true), notInArray(markets.id, playing)));
+    // Calls that can never lock: their market froze or ended first (an
+    // in-play call: its match stopped playing), or the feed went quiet for
+    // too long. Tickets come back.
     const stale = await tx
       .select({ id: calls.id, userId: calls.userId, ticket: calls.ticket })
       .from(calls)
@@ -262,7 +337,8 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       .where(
         and(
           eq(calls.status, "pending"),
-          sql`(${markets.status} <> 'open' OR ${calls.createdAt} < ${new Date(now.getTime() - TOWER.pendingExpiresSeconds * 1000).toISOString()}::timestamptz)`,
+          sql`(CASE WHEN ${calls.inPlay} THEN ${markets.status} <> 'frozen' OR NOT ${markets.inPlay} ELSE ${markets.status} <> 'open' END
+            OR ${calls.createdAt} < ${new Date(now.getTime() - TOWER.pendingExpiresSeconds * 1000).toISOString()}::timestamptz)`,
         ),
       )
       .for("no key update", { of: calls });
@@ -303,7 +379,8 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
 // The calls that move the City bar: Proof of Neighbour accounts only (so one
 // viral link can't brigade a market), and never the cast. atFreeze: the bar as
 // it stood when each market froze, so a mark stamped after that (the PoN page
-// grants it when it's opened) doesn't count.
+// grants it when it's opened) doesn't count. Never an in-play call: those are
+// made on the match as it goes, and the bar is the city's view before kickoff.
 export async function cityCalls(db: Db, marketIds: string[], opts: { atFreeze?: boolean } = {}) {
   if (!marketIds.length) return [];
   const rows = await db
@@ -311,7 +388,14 @@ export async function cityCalls(db: Db, marketIds: string[], opts: { atFreeze?: 
     .from(calls)
     .innerJoin(users, eq(users.id, calls.userId))
     .innerJoin(markets, eq(markets.id, calls.marketId))
-    .where(and(inArray(calls.marketId, marketIds), eq(calls.status, "locked"), opts.atFreeze ? lte(users.proofOfNeighbourAt, markets.freezesAt) : isNotNull(users.proofOfNeighbourAt)));
+    .where(
+      and(
+        inArray(calls.marketId, marketIds),
+        eq(calls.status, "locked"),
+        eq(calls.inPlay, false),
+        opts.atFreeze ? lte(users.proofOfNeighbourAt, markets.freezesAt) : isNotNull(users.proofOfNeighbourAt),
+      ),
+    );
   return rows.filter((r) => !NPC_IDS.includes(r.userId));
 }
 
@@ -512,10 +596,13 @@ export async function feedStatus(db: Db, opts: { now?: Date } = {}) {
 
 // --- Making a call ------------------------------------------------------------------
 
-export type CallInput = { marketId: unknown; side?: unknown; chance: unknown; seenPrice: unknown; via?: unknown; viaUserId?: unknown };
+export type CallInput = { marketId: unknown; side?: unknown; chance: unknown; seenPrice: unknown; via?: unknown; viaUserId?: unknown; inPlay?: unknown };
 
 // Confirms a call: it waits "in the mempool" and locks at the next tick (see
 // pollOdds). Off-slate calls take a ticket; a dropped call gives it back.
+// inPlay: a call on a match after kickoff, made in the Watch Party Hall at
+// its live price. It locks 2 minutes later at the earliest (see playOn), for
+// half the Aura, and is never on the Slate, a Tail or a Fade.
 export async function makeCall(db: Db, userId: string, input: CallInput, opts: { now?: Date; onSlate?: (marketId: string) => Promise<boolean> } = {}) {
   const now = opts.now ?? new Date();
   if (typeof input.marketId !== "string" || !UUID.test(input.marketId)) throw new TowerError("NO_SUCH_MARKET", "no such market");
@@ -524,18 +611,29 @@ export async function makeCall(db: Db, userId: string, input: CallInput, opts: {
   if (via === null && input.side !== "yes" && input.side !== "no") throw new TowerError("INVALID_INPUT", "side is yes or no");
   if (!Number.isInteger(input.seenPrice) || (input.seenPrice as number) < 1 || (input.seenPrice as number) > 99) throw new TowerError("INVALID_INPUT", "seenPrice is a whole percent");
   const seen = input.seenPrice as number;
+  if (input.inPlay !== undefined && input.inPlay !== null && typeof input.inPlay !== "boolean") throw new TowerError("INVALID_INPUT", "inPlay is true or false");
+  const inPlay = input.inPlay === true;
+  if (inPlay && via !== null) throw new TowerError("INVALID_INPUT", "in play, you lock your own call");
 
   const [me] = await db.select({ id: residents.userId }).from(residents).where(eq(residents.userId, userId));
   if (!me) throw new TowerError("NO_RESIDENT", "move in first");
   const [market] = await db.select().from(markets).where(eq(markets.id, input.marketId.toLowerCase()));
   if (!market) throw new TowerError("NO_SUCH_MARKET", "no such market");
   if (market.infoOnly) throw new TowerError("INFO_ONLY", "this one's on the Odds Wall: read it, don't call it");
-  if (market.status !== "open" || now >= market.freezesAt) throw new TowerError("MARKET_CLOSED", "calls are closed on this market");
-  // The latest poll didn't carry it, so its price is stale: no new calls.
-  if (!market.inFeed) throw new TowerError("MARKET_CLOSED", "this market has dropped off the feed; calls are closed");
+  if (inPlay) {
+    // The latest poll carried it in play; a match it didn't has no live price.
+    if (market.status !== "frozen" || !market.inPlay || market.livePrice === null) throw new TowerError("MARKET_CLOSED", "this match isn't in play right now");
+    if (!(await inRoom(db, userId, "watch_party", now))) throw new TowerError("NOT_IN_HALL", "in-play calls are made in the Watch Party Hall");
+  } else {
+    if (market.status !== "open" || now >= market.freezesAt) throw new TowerError("MARKET_CLOSED", "calls are closed on this market");
+    // The latest poll didn't carry it, so its price is stale: no new calls.
+    if (!market.inFeed) throw new TowerError("MARKET_CLOSED", "this market has dropped off the feed; calls are closed");
+  }
   if ((await feedStatus(db, { now })).paused) throw new TowerError("FEED_PAUSED", "odds are paused; try again when they're back");
-  if (Math.abs(market.price - seen) > TOWER.maxSlip) throw new TowerError("PRICE_MOVED", "price moved; call again?");
-  const onSlate = opts.onSlate ? await opts.onSlate(market.id) : await isOnSlate(db, market.id, now);
+  const price = inPlay ? market.livePrice! : market.price;
+  if (Math.abs(price - seen) > TOWER.maxSlip) throw new TowerError("PRICE_MOVED", "price moved; call again?");
+  // Never on the Slate: the Slate's cards froze at kickoff.
+  const onSlate = inPlay ? false : opts.onSlate ? await opts.onSlate(market.id) : await isOnSlate(db, market.id, now);
 
   // Tail copies a fren's side; Fade takes the other one.
   let side = input.side as Side;
@@ -575,7 +673,7 @@ export async function makeCall(db: Db, userId: string, input: CallInput, opts: {
     try {
       const [c] = await tx
         .insert(calls)
-        .values({ userId, marketId: market.id, side, chance: input.chance as number, seenPrice: seen, onSlate, ticket, via, viaUserId, createdAt: now })
+        .values({ userId, marketId: market.id, side, chance: input.chance as number, seenPrice: seen, onSlate, ticket, via, viaUserId, inPlay, createdAt: now })
         .returning();
       return c!;
     } catch (e) {
@@ -588,7 +686,7 @@ export async function makeCall(db: Db, userId: string, input: CallInput, opts: {
     const [r] = await db.select({ handle: residents.handle }).from(residents).where(eq(residents.userId, userId));
     await notify(db, viaUserId, "faded", { handle: r!.handle }, { now });
   }
-  return { id: row.id, status: row.status, side: row.side, chance: row.chance, onSlate: row.onSlate, ticket: row.ticket };
+  return { id: row.id, status: row.status, side: row.side, chance: row.chance, onSlate: row.onSlate, ticket: row.ticket, inPlay: row.inPlay };
 }
 
 export async function myCall(db: Db, userId: string, callId: unknown) {
@@ -629,7 +727,7 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
       await db
         .select({ userId: calls.userId, chance: calls.chance })
         .from(calls)
-        .where(and(eq(calls.marketId, m.id), eq(calls.status, "locked")))
+        .where(and(eq(calls.marketId, m.id), eq(calls.status, "locked"), eq(calls.inPlay, false)))
     ).filter((c) => !NPC_IDS.includes(c.userId));
     const neighbours = await cityCalls(db, [m.id]);
     cityCount = neighbours.length;
@@ -644,6 +742,9 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
       if (crewCount >= TOWER.crewBarMin && !blind) crew = median(crewChances);
     }
   }
+  // A match in play shows its live price, and takes in-play calls at it in
+  // the Hall. Its City and Crew bars are the view before kickoff, so no gap.
+  const live = m.inPlay && m.livePrice !== null;
   return {
     id: m.id,
     question: m.question,
@@ -652,16 +753,17 @@ export async function marketView(db: Db, userId: string, marketId: unknown, opts
     // false: the latest poll didn't carry it, so its price is stale and calls are closed.
     inFeed: m.inFeed,
     infoOnly: m.infoOnly,
+    inPlay: live,
     freezesAt: m.freezesAt,
     settlesBy: m.settlesBy,
-    world: m.price,
+    world: live ? m.livePrice! : m.price,
     city: blurred ? null : city,
     crew: blurred ? null : crew,
-    vibeGap: blurred ? null : vibeGap(m.price, city),
+    vibeGap: blurred || live ? null : vibeGap(m.price, city),
     blurred,
     counts: blurred ? null : { city: cityCount, crew: crewCount },
     onSlate,
-    mine: mine ? { id: mine.id, side: mine.side, chance: mine.chance, status: mine.status, lockedPrice: mine.lockedPrice } : null,
+    mine: mine ? { id: mine.id, side: mine.side, chance: mine.chance, status: mine.status, lockedPrice: mine.lockedPrice, inPlay: mine.inPlay } : null,
     source: oddsCredit(m.source),
   };
 }
@@ -679,6 +781,18 @@ export async function openMarkets(db: Db, opts: { infoOnly?: boolean; limit?: nu
     )
     .orderBy(markets.freezesAt)
     .limit(Math.min(Math.max(opts.limit ?? 100, 1), 200));
+}
+
+// The Watch Party Hall's matches in play: frozen at kickoff, still trading,
+// at their live price, the latest kickoff first.
+export async function inPlayMarkets(db: Db, opts: { limit?: number } = {}) {
+  const rows = await db
+    .select({ id: markets.id, question: markets.question, price: markets.livePrice, kickoffAt: markets.freezesAt, settlesBy: markets.settlesBy })
+    .from(markets)
+    .where(and(eq(markets.inPlay, true), eq(markets.status, "frozen")))
+    .orderBy(desc(markets.freezesAt), markets.id)
+    .limit(Math.min(Math.max(opts.limit ?? 20, 1), 50));
+  return rows.map((r) => ({ ...r, price: r.price! }));
 }
 
 // The side of a resident's locked call on a market, if any (the Bunkers' door).

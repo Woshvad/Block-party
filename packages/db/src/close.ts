@@ -19,7 +19,8 @@ async function slateResults(db: Db, bellDay: CityDay) {
         await db
           .select({ userId: calls.userId, marketId: calls.marketId, side: calls.side, chance: calls.chance, aura: calls.auraCenti, onSlate: calls.onSlate })
           .from(calls)
-          .where(and(inArray(calls.marketId, cards.map((c) => c.marketId)), eq(calls.status, "locked")))
+          // In-play calls aren't the city's view before kickoff (see cityCalls).
+          .where(and(inArray(calls.marketId, cards.map((c) => c.marketId)), eq(calls.status, "locked"), eq(calls.inPlay, false)))
       ).filter((c) => !NPC_IDS.includes(c.userId))
     : [];
   return { cards, locked };

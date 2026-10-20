@@ -271,6 +271,47 @@ describe("Polymarket provider on recorded payloads", () => {
     expect(urls.some((u) => new URL(u).pathname === "/markets" && new URL(u).searchParams.get("closed") === "false")).toBe(false);
   });
 
+  it("looks up the matches we froze at kickoff and carries the ones still trading, in play, at their live price", async () => {
+    const urls: string[] = [];
+    // An EPL match that kicked off at 18:30, trading on at 63%.
+    const match = { id: "880001", question: "Arsenal win?", outcomes: '["Yes", "No"]', outcomePrices: '["0.63", "0.37"]', endDate: "2026-10-11T21:00:00Z", gameStartTime: "2026-10-11 18:30:00+00", closed: false, acceptingOrders: true };
+    const trading = new Map<string, Record<string, unknown>>([
+      ["880001", match],
+      // No kickoff: a market that just ends doesn't play on.
+      ["880002", { ...match, id: "880002", gameStartTime: null, endDate: "2026-10-11T18:00:00Z" }],
+      // Stopped taking orders: not in play.
+      ["880003", { ...match, id: "880003", acceptingOrders: false }],
+      // Pinned at an extreme: no call there.
+      ["880004", { ...match, id: "880004", outcomePrices: '["0.98", "0.02"]' }],
+    ]);
+    const fetch = (url: string) => {
+      urls.push(url);
+      const u = new URL(url);
+      if (u.pathname === "/markets" && u.searchParams.get("closed") === "false") return ok(u.searchParams.getAll("id").flatMap((id) => (trading.has(id) ? [trading.get(id)!] : [])));
+      return gamma()(url);
+    };
+    const p = polymarketProvider({ fetch, log: () => {} });
+    const kicked = { freezesAt: new Date("2026-10-11T18:30:00Z"), settlesBy: new Date("2026-10-11T21:00:00Z"), inPlay: true };
+    const fs = await p.fetch(recordedAt, [known("880001", kicked), known("880002", kicked), known("880003", kicked), known("880004", kicked), known("880005", kicked), known("5046295")]);
+    const byId = new Map(fs.map((f) => [f.externalId, f]));
+    expect(byId.get("pm:880001")).toMatchObject({ price: 63, inPlay: true, resolved: null, voided: false, category: "sports" });
+    expect(byId.get("pm:880001")!.freezesAt.toISOString()).toBe("2026-10-11T18:30:00.000Z");
+    expect(byId.get("pm:880001")!.closed).toBeUndefined();
+    for (const id of ["pm:880002", "pm:880003", "pm:880004", "pm:880005"]) expect(byId.has(id)).toBe(false);
+    // Nothing else comes back in play: the listing's markets are before kickoff.
+    expect(fs.filter((f) => f.inPlay).map((f) => f.externalId)).toEqual(["pm:880001"]);
+    const lookups = urls.map((u) => new URL(u)).filter((u) => u.pathname === "/markets" && u.searchParams.get("closed") === "false");
+    expect(lookups.map((u) => u.searchParams.getAll("id"))).toEqual([["880001", "880002", "880003", "880004", "880005"]]);
+    // Only matches are looked up in play, and a result beats a live price.
+    urls.length = 0;
+    const settled = polymarketProvider({ fetch: gamma({ urls, lookup: (ids) => ok(ids.includes("880001") ? [{ ...resolvedYes, id: "880001" }] : []) }), log: () => {} });
+    const after = await settled.fetch(recordedAt, [known("880001", kicked), known("880006", { ...kicked, category: "crypto" })]);
+    expect(after.filter((f) => f.externalId === "pm:880001")).toEqual([expect.objectContaining({ resolved: true, closed: true })]);
+    expect(after.some((f) => f.inPlay)).toBe(false);
+    const inPlayIds = urls.map((u) => new URL(u)).filter((u) => u.pathname === "/markets" && u.searchParams.get("closed") === "false").flatMap((u) => u.searchParams.getAll("id"));
+    expect(inPlayIds).toEqual(["880001"]);
+  });
+
   it("a failed lookup doesn't fail the poll: the listing still counts, and it's logged", async () => {
     const lines: string[] = [];
     const refused = () => Promise.resolve({ ok: false, status: 422, json: () => Promise.resolve({ error: "no" }) });

@@ -407,6 +407,13 @@
       "when": 1792428030268,
       "tag": "0057_warmup",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792477495086,
+      "tag": "0058_hall_in_play",
+      "breakpoints": true
     }
   ]
 }

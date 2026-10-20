@@ -4,9 +4,10 @@ import type { FeedMarket, KnownMarket, MarketCategory, OddsProvider } from "./to
 // for the busiest open events per category tag and turn each YES/NO market
 // into a FeedMarket. Multi-market events ("Bitcoin above ___ on Oct 10?") are
 // price ladders. Markets we already hold are looked up again by id: that's how
-// they freeze, resolve or void once they've left the listing, and how the ones
+// they freeze, resolve or void once they've left the listing, how the ones
 // that must stay callable (today's Slate, a call waiting to lock) keep their
-// price while they trade. The mapping is pure (tested on recorded payloads);
+// price while they trade, and how a match keeps a live price after kickoff
+// for the Watch Party Hall's in-play calls. The mapping is pure (tested on recorded payloads);
 // only the provider touches the network.
 
 export const GAMMA_URL = "https://gamma-api.polymarket.com";
@@ -39,6 +40,7 @@ const REQUEST_TIMEOUT_MS = 8_000; // per request, so one hung category can't hol
 const IDS_PER_LOOKUP = 100; // Gamma refuses more ids than this in one request
 export const MAX_KNOWN_LOOKUPS = 500; // closed lookups a poll: 5 requests
 const MAX_LIVE_LOOKUPS = 200; // trading lookups a poll, for markets that must stay callable: 2 requests
+const MAX_IN_PLAY_LOOKUPS = 100; // matches looked up in play a poll: 1 request
 const MIN_PRICE = 3; // whole percent: a 97% market is no call at all
 
 // Why markets were left out of a poll: the counts say when the API has
@@ -75,7 +77,9 @@ export function outcomesAre(m: GammaMarket, pair: OutcomePair): boolean {
 
 // One trading Gamma market as a FeedMarket, or null (counted in `skipped`)
 // when it's closed, not trading, already frozen, or priced at the extremes.
-function feedMarketOf(m: GammaMarket, category: MarketCategory, ladder: string | null, now: Date, min: number, skipped: Skips): FeedMarket | null {
+// `inPlay`: a match we hold, looked up after kickoff. Past its freeze it
+// comes back marked in play, at its live price, rather than skipped.
+function feedMarketOf(m: GammaMarket, category: MarketCategory, ladder: string | null, now: Date, min: number, skipped: Skips, inPlay = false): FeedMarket | null {
   if (m.closed) {
     skipped.closed++;
     return null;
@@ -107,6 +111,8 @@ function feedMarketOf(m: GammaMarket, category: MarketCategory, ladder: string |
   const kickoff = m.gameStartTime ? new Date(m.gameStartTime) : null;
   const freezesAt = kickoff && !Number.isNaN(kickoff.getTime()) ? kickoff : ladder ? new Date(settlesBy.getTime() - LADDER_FREEZE_MS) : settlesBy;
   if (freezesAt <= now) {
+    // Only a match with a kickoff plays on; a ladder or a market that just ends doesn't.
+    if (inPlay && kickoff && !ladder) return { externalId: `pm:${m.id}`, question: m.question, category, ladder, freezesAt, settlesBy, price, resolved: null, voided: false, inPlay: true };
     skipped.frozen++;
     return null;
   }
@@ -275,13 +281,28 @@ export function polymarketProvider(
     return out;
   }
 
+  // Matches we froze at kickoff that still trade: their live price, for the
+  // Watch Party Hall's in-play calls. A match that's over, or no longer
+  // trading, just doesn't come back (Gamma's closed lookup says what became of it).
+  async function inPlayKnown(known: readonly KnownMarket[], now: Date, skipped: Skips): Promise<FeedMarket[]> {
+    const playing = byGammaId(known.filter((k) => k.inPlay && k.category === "sports").slice(0, MAX_IN_PLAY_LOOKUPS));
+    if (playing.size === 0) return [];
+    const out: FeedMarket[] = [];
+    for (const m of await lookUp([...playing.keys()], false, "matches in play", now)) {
+      const k = playing.get(String(m?.id));
+      const f = k && feedMarketOf(m, k.category, k.ladder, now, MIN_PRICE, skipped, true);
+      if (f) out.push(f);
+    }
+    return out;
+  }
+
   return {
     source: "polymarket",
     async fetch(now: Date, known: readonly KnownMarket[] = []) {
       const skipped = noSkips();
       let failed = 0;
       let events = 0;
-      const [listed, closed, live] = await Promise.all([
+      const [listed, closed, live, playing] = await Promise.all([
         Promise.all(
           (Object.entries(POLYMARKET_TAGS) as [MarketCategory, string][]).map(async ([category, tag]) => {
             const body = await getJson(`${base}/events?tag_slug=${tag}&active=true&closed=false&order=volume24hr&ascending=false&limit=20&${fresh(now)}`);
@@ -295,6 +316,7 @@ export function polymarketProvider(
         ),
         closedKnown(known, now, skipped),
         liveKnown(known, now, skipped),
+        inPlayKnown(known, now, skipped),
       ]);
       if (failed === Object.keys(POLYMARKET_TAGS).length) throw new Error("polymarket: every category request failed");
       // Answers that came back but held nothing we can use (the API changed
@@ -303,9 +325,10 @@ export function polymarketProvider(
       if (skipped.unreadable) log(`polymarket: ${describeSkips(skipped)}`);
       // A closed market's result comes first; then each market once, first
       // category wins (an event can carry two tags), and the listing's copy
-      // of a live market over its own lookup.
+      // of a live market over its own lookup. A match in play comes last: if
+      // the listing says its kickoff moved, the listing's word stands.
       const seen = new Set<string>();
-      return [...closed, ...listed.flat(), ...live].filter((m) => !seen.has(m.externalId) && seen.add(m.externalId));
+      return [...closed, ...listed.flat(), ...live, ...playing].filter((m) => !seen.has(m.externalId) && seen.add(m.externalId));
     },
   };
 }

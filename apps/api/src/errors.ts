@@ -201,6 +201,7 @@ const TOWER: Record<TowerError["code"], number> = {
   TOO_MANY_TAILS: 429,
   BLOCKED: 403,
   FEED_PAUSED: 503,
+  NOT_IN_HALL: 403,
 };
 
 const BELL_SHOW: Record<BellShowError["code"], number> = { NO_CALL_TODAY: 409, NO_RESIDENT: 404 };

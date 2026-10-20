@@ -1388,11 +1388,18 @@ export const markets = pgTable(
     // Carried, open, by the latest good poll of its feed. One the feed has
     // dropped keeps its last price, so it's off the Floor and takes no calls.
     inFeed: boolean("in_feed").notNull().default(false),
+    // A match past kickoff that still trades, carried in play by the latest
+    // good poll: `livePrice` is its price now, for the Watch Party Hall's
+    // in-play calls only. `price` stays where it stood at the freeze.
+    inPlay: boolean("in_play").notNull().default(false),
+    livePrice: integer("live_price"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("markets_source_external").on(t.source, t.externalId),
+    // The Hall's screen lists the matches in play.
+    index("markets_playing").on(t.freezesAt).where(sql`${t.inPlay}`),
     // Every poll reads its source's markets that aren't final yet.
     index("markets_unsettled").on(t.source, t.freezesAt).where(sql`${t.status} IN ('open', 'frozen')`),
     // And the Watch Party's moments look for results that just came in.
@@ -1400,6 +1407,11 @@ export const markets = pgTable(
     check("markets_price", sql`${t.price} BETWEEN 1 AND 99`),
     check("markets_resolved", sql`(${t.status} = 'resolved') = (${t.outcome} IS NOT NULL)`),
     check("markets_order", sql`${t.settlesBy} >= ${t.freezesAt}`),
+    // Only a frozen match plays on, and only with a live price.
+    check(
+      "markets_in_play",
+      sql`${t.inPlay} = (${t.livePrice} IS NOT NULL) AND (NOT ${t.inPlay} OR (${t.status} = 'frozen' AND ${t.category} = 'sports' AND ${t.livePrice} BETWEEN 1 AND 99))`,
+    ),
   ],
 );
 
@@ -1484,6 +1496,9 @@ export const calls = pgTable(
     via: text("via"),
     viaUserId: uuid("via_user_id").references(() => users.id),
     auraCenti: integer("aura_centi"),
+    // Made in the Watch Party Hall on a match in play: it locks at the first
+    // tick at least 2 minutes after it was confirmed, for half the Aura.
+    inPlay: boolean("in_play").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },
   (t) => [
@@ -1495,6 +1510,8 @@ export const calls = pgTable(
     check("calls_via", sql`(${t.via} IS NULL) = (${t.viaUserId} IS NULL) AND (${t.via} IS NULL OR ${t.via} IN ('tail', 'fade'))`),
     // A call's side matches its chance (the slider only moves on your side).
     check("calls_side", sql`(${t.side} = 'yes' AND ${t.chance} > ${t.seenPrice}) OR (${t.side} = 'no' AND ${t.chance} < ${t.seenPrice})`),
+    // An in-play call is your own (no Tail or Fade), never on the Slate, and locks for half.
+    check("calls_in_play", sql`NOT ${t.inPlay} OR (NOT ${t.onSlate} AND ${t.via} IS NULL AND (${t.status} <> 'locked' OR ${t.half}))`),
   ],
 );
 

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ApiError, type Api, type CallState, type MarketView, type Side } from "./api";
 import { useBackLayer } from "./back";
-import { CALL_STATE_LABEL, auraIf, callsOpen, clampChance, sliderRange } from "./call";
+import { CALL_STATE_LABEL, IN_PLAY_PENDING_LABEL, auraIf, callsOpen, clampChance, inPlayOpen, sliderRange } from "./call";
 import { until, useNow } from "./clock";
 import { receiptLink, receiptTokenFrom } from "./launch";
 import { receiptShareText } from "./share";
@@ -12,12 +12,28 @@ import { haptic } from "./telegram";
 
 // Make a call: pick a side, slide your "Chance of YES" past the market on that
 // side, lock it. The call waits for the next odds tick and locks within 2
-// points of the price you saw, or is dropped and you can call again.
+// points of the price you saw, or is dropped and you can call again. inPlay
+// (the Watch Party Hall, after kickoff): a call at the match's live price that
+// locks about 2 minutes on, for half the Aura.
 
 const POLL_MS = 4000;
 const POLL_FOR_MS = 6 * 60_000; // the API drops a pending call after 5 minutes
 
-export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }: { api: Api; marketId: string; onClose: () => void; onCalled: () => void; onBunker?: (place: string) => void }) {
+export default function CallSheet({
+  api,
+  marketId,
+  onClose,
+  onCalled,
+  onBunker,
+  inPlay = false,
+}: {
+  api: Api;
+  marketId: string;
+  onClose: () => void;
+  onCalled: () => void;
+  onBunker?: (place: string) => void;
+  inPlay?: boolean;
+}) {
   const [m, setM] = useState<MarketView | null>(null);
   const [side, setSide] = useState<Side>("yes");
   const [chance, setChance] = useState<number | null>(null);
@@ -105,7 +121,7 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
     setBusy(true);
     setMsg(null);
     try {
-      const r = await api.call({ marketId, side, chance, seenPrice: m.world });
+      const r = await api.call({ marketId, side, chance, seenPrice: m.world, ...(inPlay ? { inPlay: true } : {}) });
       setState({ id: r.id, status: r.status, lockedPrice: null });
       haptic("medium");
       onCalled();
@@ -123,14 +139,16 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
   };
 
   const range = m ? sliderRange(side, m.world) : null;
-  const closed = m ? !callsOpen(m, now) : false;
-  const a = m && chance !== null ? auraIf(m.world, chance) : null;
+  const closed = m ? (inPlay ? !inPlayOpen(m) : !callsOpen(m, now)) : false;
+  const a = m && chance !== null ? auraIf(m.world, chance, inPlay) : null;
+  // A call made in play waits longer before it locks.
+  const pendingLabel = inPlay || m?.mine?.inPlay ? IN_PLAY_PENDING_LABEL : CALL_STATE_LABEL.pending;
   const fmt = (n: number) => `${n > 0 ? "+" : ""}${n.toFixed(1)}`;
 
   // Portalled to <body>: inside a fixed screen its z-index can't rise above the tab bar.
   return createPortal(
     <div className="backdrop" onClick={onClose}>
-      <div className="callsheet" role="dialog" aria-label="Make a call" onClick={(e) => e.stopPropagation()}>
+      <div className="callsheet" role="dialog" aria-label={inPlay ? "Make an in-play call" : "Make a call"} onClick={(e) => e.stopPropagation()}>
         <button className="x" aria-label="close" onClick={onClose}>
           ×
         </button>
@@ -148,12 +166,12 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
                   City <b>{m.city}%</b>
                 </span>
               )}
-              <span className="muted">{closed ? "closed" : `closes in ${until(m.freezesAt, now)}`}</span>
+              <span className="muted">{closed ? "closed" : inPlay ? "live · in play" : `closes in ${until(m.freezesAt, now)}`}</span>
             </div>
 
             {state ? (
               <div className={`state ${state.status}`}>
-                <b>{state.status === "locked" ? `Locked at ${state.lockedPrice}%` : CALL_STATE_LABEL[state.status]}</b>
+                <b>{state.status === "locked" ? `Locked at ${state.lockedPrice}%` : state.status === "pending" ? pendingLabel : CALL_STATE_LABEL[state.status]}</b>
                 <span>
                   {side.toUpperCase()} · you said {chance}%
                 </span>
@@ -170,7 +188,7 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
                 )}
               </div>
             ) : closed ? (
-              <p className="muted">Calls are closed on this one.</p>
+              <p className="muted">{inPlay ? "This match isn't in play right now." : "Calls are closed on this one."}</p>
             ) : (
               <>
                 <div className="sides">
@@ -195,6 +213,7 @@ export default function CallSheet({ api, marketId, onClose, onCalled, onBunker }
                     )}
                   </>
                 )}
+                {inPlay && <p className="muted inplay-note">In play: it locks about 2 minutes after you confirm, if the price is still within 2 points. Half the Aura.</p>}
                 <button className="cta" disabled={busy || chance === null} onClick={lock}>
                   {busy ? "Locking…" : `Lock ${side.toUpperCase()} at ${chance ?? "–"}%`}
                 </button>
