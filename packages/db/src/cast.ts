@@ -69,7 +69,8 @@ export async function npcBoardLines(db: Db, bellDay: CityDay, now: Date) {
     const leanRows = await db
       .select({ side: calls.side, n: sql<number>`count(*)::int` })
       .from(calls)
-      .where(and(inArray(calls.marketId, cards.map((c) => c.marketId)), eq(calls.status, "locked"), notInArray(calls.userId, [...NPC_IDS])))
+      // Not in-play calls: made with the score known, they'd say where the match went, not the city.
+      .where(and(inArray(calls.marketId, cards.map((c) => c.marketId)), eq(calls.status, "locked"), eq(calls.inPlay, false), notInArray(calls.userId, [...NPC_IDS])))
       .groupBy(calls.side);
     const cityYes = leanRows.find((r) => r.side === "yes")?.n ?? 0;
     const cityNo = leanRows.find((r) => r.side === "no")?.n ?? 0;

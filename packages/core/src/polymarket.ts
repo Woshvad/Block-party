@@ -40,7 +40,7 @@ const REQUEST_TIMEOUT_MS = 8_000; // per request, so one hung category can't hol
 const IDS_PER_LOOKUP = 100; // Gamma refuses more ids than this in one request
 export const MAX_KNOWN_LOOKUPS = 500; // closed lookups a poll: 5 requests
 const MAX_LIVE_LOOKUPS = 200; // trading lookups a poll, for markets that must stay callable: 2 requests
-const MAX_IN_PLAY_LOOKUPS = 100; // matches looked up in play a poll: 1 request
+const MAX_IN_PLAY_LOOKUPS = 200; // matches looked up in play a poll, latest kickoff first: 2 requests
 const MIN_PRICE = 3; // whole percent: a 97% market is no call at all
 
 // Why markets were left out of a poll: the counts say when the API has
@@ -108,11 +108,14 @@ function feedMarketOf(m: GammaMarket, category: MarketCategory, ladder: string |
     skipped.extreme++;
     return null;
   }
-  const kickoff = m.gameStartTime ? new Date(m.gameStartTime) : null;
-  const freezesAt = kickoff && !Number.isNaN(kickoff.getTime()) ? kickoff : ladder ? new Date(settlesBy.getTime() - LADDER_FREEZE_MS) : settlesBy;
+  const start = m.gameStartTime ? new Date(m.gameStartTime) : null;
+  const kickoff = start && !Number.isNaN(start.getTime()) ? start : null;
+  const freezesAt = kickoff ?? (ladder ? new Date(settlesBy.getTime() - LADDER_FREEZE_MS) : settlesBy);
   if (freezesAt <= now) {
-    // Only a match with a kickoff plays on; a ladder or a market that just ends doesn't.
-    if (inPlay && kickoff && !ladder) return { externalId: `pm:${m.id}`, question: m.question, category, ladder, freezesAt, settlesBy, price, resolved: null, voided: false, inPlay: true };
+    // Only a game with a kickoff plays on (one of an event's several markets
+    // too: a match's win, draw and loss come as one event); a price ladder,
+    // or a market that just ends, doesn't.
+    if (inPlay && kickoff) return { externalId: `pm:${m.id}`, question: m.question, category, ladder, freezesAt, settlesBy, price, resolved: null, voided: false, inPlay: true };
     skipped.frozen++;
     return null;
   }
@@ -282,16 +285,20 @@ export function polymarketProvider(
   }
 
   // Matches we froze at kickoff that still trade: their live price, for the
-  // Watch Party Hall's in-play calls. A match that's over, or no longer
-  // trading, just doesn't come back (Gamma's closed lookup says what became of it).
+  // Watch Party Hall's in-play calls, the latest kickoffs first. A match that's
+  // over, or no longer trading, just doesn't come back (Gamma's closed lookup
+  // says what became of it). Only an answer in play counts: one that now reads
+  // as before kickoff (no kickoff time, or a later one) never reopens a frozen
+  // match from here; a postponement comes through the listing.
   async function inPlayKnown(known: readonly KnownMarket[], now: Date, skipped: Skips): Promise<FeedMarket[]> {
-    const playing = byGammaId(known.filter((k) => k.inPlay && k.category === "sports").slice(0, MAX_IN_PLAY_LOOKUPS));
+    const latest = known.filter((k) => k.inPlay && k.category === "sports").sort((a, b) => b.freezesAt.getTime() - a.freezesAt.getTime());
+    const playing = byGammaId(latest.slice(0, MAX_IN_PLAY_LOOKUPS));
     if (playing.size === 0) return [];
     const out: FeedMarket[] = [];
     for (const m of await lookUp([...playing.keys()], false, "matches in play", now)) {
       const k = playing.get(String(m?.id));
       const f = k && feedMarketOf(m, k.category, k.ladder, now, MIN_PRICE, skipped, true);
-      if (f) out.push(f);
+      if (f?.inPlay) out.push(f);
     }
     return out;
   }

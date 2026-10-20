@@ -312,6 +312,37 @@ describe("Polymarket provider on recorded payloads", () => {
     expect(inPlayIds).toEqual(["880001"]);
   });
 
+  it("plays on one of an event's markets (a match's win, draw and loss come as one event), never reopens a match from the in-play lookup, and asks for the latest kickoffs first", async () => {
+    const urls: string[] = [];
+    const base = { outcomes: '["Yes", "No"]', endDate: "2026-10-11T21:00:00Z", gameStartTime: "2026-10-11 18:30:00+00", closed: false, acceptingOrders: true };
+    const trading = new Map<string, Record<string, unknown>>([
+      ["990001", { ...base, id: "990001", question: "Arsenal win?", outcomePrices: '["0.55", "0.45"]' }],
+      // Gamma now gives no kickoff time: it would read as open until it ends.
+      ["990002", { ...base, id: "990002", question: "Draw?", outcomePrices: '["0.25", "0.75"]', gameStartTime: null }],
+      // A later kickoff (postponed): that's the listing's to say, not this lookup's.
+      ["990003", { ...base, id: "990003", question: "Chelsea win?", outcomePrices: '["0.20", "0.80"]', gameStartTime: "2026-10-12 18:30:00+00" }],
+    ]);
+    const fetch = (url: string) => {
+      urls.push(url);
+      const u = new URL(url);
+      if (u.pathname === "/markets" && u.searchParams.get("closed") === "false") return ok(u.searchParams.getAll("id").flatMap((id) => (trading.has(id) ? [trading.get(id)!] : [])));
+      return gamma()(url);
+    };
+    const p = polymarketProvider({ fetch, log: () => {} });
+    const kicked = { freezesAt: new Date("2026-10-11T18:30:00Z"), settlesBy: new Date("2026-10-11T21:00:00Z"), inPlay: true, ladder: "arsenal-vs-chelsea" };
+    const fs = await p.fetch(recordedAt, [known("990001", kicked), known("990002", kicked), known("990003", kicked)]);
+    expect(fs.find((f) => f.externalId === "pm:990001")).toMatchObject({ inPlay: true, price: 55, ladder: "arsenal-vs-chelsea" });
+    expect(fs.some((f) => f.externalId === "pm:990002" || f.externalId === "pm:990003")).toBe(false);
+    // More matches than one poll looks up: the latest kickoffs come first.
+    urls.length = 0;
+    const many = Array.from({ length: 250 }, (_, i) => known(`7${String(i).padStart(5, "0")}`, { ...kicked, freezesAt: new Date(Date.parse("2026-10-11T15:00:00Z") + i * 60_000) }));
+    await p.fetch(recordedAt, many);
+    const asked = urls.map((u) => new URL(u)).filter((u) => u.pathname === "/markets" && u.searchParams.get("closed") === "false").flatMap((u) => u.searchParams.getAll("id"));
+    expect(asked).toHaveLength(200);
+    expect(asked[0]).toBe("700249");
+    expect(asked).not.toContain("700049");
+  });
+
   it("a failed lookup doesn't fail the poll: the listing still counts, and it's logged", async () => {
     const lines: string[] = [];
     const refused = () => Promise.resolve({ ok: false, status: 422, json: () => Promise.resolve({ error: "no" }) });

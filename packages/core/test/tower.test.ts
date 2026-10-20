@@ -153,6 +153,18 @@ describe("the mock feed", () => {
     expect(after.some((m) => m.inPlay)).toBe(false);
   });
 
+  it("a match settles where its play ended, not where it kicked off", async () => {
+    let differs = 0;
+    for (let i = 0; i < 40; i++) {
+      const match = { ...spec, externalId: `settle-${i}`, category: "sports" as const, inPlay: true };
+      const [m] = await mockProvider(() => [match]).fetch(match.settlesBy);
+      const end = mockLivePrice(match, match.settlesBy);
+      expect(m!.resolved).toBe(end >= 50);
+      if (mockPrice(match, match.freezesAt) >= 50 !== end >= 50) differs++;
+    }
+    expect(differs).toBeGreaterThan(0); // so the kickoff price alone would have got some wrong
+  });
+
   it("the sample feed has a pickup game in play most of the day, the same for every poller", async () => {
     const p = mockProvider(() => sampleMarkets(new Date()));
     let playing = 0;

@@ -440,7 +440,7 @@ export type CallStatus = { id: string; marketId: string; side: Side; chance: num
 export type CallState = "pending" | "locked" | "price_moved" | "expired";
 export type MarketRow = { id: string; question: string; category: string; price: number; freezesAt: string; infoOnly: boolean };
 // A match in play: its live price, and when it kicked off.
-export type InPlayRow = { id: string; question: string; price: number; kickoffAt: string; settlesBy: string };
+export type InPlayRow = { id: string; question: string; price: number; kickoffAt: string; settlesBy: string; source: string };
 export type Whereabouts = { area: string; arrived: boolean; arriveAt: string | null; from: string | null };
 // searched: your own search today (today's place is never sent otherwise).
 export type Hunt = {

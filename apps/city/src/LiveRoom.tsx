@@ -464,7 +464,8 @@ export default function LiveRoom({ api, place, onLeave, me, crewId }: { api: Api
           onDismiss={(id) => setHiddenMoments((h) => [...h, id].slice(-20))}
         />
       )}
-      {!clean && <InPlayStrip rows={inPlay} onCall={(id) => setCalling({ id, inPlay: true })} />}
+      {/* Only while the room is live: the Hall check is your presence here. */}
+      {!clean && status.kind === "live" && <InPlayStrip rows={inPlay} onCall={(id) => setCalling({ id, inPlay: true })} />}
       {calling && <CallSheet api={api} marketId={calling.id} inPlay={calling.inPlay} onClose={() => setCalling(null)} onCalled={() => {}} />}
       {err && <div className="toast bad" role="alert">{err.message}</div>}
       {napMsg && <div className="toast" role="status">{napMsg}</div>}

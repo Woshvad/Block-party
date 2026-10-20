@@ -1,7 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { type FeedMarket, type KnownMarket, type OddsProvider, TOWER, auraCenti } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TowerError, cityCalls, createCrew, createDb, createInvite, ensureSystemAccounts, inPlayMarkets, inRoom, makeCall, marketView, myTickets, pollOdds, recordVisit, redeemInvite } from "../src";
+import {
+  TowerError,
+  cityCalls,
+  createCrew,
+  createDb,
+  createInvite,
+  ensureSystemAccounts,
+  inPlayMarkets,
+  inRoom,
+  makeCall,
+  marketView,
+  myTickets,
+  pollOdds,
+  receipt,
+  recordVisit,
+  redeemInvite,
+  runBell,
+} from "../src";
 import { makeResident } from "./helpers";
 
 // The Watch Party Hall's in-play calls: a match keeps a live price after
@@ -103,17 +120,19 @@ describe("a match in play", () => {
     expect(await marketRow(m.externalId)).toMatchObject({ status: "resolved", in_play: false });
   });
 
-  it("only a match we hold plays on: not crypto, not a ladder, not one the feed opens in play, not before kickoff", async () => {
+  it("only a match we hold plays on: not crypto, not one the feed opens in play, not before kickoff; one of an event's markets does", async () => {
     const t = fresh();
     const f = feed();
     const coin = f.match(t, { category: "crypto", question: "BTC up?" });
-    const rung = f.match(t, { ladder: "goals-ladder" });
+    // A match's win, draw and loss come as one event: stored like a ladder, it still plays on.
+    const draw = f.match(t, { ladder: "arsenal-vs-chelsea", question: "Draw?" });
     const early = f.match(t, { freezesAt: new Date(t + 5 * H), settlesBy: new Date(t + 6 * H) });
     await pollOdds(db, f.provider, at(t));
     const stranger = f.match(t, { inPlay: true });
-    for (const m of [coin, rung, early]) m.inPlay = true;
+    for (const m of [coin, draw, early]) m.inPlay = true;
     await pollOdds(db, f.provider, at(t + H + MIN));
-    for (const m of [coin, rung, early]) expect((await marketRow(m.externalId)).in_play).toBe(false);
+    for (const m of [coin, early]) expect((await marketRow(m.externalId)).in_play).toBe(false);
+    expect((await marketRow(draw.externalId)).in_play).toBe(true);
     expect(await client`SELECT 1 FROM markets WHERE external_id = ${stranger.externalId}`).toHaveLength(0);
   });
 
@@ -123,14 +142,15 @@ describe("a match in play", () => {
     const now = f.match(t);
     const old = f.match(t - 5 * H, { freezesAt: new Date(t - 4 * H - MIN), settlesBy: new Date(t + 3 * H) });
     const coin = f.match(t, { category: "crypto" });
-    const rung = f.match(t, { ladder: "goals-ladder" });
+    const draw = f.match(t, { ladder: "arsenal-vs-chelsea" });
     const later = f.match(t, { freezesAt: new Date(t + 5 * H), settlesBy: new Date(t + 6 * H) });
     await pollOdds(db, f.provider, at(t - 5 * H));
     await pollOdds(db, f.provider, at(t + H + MIN));
     await pollOdds(db, f.provider, at(t + H + 2 * MIN));
     const asked = new Map(f.asked.at(-1)!.map((k) => [k.externalId, k.inPlay]));
     expect(asked.get(now.externalId)).toBe(true);
-    for (const m of [old, coin, rung, later]) expect(asked.get(m.externalId)).toBe(false);
+    expect(asked.get(draw.externalId)).toBe(true);
+    for (const m of [old, coin, later]) expect(asked.get(m.externalId)).toBe(false);
   });
 });
 
@@ -184,16 +204,45 @@ describe("in-play calls in the Watch Party Hall", () => {
     expect((await myTickets(db, u, at(made + 3 * MIN))).tickets).toBe(tickets);
   });
 
-  it("the match stops playing before it locks: dropped, ticket back", async () => {
+  it("a poll that misses the match keeps the call waiting: it locks when the match is back, or drops after 5 minutes with the ticket back", async () => {
     const { f, m, k, id } = await kickedOff();
     const u = await makeResident(db);
     await inHall(u, k);
     const tickets = (await myTickets(db, u, at(k + MIN))).tickets;
-    const c = await makeCall(db, u, { marketId: id, side: "yes", chance: 80, seenPrice: 60, inPlay: true }, at(k + MIN + 5 * S));
-    m.inPlay = undefined;
+    const made = k + MIN + 5 * S;
+    const c = await makeCall(db, u, { marketId: id, side: "yes", chance: 80, seenPrice: 60, inPlay: true }, at(made));
+    // One lookup fails: the match isn't carried, so it isn't in play, but the call waits.
+    f.ms.delete(m.externalId);
     await pollOdds(db, f.provider, at(k + 2 * MIN));
-    expect((await callRow(c.id)).status).toBe("expired");
-    expect((await myTickets(db, u, at(k + 3 * MIN))).tickets).toBe(tickets);
+    expect((await marketRow(m.externalId)).in_play).toBe(false);
+    expect((await callRow(c.id)).status).toBe("pending");
+    // Back: it locks on the first tick 2 minutes on.
+    f.ms.set(m.externalId, m);
+    await pollOdds(db, f.provider, at(made + TOWER.inPlayDelaySeconds * S + 30 * S));
+    expect(await callRow(c.id)).toMatchObject({ status: "locked", locked_price: 60, half: true });
+    // Another call, and the match never comes back: dropped after 5 minutes.
+    const v = await makeResident(db);
+    await inHall(v, k);
+    const vTickets = (await myTickets(db, v, at(k + 4 * MIN))).tickets;
+    const later = made + TOWER.inPlayDelaySeconds * S + 40 * S;
+    const d = await makeCall(db, v, { marketId: id, side: "no", chance: 40, seenPrice: 60, inPlay: true }, at(later));
+    f.ms.delete(m.externalId);
+    await pollOdds(db, f.provider, at(later + TOWER.pendingExpiresSeconds * S - S));
+    expect((await callRow(d.id)).status).toBe("pending");
+    await pollOdds(db, f.provider, at(later + TOWER.pendingExpiresSeconds * S + S));
+    expect((await callRow(d.id)).status).toBe("expired");
+    expect((await myTickets(db, v, at(later + 10 * MIN))).tickets).toBe(vTickets);
+  });
+
+  it("with the rooms' live presence, that's who is in the Hall", async () => {
+    const { k, id } = await kickedOff();
+    const visited = await makeResident(db);
+    await inHall(visited, k);
+    const live = await makeResident(db);
+    const call = (u: string, here: boolean) =>
+      code(makeCall(db, u, { marketId: id, side: "yes", chance: 75, seenPrice: 60, inPlay: true }, { now: new Date(k + MIN + 5 * S), inHall: async (who) => here && who === u }));
+    expect(await call(visited, false)).toBe("NOT_IN_HALL"); // a visit the rooms never closed doesn't count
+    expect(await call(live, true)).toBe("OK");
   });
 
   it("a postponed match reopens: a waiting in-play call is dropped, never locked as an ordinary call", async () => {
@@ -308,6 +357,44 @@ describe("in-play calls in the Watch Party Hall", () => {
     // before kickoff, and no gap between that bar and a live price.
     const v = await marketView(db, u, id, { now: new Date(made + 3 * MIN), onSlate: async () => false });
     expect(v).toMatchObject({ inPlay: true, world: 60, status: "frozen", city: 70, crew: 70, vibeGap: null, counts: { city: TOWER.cityBarMin, crew: 3 }, mine: { id: c.id, status: "locked", inPlay: true } });
+    // The receipt says it was in play, and draws no gap against a bar from before kickoff.
+    expect(await receipt(db, c.id, { now: new Date(made + 3 * MIN) })).toMatchObject({ inPlay: true, world: 60, city: 70, vibeGap: null });
+  });
+
+  it("an in-play win scores its half Aura and its CALLED IT, but no Bell Score chip for the crew", async () => {
+    const t = fresh();
+    const f = feed();
+    const m = f.match(t);
+    await pollOdds(db, f.provider, at(t));
+    const id = await idOf(m.externalId);
+    const a = await makeResident(db);
+    const b = await makeResident(db);
+    const crew = await createCrew(db, a, { name: `Chips ${randomUUID().slice(0, 6)}` });
+    // Founded the day before, so the bell's gm chain has one day to read.
+    await client`UPDATE crews SET created_at = ${new Date(t - D).toISOString()} WHERE id = ${crew.id}`;
+    await redeemInvite(db, b, (await createInvite(db, a)).code);
+    // a calls it before kickoff; b, in the Hall, after.
+    const pre = await makeCall(db, a, { marketId: id, side: "yes", chance: 70, seenPrice: 50 }, { now: new Date(t + MIN), onSlate: async () => false });
+    await pollOdds(db, f.provider, at(t + 2 * MIN));
+    expect((await callRow(pre.id)).status).toBe("locked");
+    const k = t + H;
+    m.inPlay = true;
+    m.price = 60;
+    await pollOdds(db, f.provider, at(k + MIN));
+    await inHall(b, k);
+    const made = k + MIN + 5 * S;
+    const c = await makeCall(db, b, { marketId: id, side: "yes", chance: 80, seenPrice: 60, inPlay: true }, at(made));
+    await pollOdds(db, f.provider, at(made + TOWER.inPlayDelaySeconds * S));
+    expect((await callRow(c.id)).status).toBe("locked");
+    m.inPlay = undefined;
+    m.resolved = true;
+    await pollOdds(db, f.provider, at(k + 3 * H));
+    const bell = new Date(Date.parse(`${new Date(t).toISOString().slice(0, 10)}T00:00:00Z`) + D + 5 * MIN);
+    await runBell(db, { now: bell, only: ["tower"] });
+    expect(await client`SELECT chips FROM crew_bell_scores WHERE crew_id = ${crew.id}`).toEqual([{ chips: 1 }]);
+    const both: string[] = [a, b];
+    expect(await client`SELECT DISTINCT user_id FROM moods WHERE mood = 'called_it' AND user_id IN ${client(both)}`).toHaveLength(2);
+    expect((await callRow(c.id)).aura_centi).toBe(auraCenti(true, 60, 80, true));
   });
 });
 

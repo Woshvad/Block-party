@@ -134,7 +134,7 @@ describe("the Watch Party's City markets", () => {
 });
 
 describe("the Watch Party's matches in play", () => {
-  const playing = (id: string, price: number) => ({ id, question: `${id} wins?`, price, kickoffAt: new Date(now - 3_600_000).toISOString(), settlesBy: new Date(now + 3_600_000).toISOString() });
+  const playing = (id: string, price: number) => ({ id, question: `${id} wins?`, price, kickoffAt: new Date(now - 3_600_000).toISOString(), settlesBy: new Date(now + 3_600_000).toISOString(), source: POLYMARKET_CREDIT });
   const sports = Array.from({ length: 8 }, (_, i) => mk(`s${i}`, "sports", 50, i + 1));
   const city = { id: "c", question: "60+ in the Hall at full time?", kind: "headcount", place: "watch_party", threshold: 60, locksAt: new Date(now + 2 * 3_600_000).toISOString(), bellDay: "2026-10-10" } satisfies CityMarket;
 

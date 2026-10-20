@@ -86,8 +86,15 @@ The last MVP item from the plan that wasn't built (README brick 47). The branch 
 - **Kept apart:** the City and Crew bars, the Vibe Gap and the paper's Long Shot callers are the city's view before kickoff, so in-play calls stay out of them. No Tail or Fade, never on the Slate, never backed for real.
 - **The database** refuses an in-play call that locks inside 2 minutes or at full Aura, one on the Slate or as a Tail, and anything in play but a frozen sports match with a live price.
 - **The sample feed** has a pickup game every 3 hours, so the Hall has a match in play most of the day in development and staging.
+- **Reviewed** by two reviewers (correctness; the plan's rules and security), and their findings fixed with tests:
+  - On live data almost no match would have played on: a match's markets come as one event, which the Tower stores like a ladder, and ladders were excluded. A kickoff time now decides it.
+  - One failed lookup dropped every pending in-play call. A missed poll now keeps them waiting, as for any call.
+  - The in-play lookup could reopen a frozen match whose answer lost its kickoff time. It now only ever reports a match in play.
+  - In-play calls stay out of the Contrarian's city lean and the receipt's Vibe Gap, and earn no Bell Score chip; the receipt says it was in play.
+  - The Hall check uses the rooms' live presence, as voting in person does, so a visit whose end was lost doesn't count.
+  - The latest kickoffs are looked up first; the sample feed settles a match where its play ended; the strip says YES, credits the odds and has 44px buttons, and it fit no phone until its row was kept to its width.
 
-Tests: core 754, db 1,051, API 762, city 412 (rooms unchanged at 61), each with the new rules mutation-checked (every one of 22 mutants turned a test red).
+Tests: core 756, db 1,054, API 762, city 412 (rooms unchanged at 61), each with the new rules mutation-checked (every one of 35 mutants turned a test red).
 
 **Checked in a browser** against the local API and rooms:
 - walking into the Hall, and the in-play strip at the live price
@@ -98,6 +105,8 @@ Tests: core 754, db 1,051, API 762, city 412 (rooms unchanged at 61), each with 
 
 **Still open from it:**
 - **Big moments during a match.** Swings are still only looked for before kickoff, though matches in play now have the ticks for it.
+- **Moneyline markets.** Polymarket names the teams on a match's main market rather than YES and NO, and the Tower has always skipped those, so on live data the matches that play on are its YES/NO markets (a draw, an exact margin). Reading team outcomes is a feed change of its own.
+- **A poll and a resubmitted call** can wait on each other (the poll holds a call while refunding its ticket; the call holds the ticket while inserting). It was there before in-play calls; Postgres breaks such a deadlock by failing one side, and a failed poll is retried a minute later.
 - **On a phone in Telegram,** none of it has been tried yet.
 
 ## Ideas from Lagos Life (17 October 2026)

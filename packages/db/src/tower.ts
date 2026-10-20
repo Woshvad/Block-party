@@ -128,7 +128,7 @@ async function playOn(tx: Db, source: string, m: FeedMarket, now: Date, lockedFo
     .from(markets)
     .where(and(eq(markets.source, source), eq(markets.externalId, m.externalId)))
     .for("no key update");
-  if (!market || (market.status !== "frozen" && market.status !== "open") || market.category !== "sports" || market.ladder !== null || now < market.freezesAt) return null;
+  if (!market || (market.status !== "frozen" && market.status !== "open") || market.category !== "sports" || now < market.freezesAt) return null;
   // The first poll past kickoff can find it still open: it freezes here, as it would have anyway.
   await tx.update(markets).set({ status: "frozen", inFeed: false, inPlay: true, livePrice: m.price }).where(eq(markets.id, market.id));
   const out = { marketId: market.id, ticked: 0, locked: 0, moved: 0 };
@@ -193,7 +193,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
         OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id))`,
       live: sql<boolean>`(markets.status = 'open' AND (EXISTS (SELECT 1 FROM calls c WHERE c.market_id = markets.id AND c.status = 'pending')
         OR EXISTS (SELECT 1 FROM slate_cards s WHERE s.market_id = markets.id AND s.city_day = ${today})))`,
-      inPlay: sql<boolean>`(markets.status = 'frozen' AND markets.category = 'sports' AND markets.ladder IS NULL
+      inPlay: sql<boolean>`(markets.status = 'frozen' AND markets.category = 'sports'
         AND markets.freezes_at <= ${now.toISOString()}::timestamptz
         AND markets.freezes_at > ${new Date(now.getTime() - TOWER.inPlayHours * 3_600_000).toISOString()}::timestamptz)`,
     })
@@ -328,8 +328,10 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       .set({ inPlay: false, livePrice: null })
       .where(and(eq(markets.inPlay, true), notInArray(markets.id, playing)));
     // Calls that can never lock: their market froze or ended first (an
-    // in-play call: its match stopped playing), or the feed went quiet for
-    // too long. Tickets come back.
+    // in-play call: its match reopened or ended), or the feed went quiet for
+    // too long. Tickets come back. A match this poll missed keeps its in-play
+    // calls waiting, as a market the feed missed keeps its calls: one failed
+    // lookup mustn't drop them all.
     const stale = await tx
       .select({ id: calls.id, userId: calls.userId, ticket: calls.ticket })
       .from(calls)
@@ -337,7 +339,7 @@ export async function pollOdds(db: Db, provider: OddsProvider, opts: { now?: Dat
       .where(
         and(
           eq(calls.status, "pending"),
-          sql`(CASE WHEN ${calls.inPlay} THEN ${markets.status} <> 'frozen' OR NOT ${markets.inPlay} ELSE ${markets.status} <> 'open' END
+          sql`(CASE WHEN ${calls.inPlay} THEN ${markets.status} <> 'frozen' ELSE ${markets.status} <> 'open' END
             OR ${calls.createdAt} < ${new Date(now.getTime() - TOWER.pendingExpiresSeconds * 1000).toISOString()}::timestamptz)`,
         ),
       )
@@ -453,6 +455,7 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
       aura: calls.auraCenti,
       via: calls.via,
       onSlate: calls.onSlate,
+      inPlay: calls.inPlay,
       createdAt: calls.createdAt,
     })
     .from(calls)
@@ -482,7 +485,10 @@ export async function receipt(db: Db, callId: string, opts: { now?: Date } = {})
     chance: r.chance,
     world: r.world,
     city,
-    vibeGap: vibeGap(r.world!, city),
+    // In play: the World it locked at is a live price, and the City bar is
+    // from before kickoff, so there's no gap between them to show.
+    vibeGap: r.inPlay ? null : vibeGap(r.world!, city),
+    inPlay: r.inPlay,
     lockedAt: r.lockedAt,
     bellAt: r.resolvedAt ? revealAt(r.resolvedAt) : revealAt(r.settlesBy),
     // Sealed until the bell, even when the world settled hours earlier.
@@ -603,7 +609,14 @@ export type CallInput = { marketId: unknown; side?: unknown; chance: unknown; se
 // inPlay: a call on a match after kickoff, made in the Watch Party Hall at
 // its live price. It locks 2 minutes later at the earliest (see playOn), for
 // half the Aura, and is never on the Slate, a Tail or a Fade.
-export async function makeCall(db: Db, userId: string, input: CallInput, opts: { now?: Date; onSlate?: (marketId: string) => Promise<boolean> } = {}) {
+// inHall: whether they're in the Hall now, by the rooms' live presence; without
+// it, by the visits the rooms reported (inRoom).
+export async function makeCall(
+  db: Db,
+  userId: string,
+  input: CallInput,
+  opts: { now?: Date; onSlate?: (marketId: string) => Promise<boolean>; inHall?: (userId: string) => Promise<boolean> } = {},
+) {
   const now = opts.now ?? new Date();
   if (typeof input.marketId !== "string" || !UUID.test(input.marketId)) throw new TowerError("NO_SUCH_MARKET", "no such market");
   if (input.via !== undefined && input.via !== null && input.via !== "tail" && input.via !== "fade") throw new TowerError("INVALID_INPUT", "via is tail or fade");
@@ -623,7 +636,8 @@ export async function makeCall(db: Db, userId: string, input: CallInput, opts: {
   if (inPlay) {
     // The latest poll carried it in play; a match it didn't has no live price.
     if (market.status !== "frozen" || !market.inPlay || market.livePrice === null) throw new TowerError("MARKET_CLOSED", "this match isn't in play right now");
-    if (!(await inRoom(db, userId, "watch_party", now))) throw new TowerError("NOT_IN_HALL", "in-play calls are made in the Watch Party Hall");
+    const here = opts.inHall ? await opts.inHall(userId) : await inRoom(db, userId, "watch_party", now);
+    if (!here) throw new TowerError("NOT_IN_HALL", "in-play calls are made in the Watch Party Hall");
   } else {
     if (market.status !== "open" || now >= market.freezesAt) throw new TowerError("MARKET_CLOSED", "calls are closed on this market");
     // The latest poll didn't carry it, so its price is stale: no new calls.
@@ -784,15 +798,15 @@ export async function openMarkets(db: Db, opts: { infoOnly?: boolean; limit?: nu
 }
 
 // The Watch Party Hall's matches in play: frozen at kickoff, still trading,
-// at their live price, the latest kickoff first.
+// at their live price, the latest kickoff first, each with its odds credit.
 export async function inPlayMarkets(db: Db, opts: { limit?: number } = {}) {
   const rows = await db
-    .select({ id: markets.id, question: markets.question, price: markets.livePrice, kickoffAt: markets.freezesAt, settlesBy: markets.settlesBy })
+    .select({ id: markets.id, question: markets.question, price: markets.livePrice, kickoffAt: markets.freezesAt, settlesBy: markets.settlesBy, source: markets.source })
     .from(markets)
     .where(and(eq(markets.inPlay, true), eq(markets.status, "frozen")))
     .orderBy(desc(markets.freezesAt), markets.id)
     .limit(Math.min(Math.max(opts.limit ?? 20, 1), 50));
-  return rows.map((r) => ({ ...r, price: r.price! }));
+  return rows.map((r) => ({ ...r, price: r.price!, source: oddsCredit(r.source) }));
 }
 
 // The side of a resident's locked call on a market, if any (the Bunkers' door).

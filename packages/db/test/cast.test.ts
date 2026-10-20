@@ -13,6 +13,7 @@ import {
   publishSlate,
   readBoard,
   receipt,
+  recordVisit,
   runBell,
   setPrefs,
 } from "../src";
@@ -148,6 +149,30 @@ describe("the cast's Board lines", () => {
     expect((await npcBoardLines(db, dayOf(s.d0), at)).posted).toBe(0);
     const [n] = await client`SELECT count(*)::int AS n FROM messages WHERE channel = 'roof' AND author_id = ${CAST.nothing_9000.id} AND created_at >= ${new Date(s.d0 + D).toISOString()} AND created_at < ${new Date(s.d0 + 2 * D).toISOString()}`;
     expect(n!.n).toBe(3);
+  });
+
+  it("the Contrarian's city lean is the city's before kickoff: calls made in play don't move it", async () => {
+    const s = await slateDay();
+    for (let i = 0; i < 2; i++) await makeCall(db, await makeResident(db), { marketId: s.ids[1]!, side: "no", chance: 40, seenPrice: 50 }, { now: new Date(s.d0 + 9 * H) });
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 9 * H + MIN) });
+    // Kickoff: three in the Watch Party Hall call YES, in play.
+    s.ms[1]!.inPlay = true;
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 16 * H + MIN) });
+    for (let i = 0; i < 3; i++) {
+      const fan = await makeResident(db);
+      await recordVisit(db, { userId: fan, room: "watch_party#1", event: "start", at: new Date(s.d0 + 16 * H) });
+      await makeCall(db, fan, { marketId: s.ids[1]!, side: "yes", chance: 60, seenPrice: 50, inPlay: true }, { now: new Date(s.d0 + 16 * H + MIN + 1000) });
+    }
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 16 * H + 4 * MIN) });
+    const [live] = await client`SELECT count(*)::int AS n FROM calls WHERE market_id = ${s.ids[1]!} AND in_play AND status = 'locked'`;
+    expect(live!.n).toBe(3);
+    s.ms[1]!.inPlay = undefined;
+    for (const m of s.ms) m.resolved = false;
+    await pollOdds(db, s.f.provider, { now: new Date(s.d0 + 21 * H) });
+    const at = new Date(s.d0 + D + 5 * MIN);
+    await runBell(db, { now: at, only: ["npc_lines"] });
+    const tower = await readBoard(db, await makeResident(db), "tower", { now: new Date(at.getTime() + MIN) });
+    expect(tower.find((m) => m.authorId === CAST.contrarian.id)?.text).toBe("The city leaned NO and got it right. Even a stopped clock, ser.");
   });
 });
 

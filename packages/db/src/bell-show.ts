@@ -44,7 +44,7 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   const from = dayStart(bellDay);
   const to = dayStart(addDays(bellDay, 1));
   const receipts = await db
-    .select({ userId: calls.userId, marketId: calls.marketId, side: calls.side, outcome: markets.outcome })
+    .select({ userId: calls.userId, marketId: calls.marketId, side: calls.side, outcome: markets.outcome, inPlay: calls.inPlay })
     .from(calls)
     .innerJoin(markets, eq(markets.id, calls.marketId))
     .where(and(eq(calls.status, "locked"), eq(markets.status, "resolved"), gte(markets.resolvedAt, from), lt(markets.resolvedAt, to)));
@@ -93,7 +93,9 @@ export async function stepTower(db: Db, bellDay: CityDay, now: Date) {
   // Bell Scores: CALLED IT chips per crew, Long Shots caught, the gm chain.
   const longShot = slate.find((s) => s.tier === "long_shot")?.marketId;
   const golds = new Set(slateCalls.filter((c) => c.marketId === longShot && c.side === "yes" && c.outcome === true).map((c) => c.userId));
-  const winners = receipts.filter((r) => (r.side === "yes") === r.outcome && !NPC_IDS.includes(r.userId)).map((r) => r.userId);
+  // Not an in-play win: late in a match a near-certain call would farm chips
+  // for the crew, three tickets a day. It still gets its half Aura and its mood.
+  const winners = receipts.filter((r) => (r.side === "yes") === r.outcome && !r.inPlay && !NPC_IDS.includes(r.userId)).map((r) => r.userId);
   const members = winners.length
     ? await db
         .select({ userId: crewMembers.userId, crewId: crewMembers.crewId })

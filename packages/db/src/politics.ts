@@ -27,7 +27,7 @@ export class PoliticsError extends Error {
 
 // Voting is in person: you have to be at City Hall. The live-rooms brick
 // provides the real check; until then nobody is anywhere.
-export type PresenceCheck = (userId: string, place: "city_hall") => Promise<boolean>;
+export type PresenceCheck = (userId: string, place: "city_hall" | "watch_party") => Promise<boolean>;
 export const nobodyIsAnywhere: PresenceCheck = async () => false;
 
 export const PITCH_MAX = 140;

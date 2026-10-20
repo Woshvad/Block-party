@@ -1069,8 +1069,11 @@ export function createApp(cfg: AppConfig) {
   app.get("/v1/tower/in-play", auth, async (c) => c.json(await inPlayMarkets(db)));
   app.post("/v1/tower/calls", auth, async (c) => {
     const b = await body(c);
+    // In the Hall by the rooms' live presence, as for voting in person;
+    // without the rooms Worker, by the visits it reported.
+    const inHall = presence ? (u: string) => presence(u, "watch_party") : undefined;
     return c.json(
-      await makeCall(db, c.get("userId"), { marketId: b.marketId, side: b.side, chance: b.chance, seenPrice: b.seenPrice, via: b.via, viaUserId: b.viaUserId, inPlay: b.inPlay }, opts()),
+      await makeCall(db, c.get("userId"), { marketId: b.marketId, side: b.side, chance: b.chance, seenPrice: b.seenPrice, via: b.via, viaUserId: b.viaUserId, inPlay: b.inPlay }, { ...opts(), inHall }),
       201,
     );
   });

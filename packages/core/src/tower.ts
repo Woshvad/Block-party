@@ -177,7 +177,8 @@ export function mockProvider(specs: () => readonly MockMarketSpec[]): OddsProvid
             freezesAt: s.freezesAt,
             settlesBy: s.settlesBy,
             price: inPlay ? mockLivePrice(s, now) : price,
-            resolved: settled && !s.voided ? (s.outcome ?? price >= 50) : null,
+            // A match settles where its play ended, not where it kicked off.
+            resolved: settled && !s.voided ? (s.outcome ?? (s.inPlay ? mockLivePrice(s, s.settlesBy) : price) >= 50) : null,
             voided: settled && !!s.voided,
             ...(inPlay ? { inPlay: true } : {}),
           };

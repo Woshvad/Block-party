@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type FeedMarket, type OddsProvider, TOWER } from "@bp/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SECRET, call, close, makeApp, ready, resident } from "./harness";
+import { SECRET, call, close, makeApp, ready, resident, roomsState } from "./harness";
 
 beforeAll(ready);
 afterAll(close);
@@ -35,10 +35,12 @@ describe("in-play calls over HTTP", () => {
     await poll(k + MIN);
     const list = (await call("GET", "/v1/tower/in-play", { token: me.token, via: app })).body as Array<{ id: string; question: string; price: number; kickoffAt: string }>;
     const live = list.find((x) => x.question === m.question)!;
-    expect(live).toMatchObject({ price: 64, kickoffAt: new Date(k).toISOString() });
+    expect(live).toMatchObject({ price: 64, kickoffAt: new Date(k).toISOString(), source: "Sample odds · Not real" });
     expect((await call("GET", `/v1/tower/markets/${live.id}`, { token: me.token, via: app })).body).toMatchObject({ inPlay: true, world: 64, status: "frozen" });
-    // The rooms report you walked into the Hall.
-    const effects = { place: "watch_party", copy: 1, effects: [{ id: "v1", kind: "visit_start", userId: me.userId, at: k }] };
+    // The rooms Worker says you're in the Hall (live presence, as for voting).
+    // A visit it once reported isn't enough: `away` has one and is refused.
+    roomsState.where.set(`${me.userId}|watch_party`, 1);
+    const effects = { place: "watch_party", copy: 1, effects: [{ id: "v1", kind: "visit_start", userId: away.userId, at: k }] };
     expect((await call("POST", "/internal/rooms/effects", { headers: internal, via: app, body: effects })).status).toBe(200);
     clock = new Date(k + MIN + 5_000);
     const body = { marketId: live.id, side: "yes", chance: 80, seenPrice: 64, inPlay: true };
@@ -52,5 +54,6 @@ describe("in-play calls over HTTP", () => {
     expect((await call("GET", `/v1/tower/calls/${made.body.id}`, { token: me.token, via: app })).body).toMatchObject({ status: "pending", inPlay: true });
     await poll(k + MIN + 5_000 + TOWER.inPlayDelaySeconds * 1000);
     expect((await call("GET", `/v1/tower/calls/${made.body.id}`, { token: me.token, via: app })).body).toMatchObject({ status: "locked", lockedPrice: 64, half: true, inPlay: true });
+    roomsState.where.delete(`${me.userId}|watch_party`);
   });
 });
